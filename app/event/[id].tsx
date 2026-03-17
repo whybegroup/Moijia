@@ -109,7 +109,10 @@ export default function EventDetailScreen() {
     <SafeAreaView style={styles.safe}>
       {/* Nav */}
       <View style={styles.nav}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.navBack}>
+        <TouchableOpacity
+          onPress={() => router.replace('/(tabs)/feed')}
+          style={styles.navBack}
+        >
           <Text style={styles.navBackText}>← Back</Text>
         </TouchableOpacity>
         <View style={{ flex: 1 }} />

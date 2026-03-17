@@ -1,13 +1,14 @@
 import React, { useState, useMemo } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity,
-  StyleSheet, SafeAreaView,
+  StyleSheet, SafeAreaView, Modal,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Colors, Fonts, Radius, Spacing } from '../../constants/theme';
 import { paletteOf } from '../../utils/helpers';
 import { ALL_EVENTS, GROUPS, INIT_NOTIFICATIONS, TAGS, MY_NAME, type Event } from '../../data/mock';
 import { ListView } from '../../components/ListView';
+import { CalendarView } from '../../components/CalendarView';
 import { Pill } from '../../components/ui';
 import Svg, { Path } from 'react-native-svg';
 
@@ -20,6 +21,7 @@ export default function FeedScreen() {
   const [showFilters, setShowFilters] = useState(false);
   const [notifs, setNotifs] = useState(INIT_NOTIFICATIONS);
   const [showNotifs, setShowNotifs] = useState(false);
+  const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
 
   const unread = notifs.filter(n => !n.read).length;
 
@@ -31,7 +33,7 @@ export default function FeedScreen() {
     if (filterNeeds && !(ev.minAttendees && ev.rsvps.filter(r => r.status === 'going').length < ev.minAttendees)) return false;
     if (filterTags.length > 0 && !filterTags.some(t => ev.tags?.includes(t))) return false;
     return true;
-  }), [filterGroup, filterRsvp, filterTags, filterNeeds]);
+  }), [filterGroup, filterRsvp, filterTags, filterNeeds, ALL_EVENTS.length]);
 
   const hasFilters = !!(filterRsvp || filterTags.length || filterNeeds);
 
@@ -55,9 +57,14 @@ export default function FeedScreen() {
           <View style={styles.actions}>
             {/* View toggle */}
             <View style={styles.viewToggle}>
-              {[['list','☰'],['calendar','📅']].map(([v, icon]) => (
-                <TouchableOpacity key={v} style={styles.viewBtn} activeOpacity={0.7}>
-                  <Text style={{ fontSize: 13 }}>{icon}</Text>
+              {([['list','☰'],['calendar','📅']] as const).map(([v, icon]) => (
+                <TouchableOpacity
+                  key={v}
+                  style={[styles.viewBtn, viewMode === v && styles.viewBtnActive]}
+                  onPress={() => setViewMode(v)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={{ fontSize: 13, color: viewMode === v ? Colors.text : Colors.textMuted }}>{icon}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -79,63 +86,16 @@ export default function FeedScreen() {
             </TouchableOpacity>
 
             {/* Bell */}
-            <View style={{ position: 'relative' }}>
-              <TouchableOpacity
-                onPress={() => setShowNotifs(p => !p)}
-                style={[styles.iconBtn, showNotifs && { borderColor: Colors.borderStrong, backgroundColor: Colors.bg }]}
-              >
-                <Svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke={Colors.text} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                  <Path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-                  <Path d="M13.73 21a2 2 0 0 1-3.46 0"/>
-                </Svg>
-                {unread > 0 && <View style={styles.bellDot} />}
-              </TouchableOpacity>
-
-              {/* Notif dropdown */}
-              {showNotifs && (
-                <View style={styles.notifPanel}>
-                  <View style={styles.notifHeader}>
-                    <Text style={styles.notifTitle}>Notifications</Text>
-                    {unread > 0 && (
-                      <TouchableOpacity onPress={() => setNotifs(p => p.map(n => ({ ...n, read: true })))}>
-                        <Text style={styles.notifMarkAll}>Mark all read</Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                  <ScrollView style={{ maxHeight: 340 }} showsVerticalScrollIndicator={false}>
-                    {notifs.map((n, i) => {
-                      const group = GROUPS.find(g => g.id === n.groupId);
-                      const p = paletteOf(group);
-                      return (
-                        <TouchableOpacity
-                          key={n.id}
-                          onPress={() => {
-                            setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
-                            if (!n.navigable) return;
-                            setShowNotifs(false);
-                            if (n.dest === 'event' && n.eventId) router.push(`/event/${n.eventId}`);
-                            else if (n.dest === 'group' && n.groupId) router.push(`/group/${n.groupId}`);
-                          }}
-                          style={[styles.notifRow, { backgroundColor: n.read ? 'transparent' : p.row }, i < notifs.length - 1 && { borderBottomWidth: 1, borderBottomColor: Colors.border }]}
-                          activeOpacity={n.navigable ? 0.7 : 1}
-                        >
-                          <View style={[styles.notifIcon, { backgroundColor: n.read ? Colors.bg : p.row, borderColor: n.read ? Colors.border : p.cal }]}>
-                            <Text style={{ fontSize: 16 }}>{n.icon}</Text>
-                          </View>
-                          <View style={{ flex: 1, minWidth: 0 }}>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-                              <Text style={{ fontSize: 13, fontFamily: n.read ? Fonts.medium : Fonts.bold, color: Colors.text }} numberOfLines={1}>{n.title}</Text>
-                              {!n.read && <View style={styles.unreadDot} />}
-                            </View>
-                            <Text style={{ fontSize: 12, color: Colors.textSub }} numberOfLines={1}>{n.body}</Text>
-                          </View>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </ScrollView>
-                </View>
-              )}
-            </View>
+            <TouchableOpacity
+              onPress={() => setShowNotifs(p => !p)}
+              style={[styles.iconBtn, showNotifs && { borderColor: Colors.borderStrong, backgroundColor: Colors.bg }]}
+            >
+              <Svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke={Colors.text} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <Path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                <Path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+              </Svg>
+              {unread > 0 && <View style={styles.bellDot} />}
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -188,12 +148,71 @@ export default function FeedScreen() {
       </View>
 
       {/* Feed */}
-      <View style={{ flex: 1, paddingHorizontal: 16, paddingTop: 14 }}>
+      <View style={styles.feedContent}>
         {filtered.length === 0
           ? <View style={styles.empty}><Text style={{ fontSize: 32, marginBottom: 10 }}>📭</Text><Text style={styles.emptyText}>No events</Text></View>
-          : <ListView events={filtered} onSelect={ev => router.push(`/event/${ev.id}`)} />
+          : viewMode === 'list'
+            ? <ListView events={filtered} onSelect={ev => router.push(`/event/${ev.id}`)} />
+            : <CalendarView events={filtered} onSelectEvent={ev => router.push(`/event/${ev.id}`)} />
         }
       </View>
+
+      {/* Notif dropdown - Modal ensures it's always on top */}
+      <Modal
+        visible={showNotifs}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowNotifs(false)}
+      >
+        <View style={styles.notifOverlay}>
+          <TouchableOpacity
+            style={styles.notifBackdrop}
+            onPress={() => setShowNotifs(false)}
+            activeOpacity={1}
+          />
+          <View style={styles.notifPanel}>
+            <View style={styles.notifHeader}>
+              <Text style={styles.notifTitle}>Notifications</Text>
+              {unread > 0 && (
+                <TouchableOpacity onPress={() => setNotifs(p => p.map(n => ({ ...n, read: true })))}>
+                  <Text style={styles.notifMarkAll}>Mark all read</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+            <ScrollView style={{ maxHeight: 340 }} showsVerticalScrollIndicator={false}>
+              {notifs.map((n, i) => {
+                const group = GROUPS.find(g => g.id === n.groupId);
+                const p = paletteOf(group);
+                return (
+                  <TouchableOpacity
+                    key={n.id}
+                    onPress={() => {
+                      setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
+                      if (!n.navigable) return;
+                      setShowNotifs(false);
+                      if (n.dest === 'event' && n.eventId) router.push(`/event/${n.eventId}`);
+                      else if (n.dest === 'group' && n.groupId) router.push(`/group/${n.groupId}`);
+                    }}
+                    style={[styles.notifRow, { backgroundColor: n.read ? 'transparent' : p.row }, i < notifs.length - 1 && { borderBottomWidth: 1, borderBottomColor: Colors.border }]}
+                    activeOpacity={n.navigable ? 0.7 : 1}
+                  >
+                    <View style={[styles.notifIcon, { backgroundColor: n.read ? Colors.bg : p.row, borderColor: n.read ? Colors.border : p.cal }]}>
+                      <Text style={{ fontSize: 16 }}>{n.icon}</Text>
+                    </View>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                        <Text style={{ fontSize: 13, fontFamily: n.read ? Fonts.medium : Fonts.bold, color: Colors.text }} numberOfLines={1}>{n.title}</Text>
+                        {!n.read && <View style={styles.unreadDot} />}
+                      </View>
+                      <Text style={{ fontSize: 12, color: Colors.textSub }} numberOfLines={1}>{n.body}</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -210,15 +229,19 @@ const styles = StyleSheet.create({
   actions:     { flexDirection: 'row', alignItems: 'center', gap: 8 },
   viewToggle:  { flexDirection: 'row', backgroundColor: Colors.bg, borderRadius: 10, borderWidth: 1, borderColor: Colors.border, padding: 3, gap: 2 },
   viewBtn:     { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+  viewBtnActive: { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border },
   iconBtn:     { width: 34, height: 34, borderRadius: 17, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surface, alignItems: 'center', justifyContent: 'center' },
   iconBtnActive:{ backgroundColor: Colors.bg, borderColor: Colors.accent },
   createBtn:   { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 10, backgroundColor: Colors.accent },
   createBtnText:{ fontSize: 13, fontFamily: Fonts.semiBold, color: Colors.accentFg },
   bellDot:     { position: 'absolute', top: 1, right: 1, width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.notGoing, borderWidth: 2, borderColor: Colors.surface },
   pillsRow:    { paddingLeft: 20, paddingBottom: 12 },
+  feedContent:   { flex: 1, paddingHorizontal: 16, paddingTop: 14, zIndex: 0 },
   filterPanel: { paddingHorizontal: 20, paddingBottom: 14, borderTopWidth: 1, borderTopColor: Colors.border, paddingTop: 12 },
   filterSectionLabel:{ fontSize: 11, fontFamily: Fonts.semiBold, color: Colors.textMuted, letterSpacing: 0.6, marginBottom: 8 },
-  notifPanel:  { position: 'absolute', top: 42, right: 0, width: 300, backgroundColor: Colors.surface, borderRadius: 16, borderWidth: 1, borderColor: Colors.border, zIndex: 100, overflow: 'hidden', elevation: 8 },
+  notifOverlay:  { flex: 1, opacity: 1 },
+  notifBackdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.2)', opacity: 1 },
+  notifPanel:    { position: 'absolute', top: 110, right: 16, width: 300, backgroundColor: Colors.surface, borderRadius: 16, borderWidth: 1, borderColor: Colors.border, overflow: 'hidden', opacity: 1, elevation: 999, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 12 },
   notifHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 14, borderBottomWidth: 1, borderBottomColor: Colors.border },
   notifTitle:  { fontSize: 15, fontFamily: Fonts.bold, color: Colors.text },
   notifMarkAll:{ fontSize: 12, fontFamily: Fonts.semiBold, color: Colors.textSub },

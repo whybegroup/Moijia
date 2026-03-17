@@ -4,7 +4,7 @@ import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { Colors, Fonts, Radius } from '../constants/theme';
 import { paletteOf } from '../utils/helpers';
-import { GROUPS, TAGS } from '../data/mock';
+import { GROUPS, TAGS, addEvent, uid, type Event } from '../data/mock';
 import { NavBar, Field, Toggle } from '../components/ui';
 
 export default function CreateEventScreen() {
@@ -21,6 +21,44 @@ export default function CreateEventScreen() {
   const set = (k: string, v: any) => setForm(p => ({ ...p, [k]: v }));
   const ok  = !!form.title.trim() && !!form.date;
 
+  const submit = () => {
+    if (!ok) return;
+    const [sh, sm] = form.startTime.split(':').map(Number);
+    const [eh, em] = form.endTime.split(':').map(Number);
+    const start = new Date(form.date + 'T' + String(sh).padStart(2, '0') + ':' + String(sm || 0).padStart(2, '0') + ':00');
+    const end   = new Date(form.date + 'T' + String(eh).padStart(2, '0') + ':' + String(em || 0).padStart(2, '0') + ':00');
+    if (form.isAllDay) {
+      start.setHours(0, 0, 0, 0);
+      end.setHours(23, 59, 59, 999);
+    }
+    let deadline: Date | undefined;
+    if (form.deadline.trim()) {
+      const [dh, dm] = form.deadline.split(':').map(Number);
+      deadline = new Date(form.date + 'T' + String(dh).padStart(2, '0') + ':' + String(dm || 0).padStart(2, '0') + ':00');
+    }
+    const newEvent: Event = {
+      id: uid(),
+      groupId: form.groupId,
+      title: form.title.trim(),
+      subtitle: form.subtitle.trim() || undefined,
+      description: form.description.trim() || undefined,
+      coverPhotos: form.coverPhotos,
+      start,
+      end,
+      isAllDay: form.isAllDay || undefined,
+      location: form.location.trim() || undefined,
+      minAttendees: form.minAttendees.trim() ? parseInt(form.minAttendees, 10) : undefined,
+      deadline,
+      allowMaybe: form.allowMaybe,
+      tags: form.tags.length ? form.tags : undefined,
+      rsvps: [],
+      noResponse: [],
+      comments: [],
+    };
+    addEvent(newEvent);
+    router.replace('/(tabs)/feed');
+  };
+
   const pickPhotos = async () => {
     const r = await ImagePicker.launchImageLibraryAsync({ allowsMultipleSelection: true, mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8 });
     if (!r.canceled) set('coverPhotos', [...form.coverPhotos, ...r.assets.map(a => a.uri)]);
@@ -30,9 +68,9 @@ export default function CreateEventScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <NavBar title="New Event" onBack={() => router.back()}
+      <NavBar title="New Event" onBack={() => router.replace('/(tabs)/feed')}
         right={
-          <TouchableOpacity onPress={() => ok && router.back()} style={[styles.headerBtn, !ok && styles.headerBtnDis]}>
+          <TouchableOpacity onPress={submit} style={[styles.headerBtn, !ok && styles.headerBtnDis]}>
             <Text style={[styles.headerBtnText, !ok && { color: Colors.textMuted }]}>Create</Text>
           </TouchableOpacity>
         }
@@ -133,7 +171,7 @@ export default function CreateEventScreen() {
           </View>
         </Field>
 
-        <TouchableOpacity onPress={() => ok && router.back()} style={[styles.submitBtn, !ok && { backgroundColor: Colors.border }]} disabled={!ok}>
+        <TouchableOpacity onPress={submit} style={[styles.submitBtn, !ok && { backgroundColor: Colors.border }]} disabled={!ok}>
           <Text style={[styles.submitBtnText, !ok && { color: Colors.textMuted }]}>Create Event</Text>
         </TouchableOpacity>
       </ScrollView>

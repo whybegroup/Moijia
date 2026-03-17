@@ -35,9 +35,6 @@
         "expo-media-library",
         { "photosPermission": "Allow Popin to save photos.", "savePhotosPermission": "Allow Popin to save photos." }
       ]
-    ],
-    "experiments": {
-      "typedRoutes": true
-    }
+    ]
   }
 }

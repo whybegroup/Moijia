@@ -4,9 +4,8 @@ import {
   StyleSheet, SafeAreaView, Switch,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Colors, Fonts, Radius } from '../../constants/theme';
-import { GroupPalettes } from '../../constants/theme';
-import { NavBar, Field, Toggle } from '../../components/ui';
+import { Colors, Fonts, Radius, GroupPalettes } from '../constants/theme';
+import { NavBar, Field, Toggle } from '../components/ui';
 
 const EMOJIS = ['🏙️','🍜','👨‍👩‍👧','⛰️','🏀','🎤','🍻','🎮','🌸','💼','🎵','🏐'];
 

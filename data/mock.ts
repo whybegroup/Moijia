@@ -81,7 +81,7 @@ function dt(offsetDays: number, h = 19, m = 0): Date {
   d.setHours(h, m, 0, 0);
   return d;
 }
-function uid(): string { return Math.random().toString(36).slice(2, 9); }
+export function uid(): string { return Math.random().toString(36).slice(2, 9); }
 function cmt(name: string, text: string, minsAgo: number): Comment {
   return { id: uid(), name, text, photos: [], ts: new Date(Date.now() - minsAgo * 60000) };
 }
@@ -193,6 +193,11 @@ export const ALL_EVENTS: Event[] = ([
     noResponse:['Chris · LA · 90','Amy · OC · 91','Jay · LA · 83'],
     comments:[] },
 ] as Event[]).sort((a, b) => a.start.getTime() - b.start.getTime());
+
+export function addEvent(event: Event): void {
+  ALL_EVENTS.push(event);
+  ALL_EVENTS.sort((a, b) => a.start.getTime() - b.start.getTime());
+}
 
 // ── Notifications ─────────────────────────────────────────────────────────────
 export const INIT_NOTIFICATIONS: Notification[] = [

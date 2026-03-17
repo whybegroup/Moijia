@@ -4,10 +4,10 @@ import {
   StyleSheet, SafeAreaView, Modal, TextInput,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Colors, Fonts, Radius, Shadows } from '../../constants/theme';
-import { paletteOf } from '../../utils/helpers';
-import { GROUPS } from '../../data/mock';
-import { Avatar, NavBar } from '../../components/ui';
+import { Colors, Fonts, Radius, Shadows } from '../../../constants/theme';
+import { paletteOf } from '../../../utils/helpers';
+import { GROUPS } from '../../../data/mock';
+import { Avatar, NavBar } from '../../../components/ui';
 
 export default function GroupSettingsScreen() {
   const { id }     = useLocalSearchParams<{ id: string }>();
@@ -17,7 +17,7 @@ export default function GroupSettingsScreen() {
   const [group,          setGroup]          = useState({ ...initGroup });
   const [newMember,      setNewMember]      = useState('');
   const [showDelete,     setShowDelete]     = useState(false);
-  const [pendingReqs,    setPendingReqs]    = useState([
+  const [pendingReqs,    setPendingReqs]   = useState([
     { name: 'Rachel · OC · 91', handle: 'rachel.oc.91' },
     { name: 'Tommy · SGV · 89', handle: 'tommy.sgv.89' },
   ]);

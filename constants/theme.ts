@@ -36,13 +36,13 @@ export const GroupPalettes = [
 export const Fonts = {
   regular:    'DMSans_400Regular',
   medium:     'DMSans_500Medium',
-  semiBold:   'DMSans_600SemiBold',
+  semiBold:   'DMSans_700Bold',
   bold:       'DMSans_700Bold',
-  extraBold:  'DMSans_800ExtraBold',
+  extraBold:  'DMSans_700Bold',
 };
 
 export const TextStyles = StyleSheet.create({
-  h1:      { fontFamily: 'DMSans_800ExtraBold', fontSize: 22, color: Colors.text, lineHeight: 28 },
+  h1:      { fontFamily: 'DMSans_700Bold', fontSize: 22, color: Colors.text, lineHeight: 28 },
   h2:      { fontFamily: 'DMSans_700Bold',       fontSize: 18, color: Colors.text, lineHeight: 24 },
   h3:      { fontFamily: 'DMSans_700Bold',       fontSize: 16, color: Colors.text, lineHeight: 22 },
   body:    { fontFamily: 'DMSans_400Regular',    fontSize: 14, color: Colors.text, lineHeight: 20 },
