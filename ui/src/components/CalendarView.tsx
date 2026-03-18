@@ -10,6 +10,7 @@ const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 interface CalendarViewProps {
   events: EventDetailed[];
   groups: Group[];
+  groupColors?: Record<string, string>;
   onSelectEvent: (ev: EventDetailed) => void;
 }
 
@@ -35,7 +36,7 @@ function getMonthGrid(year: number, month: number): (Date | null)[][] {
   return rows;
 }
 
-export function CalendarView({ events, groups, onSelectEvent }: CalendarViewProps) {
+export function CalendarView({ events, groups, groupColors = {}, onSelectEvent }: CalendarViewProps) {
   const [focusDate, setFocusDate] = useState(() => new Date());
   const year = focusDate.getFullYear();
   const month = focusDate.getMonth();
@@ -123,7 +124,8 @@ export function CalendarView({ events, groups, onSelectEvent }: CalendarViewProp
                     <View style={styles.dotWrap}>
                       {dayEvents.slice(0, 2).map(ev => {
                         const group = groupsMap[ev.groupId];
-                        const p = getGroupColor(group?.colorHex);
+                        const userColorHex = groupColors[ev.groupId] || '#EC4899';
+                        const p = getGroupColor(userColorHex);
                         return (
                           <View
                             key={ev.id}
@@ -166,7 +168,8 @@ export function CalendarView({ events, groups, onSelectEvent }: CalendarViewProp
               })
               .map(ev => {
                 const group = groupsMap[ev.groupId];
-                const p = getGroupColor(group?.colorHex);
+                const userColorHex = groupColors[ev.groupId] || '#EC4899';
+                const p = getGroupColor(userColorHex);
                 const startDate = new Date(ev.start);
                 return (
                   <TouchableOpacity

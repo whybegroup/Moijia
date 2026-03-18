@@ -6,7 +6,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Colors, Fonts, Radius } from '../constants/theme';
 import { getGroupColor } from '../utils/helpers';
 import { NavBar, Field, Toggle } from '../components/ui';
-import { useGroups, useCreateEvent } from '../hooks/api';
+import { useGroups, useCreateEvent, useAllGroupMemberColors } from '../hooks/api';
 import { uid } from '../utils/api-helpers';
 
 const ME_ID = 'u1';
@@ -15,6 +15,7 @@ export default function CreateEventScreen() {
   const router = useRouter();
   const today  = new Date().toISOString().slice(0, 10);
   const { data: groups = [], isLoading: loading } = useGroups();
+  const { data: groupColors = {} } = useAllGroupMemberColors(ME_ID);
   const createEventMutation = useCreateEvent();
 
   const [form, setForm] = useState({
@@ -109,11 +110,12 @@ export default function CreateEventScreen() {
         <Field label="Group" required>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
             {groups.map(g => {
-              const p = getGroupColor(g?.colorHex); const sel = form.groupId === g.id;
+              const userColorHex = groupColors[g.id] || '#EC4899';
+              const p = getGroupColor(userColorHex);
+              const sel = form.groupId === g.id;
               return (
                 <TouchableOpacity key={g.id} onPress={() => set('groupId', g.id)}
                   style={[styles.groupChip, sel && { borderColor: p.dot, backgroundColor: p.row }]}>
-                  <Text style={{ fontSize: 16 }}>{g.emoji}</Text>
                   <Text style={[styles.chipText, sel && { color: p.text, fontFamily: Fonts.semiBold }]}>{g.name}</Text>
                 </TouchableOpacity>
               );

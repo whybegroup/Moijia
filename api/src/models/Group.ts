@@ -6,12 +6,10 @@ export interface Group {
   id: string;
   /** Group name */
   name: string;
-  /** Group emoji icon */
-  emoji: string;
-  /** Group color hex code */
-  colorHex: string;
   /** Group description */
   desc: string;
+  /** Group thumbnail/avatar URL */
+  thumbnail?: string | null;
   /** Whether the group is publicly visible */
   isPublic: boolean;
   /** ID of the group's super admin */
@@ -20,6 +18,8 @@ export interface Group {
   adminIds: string[];
   /** Array of member user IDs */
   memberIds: string[];
+  /** Array of pending member request user IDs */
+  pendingMemberIds?: string[];
   /** Timestamp when the group was created */
   createdAt: Date;
   /** Timestamp when the group was last updated */
@@ -32,9 +32,8 @@ export interface Group {
 export interface GroupInput {
   id: string;
   name: string;
-  emoji: string;
-  colorHex: string;
   desc: string;
+  thumbnail?: string | null;
   isPublic: boolean;
   superAdminId: string;
   adminIds?: string[];
@@ -46,9 +45,8 @@ export interface GroupInput {
  */
 export interface GroupUpdate {
   name?: string;
-  emoji?: string;
-  colorHex?: string;
   desc?: string;
+  thumbnail?: string | null;
   isPublic?: boolean;
   superAdminId?: string;
   adminIds?: string[];
@@ -59,3 +57,18 @@ export interface GroupUpdate {
  * Group member role
  */
 export type GroupRole = 'member' | 'admin' | 'superadmin';
+
+/**
+ * Group member status
+ */
+export type GroupMemberStatus = 'pending' | 'active' | 'rejected';
+
+/**
+ * Membership request action
+ */
+export interface MembershipRequestAction {
+  /** User ID of the member request */
+  userId: string;
+  /** Action to take: approve or reject */
+  action: 'approve' | 'reject';
+}

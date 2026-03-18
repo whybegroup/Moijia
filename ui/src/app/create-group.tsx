@@ -1,14 +1,16 @@
 import React, { useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput,
-  StyleSheet,
+  StyleSheet, Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Colors, Fonts, Radius, GroupPalettes } from '../constants/theme';
 import { NavBar, Field, Toggle } from '../components/ui';
 
-const EMOJIS = ['🏙️','🍜','👨‍👩‍👧','⛰️','🏀','🎤','🍻','🎮','🌸','💼','🎵','🏐'];
+function defaultGroupAvatarUri(groupId: string): string {
+  return `https://api.dicebear.com/8.x/bottts/png?seed=${encodeURIComponent(groupId)}&size=256&backgroundType=gradientLinear`;
+}
 
 export default function CreateGroupScreen() {
   const router = useRouter();
@@ -17,7 +19,6 @@ export default function CreateGroupScreen() {
     desc:      '',
     isPrivate: false,
     palette:   0,
-    emoji:     '🏙️',
   });
   const set  = (k: string, v: any) => setForm(p => ({ ...p, [k]: v }));
   const valid = !!form.name.trim();
@@ -65,26 +66,12 @@ export default function CreateGroupScreen() {
           </View>
         </Field>
 
-        {/* Emoji picker */}
-        <Field label="Emoji">
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            {EMOJIS.map(e => (
-              <TouchableOpacity
-                key={e}
-                onPress={() => set('emoji', e)}
-                style={[styles.emojiBtn, form.emoji === e && styles.emojiBtnActive]}
-              >
-                <Text style={{ fontSize: 22 }}>{e}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </Field>
-
         {/* Live preview */}
         <View style={[styles.preview, { backgroundColor: p.row, borderColor: p.cal }]}>
-          <View style={[styles.previewIcon, { backgroundColor: Colors.surface, borderColor: p.cal }]}>
-            <Text style={{ fontSize: 24 }}>{form.emoji}</Text>
-          </View>
+          <Image 
+            source={{ uri: defaultGroupAvatarUri(form.name || 'preview') }} 
+            style={[styles.previewIcon, { backgroundColor: Colors.surface, borderColor: p.cal }]} 
+          />
           <View style={{ flex: 1 }}>
             <Text style={[styles.previewName, { color: Colors.text }]}>
               {form.name || 'Group name'}
@@ -140,10 +127,8 @@ const styles = StyleSheet.create({
   createBtnText:     { fontSize: 13, fontFamily: Fonts.semiBold, color: Colors.accentFg },
   colorDot:          { width: 36, height: 36, borderRadius: 18 },
   colorDotSelected:  { borderWidth: 3, borderColor: Colors.text, transform: [{ scale: 1.1 }] },
-  emojiBtn:          { width: 44, height: 44, borderRadius: Radius.lg, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.surface, alignItems: 'center', justifyContent: 'center' },
-  emojiBtnActive:    { borderColor: Colors.text, backgroundColor: Colors.bg },
   preview:           { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 16, borderRadius: Radius.xl, borderWidth: 1, marginBottom: 24 },
-  previewIcon:       { width: 48, height: 48, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  previewIcon:       { width: 48, height: 48, borderRadius: 14, borderWidth: 1, flexShrink: 0 },
   previewName:       { fontSize: 15, fontFamily: Fonts.bold },
   previewSub:        { fontSize: 12, color: Colors.textMuted, fontFamily: Fonts.regular },
   input:             { padding: 10, paddingHorizontal: 14, borderRadius: Radius.lg, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.bg, fontSize: 14, color: Colors.text, fontFamily: Fonts.regular },

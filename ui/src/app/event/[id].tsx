@@ -11,7 +11,7 @@ import * as MediaLibrary from 'expo-media-library';
 import { Colors, Fonts, Radius, Shadows } from '../../constants/theme';
 import { getGroupColor, fmtTime, fmtDateFull, timeAgo, dDiff } from '../../utils/helpers';
 import { Avatar, AvatarStack, Sheet } from '../../components/ui';
-import { useEvent, useGroup, useUsers, useCreateOrUpdateRSVP, useCreateComment } from '../../hooks/api';
+import { useEvent, useGroup, useUsers, useCreateOrUpdateRSVP, useCreateComment, useGroupMemberColor } from '../../hooks/api';
 import { uid, getNoResponseIds } from '../../utils/api-helpers';
 import type { EventDetailed, User, Group, RSVP } from '@boltup/client';
 import { RSVPInput } from '@boltup/client';
@@ -127,6 +127,7 @@ export default function EventDetailScreen() {
   const { data: ev, isLoading: eventLoading } = useEvent(eventId || '');
   const { data: group, isLoading: groupLoading } = useGroup(ev?.groupId || '');
   const { data: allUsers = [] } = useUsers();
+  const { data: memberColorData } = useGroupMemberColor(ev?.groupId || '', ME_ID);
   const createOrUpdateRSVPMutation = useCreateOrUpdateRSVP(eventId || '');
   const createCommentMutation = useCreateComment(eventId || '');
 
@@ -183,7 +184,8 @@ export default function EventDetailScreen() {
     return null;
   }
 
-  const p       = getGroupColor(group?.colorHex);
+  const userColorHex = memberColorData?.colorHex || '#EC4899';
+  const p       = getGroupColor(userColorHex);
   const rsvps   = ev.rsvps || [];
   const going   = rsvps.filter(r => r.status === 'going');
   const notGoing= rsvps.filter(r => r.status === 'notGoing');

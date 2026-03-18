@@ -186,15 +186,13 @@ components:
         name:
           type: string
           description: Group name
-        emoji:
-          type: string
-          description: Group emoji icon
-        colorHex:
-          type: string
-          description: Group color hex code
         desc:
           type: string
           description: Group description
+        thumbnail:
+          type: string
+          nullable: true
+          description: Group thumbnail/avatar URL
         isPublic:
           type: boolean
           description: Whether the group is publicly visible
@@ -211,6 +209,11 @@ components:
             type: string
           type: array
           description: Array of member user IDs
+        pendingMemberIds:
+          items:
+            type: string
+          type: array
+          description: Array of pending member request user IDs
         createdAt:
           type: string
           format: date-time
@@ -222,8 +225,6 @@ components:
       required:
         - id
         - name
-        - emoji
-        - colorHex
         - desc
         - isPublic
         - superAdminId
@@ -240,12 +241,11 @@ components:
           type: string
         name:
           type: string
-        emoji:
-          type: string
-        colorHex:
-          type: string
         desc:
           type: string
+        thumbnail:
+          type: string
+          nullable: true
         isPublic:
           type: boolean
         superAdminId:
@@ -261,8 +261,6 @@ components:
       required:
         - id
         - name
-        - emoji
-        - colorHex
         - desc
         - isPublic
         - superAdminId
@@ -273,12 +271,11 @@ components:
       properties:
         name:
           type: string
-        emoji:
-          type: string
-        colorHex:
-          type: string
         desc:
           type: string
+        thumbnail:
+          type: string
+          nullable: true
         isPublic:
           type: boolean
         superAdminId:
@@ -293,6 +290,29 @@ components:
           type: array
       type: object
       additionalProperties: false
+    MembershipRequestAction:
+      description: Membership request action
+      properties:
+        userId:
+          type: string
+          description: User ID of the member request
+        action:
+          type: string
+          enum:
+            - approve
+            - reject
+          description: "Action to take: approve or reject"
+      required:
+        - userId
+        - action
+      type: object
+      additionalProperties: false
+    Record_string.string_:
+      properties: {}
+      additionalProperties:
+        type: string
+      type: object
+      description: Construct a type with a set of properties K of type T
     RSVP:
       description: RSVP model
       properties:
@@ -984,6 +1004,137 @@ paths:
       parameters:
         - in: path
           name: id
+          required: true
+          schema:
+            type: string
+  /groups/{id}/requests/pending:
+    get:
+      operationId: GetPendingRequests
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: "#/components/schemas/User"
+                type: array
+      description: Get pending membership requests
+      summary: Retrieves all pending membership requests for a group
+      tags:
+        - Groups
+      security: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+  /groups/{id}/requests/handle:
+    post:
+      operationId: HandleMembershipRequest
+      responses:
+        "204":
+          description: No content
+      description: Handle membership request
+      summary: Approve or reject a membership request
+      tags:
+        - Groups
+      security: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MembershipRequestAction"
+  /groups/{id}/members/{userId}/color:
+    put:
+      operationId: UpdateMemberColor
+      responses:
+        "204":
+          description: No content
+      description: Update user's color preference for a group
+      summary: Sets the user's custom color for a specific group
+      tags:
+        - Groups
+      security: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: userId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              properties:
+                colorHex:
+                  type: string
+              required:
+                - colorHex
+              type: object
+    get:
+      operationId: GetMemberColor
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                properties:
+                  colorHex:
+                    type: string
+                    nullable: true
+                required:
+                  - colorHex
+                type: object
+      description: Get user's color preference for a group
+      summary: Retrieves the user's custom color for a specific group
+      tags:
+        - Groups
+      security: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: userId
+          required: true
+          schema:
+            type: string
+  /groups/members/{userId}/colors:
+    get:
+      operationId: GetAllMemberColors
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Record_string.string_"
+      description: Get user's color preferences for all their groups
+      summary: Retrieves all group color preferences for a user
+      tags:
+        - Groups
+      security: []
+      parameters:
+        - in: path
+          name: userId
           required: true
           schema:
             type: string

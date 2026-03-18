@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { Group, GroupInput, GroupUpdate, GroupRole } from '../models';
+import { Group, GroupInput, GroupUpdate, GroupRole, MembershipRequestAction, User } from '../models';
 
 const prisma = new PrismaClient();
 
@@ -169,24 +169,149 @@ export class GroupService {
   }
 
   /**
+   * Get pending membership requests for a group
+   */
+  public async getPendingRequests(groupId: string): Promise<User[]> {
+    const pendingMembers = await prisma.groupMember.findMany({
+      where: {
+        groupId,
+        status: 'pending',
+      },
+      include: {
+        user: true,
+      },
+    });
+
+    return pendingMembers.map((m) => m.user) as User[];
+  }
+
+  /**
+   * Handle membership request (approve or reject)
+   */
+  public async handleMembershipRequest(
+    groupId: string,
+    action: MembershipRequestAction
+  ): Promise<void> {
+    const { userId, action: requestAction } = action;
+
+    if (requestAction === 'approve') {
+      await prisma.groupMember.update({
+        where: {
+          groupId_userId: {
+            groupId,
+            userId,
+          },
+        },
+        data: {
+          status: 'active',
+        },
+      });
+    } else if (requestAction === 'reject') {
+      await prisma.groupMember.update({
+        where: {
+          groupId_userId: {
+            groupId,
+            userId,
+          },
+        },
+        data: {
+          status: 'rejected',
+        },
+      });
+    }
+  }
+
+  /**
+   * Update user's color preference for a group
+   */
+  public async updateMemberColor(
+    groupId: string,
+    userId: string,
+    colorHex: string
+  ): Promise<void> {
+    await prisma.groupMember.updateMany({
+      where: {
+        groupId,
+        userId,
+        status: 'active',
+      },
+      data: {
+        colorHex,
+      },
+    });
+  }
+
+  /**
+   * Get user's color preference for a group
+   */
+  public async getMemberColor(
+    groupId: string,
+    userId: string
+  ): Promise<string | null> {
+    const member = await prisma.groupMember.findUnique({
+      where: {
+        groupId_userId: {
+          groupId,
+          userId,
+        },
+      },
+      select: {
+        colorHex: true,
+      },
+    });
+
+    return member?.colorHex || null;
+  }
+
+  /**
+   * Get all group color preferences for a user
+   */
+  public async getAllMemberColors(userId: string): Promise<Record<string, string>> {
+    const memberships = await prisma.groupMember.findMany({
+      where: {
+        userId,
+        status: 'active',
+        colorHex: {
+          not: null,
+        },
+      },
+      select: {
+        groupId: true,
+        colorHex: true,
+      },
+    });
+
+    const colors: Record<string, string> = {};
+    memberships.forEach((m) => {
+      if (m.colorHex) {
+        colors[m.groupId] = m.colorHex;
+      }
+    });
+
+    return colors;
+  }
+
+  /**
    * Map Prisma group with members to Group model
    */
   private mapGroupWithMembers(group: any): Group {
-    const superAdmin = group.members.find((m: any) => m.role === 'superadmin');
+    const superAdmin = group.members.find((m: any) => m.role === 'superadmin' && m.status === 'active');
     const admins = group.members.filter(
-      (m: any) => m.role === 'admin' || m.role === 'superadmin'
+      (m: any) => (m.role === 'admin' || m.role === 'superadmin') && m.status === 'active'
     );
+    const activeMembers = group.members.filter((m: any) => m.status === 'active');
+    const pendingMembers = group.members.filter((m: any) => m.status === 'pending');
 
     return {
       id: group.id,
       name: group.name,
-      emoji: group.emoji,
-      colorHex: group.colorHex,
       desc: group.desc,
+      thumbnail: group.thumbnail,
       isPublic: group.isPublic,
       superAdminId: superAdmin ? superAdmin.userId : '',
       adminIds: admins.map((m: any) => m.userId),
-      memberIds: group.members.map((m: any) => m.userId),
+      memberIds: activeMembers.map((m: any) => m.userId),
+      pendingMemberIds: pendingMembers.map((m: any) => m.userId),
       createdAt: group.createdAt,
       updatedAt: group.updatedAt,
     };

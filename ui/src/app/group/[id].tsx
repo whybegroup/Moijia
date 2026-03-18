@@ -2,11 +2,12 @@ import React, { useState, useMemo } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Modal, Image, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Colors, Fonts, Radius, Shadows } from '../../constants/theme';
+import { Colors, Fonts, Radius, Shadows, GroupPalettes } from '../../constants/theme';
 import { getGroupColor } from '../../utils/helpers';
 import { Avatar, AvatarStack, NavBar } from '../../components/ui';
 import { ListView } from '../../components/ListView';
-import { useGroup, useEvents, useUsers } from '../../hooks/api';
+import { useGroup, useEvents, useUsers, usePendingRequests, useHandleMembershipRequest, useGroupMemberColor, useUpdateGroupMemberColor } from '../../hooks/api';
+import { MembershipRequestAction } from '@boltup/client';
 
 const ME_ID = 'u1';
 
@@ -27,15 +28,16 @@ export default function GroupDetailScreen() {
   const { data: group, isLoading: groupLoading } = useGroup(groupId);
   const { data: events = [], isLoading: eventsLoading } = useEvents({ groupId });
   const { data: users = [] } = useUsers();
+  const { data: pendingRequestUsers = [] } = usePendingRequests(groupId);
+  const handleMembershipRequest = useHandleMembershipRequest(groupId);
+  const { data: memberColorData } = useGroupMemberColor(groupId, ME_ID);
+  const updateMemberColor = useUpdateGroupMemberColor(groupId, ME_ID);
 
   const [tab,         setTab]         = useState<'events' | 'members'>('events');
   const [memberMenu,  setMemberMenu]  = useState<{ userId: string } | null>(null);
   const [showLeave,   setShowLeave]   = useState(false);
   const [newMember,   setNewMember]   = useState('');
-  const [pendingReqs, setPendingReqs] = useState([
-    { userId: 'u26' },
-    { userId: 'u27' },
-  ]);
+  const [showColorPicker, setShowColorPicker] = useState(false);
 
   const usersMap = useMemo(() => {
     const map: Record<string, any> = {};
@@ -51,11 +53,22 @@ export default function GroupDetailScreen() {
     return null;
   }
 
-  const p = getGroupColor(group?.colorHex);
+  const userColorHex = memberColorData?.colorHex || '#EC4899';
+  const p = getGroupColor(userColorHex);
   const groupEvents = events.filter(e => e.groupId === group.id);
   const superAdminId = group.superAdminId;
   const admins = group.adminIds;
-  const hasPendingApprovals = pendingReqs.length > 0;
+  const isAdmin = admins.includes(ME_ID);
+  const hasPendingApprovals = isAdmin && pendingRequestUsers.length > 0;
+
+  const selectColor = async (colorHex: string) => {
+    try {
+      await updateMemberColor.mutateAsync(colorHex);
+      setShowColorPicker(false);
+    } catch (error) {
+      console.error('Failed to update color:', error);
+    }
+  };
 
   const handleBack = () => {
     if (router.canGoBack()) {
@@ -73,14 +86,26 @@ export default function GroupDetailScreen() {
     handleBack();
   };
 
-  const approveReq = (userId: string) => {
-    // TODO: Call API to approve request
-    setPendingReqs(p => p.filter(r => r.userId !== userId));
+  const approveReq = async (userId: string) => {
+    try {
+      await handleMembershipRequest.mutateAsync({
+        userId,
+        action: MembershipRequestAction.action.APPROVE,
+      });
+    } catch (error) {
+      console.error('Failed to approve request:', error);
+    }
   };
 
-  const declineReq = (userId: string) => {
-    // TODO: Call API to decline request
-    setPendingReqs(p => p.filter(r => r.userId !== userId));
+  const declineReq = async (userId: string) => {
+    try {
+      await handleMembershipRequest.mutateAsync({
+        userId,
+        action: MembershipRequestAction.action.REJECT,
+      });
+    } catch (error) {
+      console.error('Failed to decline request:', error);
+    }
   };
 
   const removeMember = (userId: string) => {
@@ -127,7 +152,12 @@ export default function GroupDetailScreen() {
           <View style={{ flexDirection: 'row', gap: 16, marginBottom: 16 }}>
             <Image source={{ uri: group.thumbnail || defaultGroupAvatarUri(group.id) }} style={styles.groupThumb} />
             <View style={{ flex: 1 }}>
-              <Text style={styles.groupName}>{group.name}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                <Text style={styles.groupName}>{group.name}</Text>
+                <TouchableOpacity onPress={() => setShowColorPicker(true)} style={styles.colorBtn}>
+                  <View style={[styles.colorDot, { backgroundColor: p.dot }]} />
+                </TouchableOpacity>
+              </View>
               <Text style={styles.groupDesc}>{group.desc}</Text>
             </View>
           </View>
@@ -175,22 +205,22 @@ export default function GroupDetailScreen() {
           {tab === 'members' && group.adminIds.includes(ME_ID) && (
             <>
               {/* Pending requests */}
-              {pendingReqs.length > 0 && (
+              {pendingRequestUsers.length > 0 && (
                 <>
-                  <Text style={styles.sectionLabel}>PENDING REQUESTS · {pendingReqs.length}</Text>
+                  <Text style={styles.sectionLabel}>PENDING REQUESTS · {pendingRequestUsers.length}</Text>
                   <View style={[styles.card, styles.pendingCard]}>
-                    {pendingReqs.map((req, i) => (
-                      <View key={i} style={[styles.memberRow, i < pendingReqs.length - 1 && styles.rowBorder]}>
-                        <Avatar name={getUser(req.userId).displayName} size={38} />
+                    {pendingRequestUsers.map((user, i) => (
+                      <View key={user.id} style={[styles.memberRow, i < pendingRequestUsers.length - 1 && styles.rowBorder]}>
+                        <Avatar name={user.displayName} size={38} />
                         <View style={{ flex: 1 }}>
-                          <Text style={styles.memberName}>{getUser(req.userId).displayName}</Text>
-                          <Text style={styles.memberHandle}>@{getUser(req.userId).handle} · wants to join</Text>
+                          <Text style={styles.memberName}>{user.displayName}</Text>
+                          <Text style={styles.memberHandle}>@{user.handle} · wants to join</Text>
                         </View>
                         <View style={{ flexDirection: 'row', gap: 6 }}>
-                          <TouchableOpacity onPress={() => approveReq(req.userId)} style={styles.approveBtn}>
+                          <TouchableOpacity onPress={() => approveReq(user.id)} style={styles.approveBtn}>
                             <Text style={styles.approveBtnText}>Approve</Text>
                           </TouchableOpacity>
-                          <TouchableOpacity onPress={() => declineReq(req.userId)} style={styles.declineBtn}>
+                          <TouchableOpacity onPress={() => declineReq(user.id)} style={styles.declineBtn}>
                             <Text style={styles.declineBtnText}>Decline</Text>
                           </TouchableOpacity>
                         </View>
@@ -348,6 +378,32 @@ export default function GroupDetailScreen() {
         </Modal>
       )}
 
+      {/* Color picker */}
+      {showColorPicker && (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setShowColorPicker(false)}>
+          <TouchableOpacity style={styles.menuOverlay} onPress={() => setShowColorPicker(false)} activeOpacity={1}>
+            <View style={styles.colorPickerCard}>
+              <Text style={styles.colorPickerTitle}>Choose your color for {group.name}</Text>
+              <Text style={styles.colorPickerDesc}>This color is just for you and helps you identify this group</Text>
+              <View style={styles.colorGrid}>
+                {GroupPalettes.map((palette, i) => (
+                  <TouchableOpacity
+                    key={i}
+                    onPress={() => selectColor(palette.dot)}
+                    style={[
+                      styles.colorOption,
+                      { backgroundColor: palette.dot },
+                      userColorHex === palette.dot && styles.colorOptionSelected,
+                    ]}
+                    activeOpacity={0.8}
+                  />
+                ))}
+              </View>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+      )}
+
     </SafeAreaView>
   );
 }
@@ -358,7 +414,7 @@ const styles = StyleSheet.create({
   settingsBtnText:  { fontSize: 14, color: Colors.accentFg, fontFamily: Fonts.semiBold },
   headerBlock:      { backgroundColor: Colors.surface, padding: 20, borderBottomWidth: 1 },
   groupThumb:       { width: 56, height: 56, borderRadius: 16, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.bg },
-  groupName:        { fontSize: 19, fontFamily: Fonts.extraBold, color: Colors.text, marginBottom: 4 },
+  groupName:        { fontSize: 19, fontFamily: Fonts.extraBold, color: Colors.text },
   groupDesc:        { fontSize: 13, color: Colors.textSub, fontFamily: Fonts.regular, lineHeight: 18 },
   memberCount:      { fontSize: 13, color: Colors.textSub, fontFamily: Fonts.regular },
   inviteBtn:        { paddingHorizontal: 14, paddingVertical: 7, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border },
@@ -401,4 +457,12 @@ const styles = StyleSheet.create({
   confirmTitle:     { fontSize: 17, fontFamily: Fonts.extraBold, color: Colors.text, marginBottom: 8 },
   confirmBody:      { fontSize: 14, color: Colors.textSub, fontFamily: Fonts.regular, lineHeight: 22, marginBottom: 20 },
   confirmBtn:       { flex: 1, paddingVertical: 10, borderRadius: Radius.lg, borderWidth: 1, alignItems: 'center' },
+  colorBtn:         { padding: 4, borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.bg },
+  colorDot:         { width: 16, height: 16, borderRadius: 8 },
+  colorPickerCard:  { backgroundColor: Colors.surface, borderRadius: 20, padding: 20, width: '100%', maxWidth: 320, ...Shadows.lg },
+  colorPickerTitle: { fontSize: 16, fontFamily: Fonts.extraBold, color: Colors.text, marginBottom: 6 },
+  colorPickerDesc:  { fontSize: 13, color: Colors.textSub, fontFamily: Fonts.regular, lineHeight: 18, marginBottom: 16 },
+  colorGrid:        { flexDirection: 'row', flexWrap: 'wrap', gap: 12, justifyContent: 'center' },
+  colorOption:      { width: 44, height: 44, borderRadius: 22, borderWidth: 2, borderColor: 'transparent' },
+  colorOptionSelected: { borderColor: Colors.text, transform: [{ scale: 1.15 }] },
 });

@@ -25,6 +25,9 @@ export const queryKeys = {
     all: ['groups'] as const,
     detail: (id: string) => ['groups', id] as const,
     members: (id: string) => ['groups', id, 'members'] as const,
+    pendingRequests: (id: string) => ['groups', id, 'requests', 'pending'] as const,
+    memberColor: (groupId: string, userId: string) => ['groups', groupId, 'members', userId, 'color'] as const,
+    allMemberColors: (userId: string) => ['groups', 'members', userId, 'colors'] as const,
   },
   events: {
     all: ['events'] as const,

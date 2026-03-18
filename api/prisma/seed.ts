@@ -38,8 +38,6 @@ const GROUPS = [
   {
     id: 'g1',
     name: 'KTown Hangout',
-    emoji: '🏙️',
-    colorHex: '#FFB3D9',
     desc: 'Friday nights, pocha runs, random KTown adventures. Everyone welcome!',
     isPublic: false,
     createdAt: new Date('2026-03-01T10:00:00'),
@@ -57,8 +55,6 @@ const GROUPS = [
   {
     id: 'g2',
     name: 'SGV Foodies',
-    emoji: '🍜',
-    colorHex: '#FDD835',
     desc: 'Exploring the best of SGV — dim sum, KBBQ, and everything in between.',
     isPublic: false,
     createdAt: new Date('2026-03-10T14:00:00'),
@@ -75,8 +71,6 @@ const GROUPS = [
   {
     id: 'g3',
     name: 'LA Korean Entrepreneurs',
-    emoji: '💼',
-    colorHex: '#60A5FA',
     desc: 'Networking, mentorship, and startup support in LA.',
     isPublic: true,
     createdAt: new Date('2026-02-15T09:00:00'),
@@ -91,8 +85,6 @@ const GROUPS = [
   {
     id: 'g4',
     name: 'LA Hiking Crew',
-    emoji: '⛰️',
-    colorHex: '#86EFAC',
     desc: 'Weekend hikes across LA — Griffith, Mt. Baldy, Runyon. All levels welcome.',
     isPublic: false,
     createdAt: new Date('2026-03-12T11:00:00'),
@@ -108,8 +100,6 @@ const GROUPS = [
   {
     id: 'g5',
     name: 'KTown Hoops',
-    emoji: '🏀',
-    colorHex: '#FB923C',
     desc: 'Pick-up basketball and 3-on-3 at local courts.',
     isPublic: false,
     createdAt: new Date('2026-03-14T16:00:00'),
@@ -125,8 +115,6 @@ const GROUPS = [
   {
     id: 'g6',
     name: 'LA Night Owls',
-    emoji: '🦉',
-    colorHex: '#A78BFA',
     desc: 'Late-night eats, spontaneous plans, and after-hours adventures.',
     isPublic: false,
     createdAt: new Date('2026-03-16T13:00:00'),
@@ -625,15 +613,29 @@ async function clearDatabase() {
   console.log('Clearing database...');
   
   // Delete in reverse dependency order
-  await prisma.commentPhoto.deleteMany();
-  await prisma.comment.deleteMany();
-  await prisma.rSVP.deleteMany();
-  await prisma.eventPhoto.deleteMany();
-  await prisma.event.deleteMany();
-  await prisma.groupMember.deleteMany();
-  await prisma.group.deleteMany();
-  await prisma.notification.deleteMany();
-  await prisma.user.deleteMany();
+  // Wrap in try-catch to handle cases where tables don't exist yet
+  const deleteOperations = [
+    () => prisma.commentPhoto.deleteMany(),
+    () => prisma.comment.deleteMany(),
+    () => prisma.rSVP.deleteMany(),
+    () => prisma.eventPhoto.deleteMany(),
+    () => prisma.event.deleteMany(),
+    () => prisma.groupMember.deleteMany(),
+    () => prisma.group.deleteMany(),
+    () => prisma.notification.deleteMany(),
+    () => prisma.user.deleteMany(),
+  ];
+
+  for (const operation of deleteOperations) {
+    try {
+      await operation();
+    } catch (error: any) {
+      // Ignore P2021 errors (table doesn't exist)
+      if (error.code !== 'P2021') {
+        throw error;
+      }
+    }
+  }
   
   console.log('✓ Database cleared');
 }
@@ -668,6 +670,31 @@ async function seedGroups() {
   }
   
   console.log(`✓ Seeded ${GROUPS.length} groups with members`);
+}
+
+async function seedPendingRequests() {
+  console.log('Seeding pending membership requests...');
+  
+  const pendingRequests = [
+    { groupId: 'g1', userId: 'u26', role: 'member' },
+    { groupId: 'g1', userId: 'u27', role: 'member' },
+    { groupId: 'g2', userId: 'u20', role: 'member' },
+    { groupId: 'g3', userId: 'u21', role: 'member' },
+    { groupId: 'g4', userId: 'u22', role: 'member' },
+  ];
+  
+  for (const request of pendingRequests) {
+    await prisma.groupMember.create({
+      data: {
+        groupId: request.groupId,
+        userId: request.userId,
+        role: request.role,
+        status: 'pending',
+      },
+    });
+  }
+  
+  console.log(`✓ Seeded ${pendingRequests.length} pending membership requests`);
 }
 
 async function seedEvents() {
@@ -732,9 +759,22 @@ async function seed() {
   try {
     console.log('Starting database seed...\n');
     
+    // Check if database is migrated by trying to query a table
+    try {
+      await prisma.user.findFirst();
+    } catch (error: any) {
+      if (error.code === 'P2021') {
+        console.error('❌ Database tables do not exist. Please run migrations first:');
+        console.error('   npm run db:migrate\n');
+        throw new Error('Database not migrated. Run "npm run db:migrate" first.');
+      }
+      throw error;
+    }
+    
     await clearDatabase();
     await seedUsers();
     await seedGroups();
+    await seedPendingRequests();
     await seedEvents();
     await seedRsvps();
     await seedComments();

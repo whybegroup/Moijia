@@ -99,13 +99,13 @@ const models: TsoaRoute.Models = {
         "properties": {
             "id": {"dataType":"string","required":true},
             "name": {"dataType":"string","required":true},
-            "emoji": {"dataType":"string","required":true},
-            "colorHex": {"dataType":"string","required":true},
             "desc": {"dataType":"string","required":true},
+            "thumbnail": {"dataType":"union","subSchemas":[{"dataType":"string"},{"dataType":"enum","enums":[null]}]},
             "isPublic": {"dataType":"boolean","required":true},
             "superAdminId": {"dataType":"string","required":true},
             "adminIds": {"dataType":"array","array":{"dataType":"string"},"required":true},
             "memberIds": {"dataType":"array","array":{"dataType":"string"},"required":true},
+            "pendingMemberIds": {"dataType":"array","array":{"dataType":"string"}},
             "createdAt": {"dataType":"datetime","required":true},
             "updatedAt": {"dataType":"datetime","required":true},
         },
@@ -117,9 +117,8 @@ const models: TsoaRoute.Models = {
         "properties": {
             "id": {"dataType":"string","required":true},
             "name": {"dataType":"string","required":true},
-            "emoji": {"dataType":"string","required":true},
-            "colorHex": {"dataType":"string","required":true},
             "desc": {"dataType":"string","required":true},
+            "thumbnail": {"dataType":"union","subSchemas":[{"dataType":"string"},{"dataType":"enum","enums":[null]}]},
             "isPublic": {"dataType":"boolean","required":true},
             "superAdminId": {"dataType":"string","required":true},
             "adminIds": {"dataType":"array","array":{"dataType":"string"}},
@@ -132,15 +131,28 @@ const models: TsoaRoute.Models = {
         "dataType": "refObject",
         "properties": {
             "name": {"dataType":"string"},
-            "emoji": {"dataType":"string"},
-            "colorHex": {"dataType":"string"},
             "desc": {"dataType":"string"},
+            "thumbnail": {"dataType":"union","subSchemas":[{"dataType":"string"},{"dataType":"enum","enums":[null]}]},
             "isPublic": {"dataType":"boolean"},
             "superAdminId": {"dataType":"string"},
             "adminIds": {"dataType":"array","array":{"dataType":"string"}},
             "memberIds": {"dataType":"array","array":{"dataType":"string"}},
         },
         "additionalProperties": false,
+    },
+    // WARNING: This file was auto-generated with tsoa. Please do not modify it. Re-run tsoa to re-generate this file: https://github.com/lukeautry/tsoa
+    "MembershipRequestAction": {
+        "dataType": "refObject",
+        "properties": {
+            "userId": {"dataType":"string","required":true},
+            "action": {"dataType":"union","subSchemas":[{"dataType":"enum","enums":["approve"]},{"dataType":"enum","enums":["reject"]}],"required":true},
+        },
+        "additionalProperties": false,
+    },
+    // WARNING: This file was auto-generated with tsoa. Please do not modify it. Re-run tsoa to re-generate this file: https://github.com/lukeautry/tsoa
+    "Record_string.string_": {
+        "dataType": "refAlias",
+        "type": {"dataType":"nestedObjectLiteral","nestedProperties":{},"additionalProperties":{"dataType":"string"},"validators":{}},
     },
     // WARNING: This file was auto-generated with tsoa. Please do not modify it. Re-run tsoa to re-generate this file: https://github.com/lukeautry/tsoa
     "RSVP": {
@@ -738,6 +750,160 @@ export function RegisterRoutes(app: Router) {
                 next,
                 validatedArgs,
                 successStatus: 204,
+              });
+            } catch (err) {
+                return next(err);
+            }
+        });
+        // WARNING: This file was auto-generated with tsoa. Please do not modify it. Re-run tsoa to re-generate this file: https://github.com/lukeautry/tsoa
+        const argsGroupController_getPendingRequests: Record<string, TsoaRoute.ParameterSchema> = {
+                id: {"in":"path","name":"id","required":true,"dataType":"string"},
+        };
+        app.get('/api/groups/:id/requests/pending',
+            ...(fetchMiddlewares<RequestHandler>(GroupController)),
+            ...(fetchMiddlewares<RequestHandler>(GroupController.prototype.getPendingRequests)),
+
+            async function GroupController_getPendingRequests(request: ExRequest, response: ExResponse, next: any) {
+
+            // WARNING: This file was auto-generated with tsoa. Please do not modify it. Re-run tsoa to re-generate this file: https://github.com/lukeautry/tsoa
+
+            let validatedArgs: any[] = [];
+            try {
+                validatedArgs = templateService.getValidatedArgs({ args: argsGroupController_getPendingRequests, request, response });
+
+                const controller = new GroupController();
+
+              await templateService.apiHandler({
+                methodName: 'getPendingRequests',
+                controller,
+                response,
+                next,
+                validatedArgs,
+                successStatus: undefined,
+              });
+            } catch (err) {
+                return next(err);
+            }
+        });
+        // WARNING: This file was auto-generated with tsoa. Please do not modify it. Re-run tsoa to re-generate this file: https://github.com/lukeautry/tsoa
+        const argsGroupController_handleMembershipRequest: Record<string, TsoaRoute.ParameterSchema> = {
+                id: {"in":"path","name":"id","required":true,"dataType":"string"},
+                body: {"in":"body","name":"body","required":true,"ref":"MembershipRequestAction"},
+        };
+        app.post('/api/groups/:id/requests/handle',
+            ...(fetchMiddlewares<RequestHandler>(GroupController)),
+            ...(fetchMiddlewares<RequestHandler>(GroupController.prototype.handleMembershipRequest)),
+
+            async function GroupController_handleMembershipRequest(request: ExRequest, response: ExResponse, next: any) {
+
+            // WARNING: This file was auto-generated with tsoa. Please do not modify it. Re-run tsoa to re-generate this file: https://github.com/lukeautry/tsoa
+
+            let validatedArgs: any[] = [];
+            try {
+                validatedArgs = templateService.getValidatedArgs({ args: argsGroupController_handleMembershipRequest, request, response });
+
+                const controller = new GroupController();
+
+              await templateService.apiHandler({
+                methodName: 'handleMembershipRequest',
+                controller,
+                response,
+                next,
+                validatedArgs,
+                successStatus: undefined,
+              });
+            } catch (err) {
+                return next(err);
+            }
+        });
+        // WARNING: This file was auto-generated with tsoa. Please do not modify it. Re-run tsoa to re-generate this file: https://github.com/lukeautry/tsoa
+        const argsGroupController_updateMemberColor: Record<string, TsoaRoute.ParameterSchema> = {
+                id: {"in":"path","name":"id","required":true,"dataType":"string"},
+                userId: {"in":"path","name":"userId","required":true,"dataType":"string"},
+                body: {"in":"body","name":"body","required":true,"dataType":"nestedObjectLiteral","nestedProperties":{"colorHex":{"dataType":"string","required":true}}},
+        };
+        app.put('/api/groups/:id/members/:userId/color',
+            ...(fetchMiddlewares<RequestHandler>(GroupController)),
+            ...(fetchMiddlewares<RequestHandler>(GroupController.prototype.updateMemberColor)),
+
+            async function GroupController_updateMemberColor(request: ExRequest, response: ExResponse, next: any) {
+
+            // WARNING: This file was auto-generated with tsoa. Please do not modify it. Re-run tsoa to re-generate this file: https://github.com/lukeautry/tsoa
+
+            let validatedArgs: any[] = [];
+            try {
+                validatedArgs = templateService.getValidatedArgs({ args: argsGroupController_updateMemberColor, request, response });
+
+                const controller = new GroupController();
+
+              await templateService.apiHandler({
+                methodName: 'updateMemberColor',
+                controller,
+                response,
+                next,
+                validatedArgs,
+                successStatus: undefined,
+              });
+            } catch (err) {
+                return next(err);
+            }
+        });
+        // WARNING: This file was auto-generated with tsoa. Please do not modify it. Re-run tsoa to re-generate this file: https://github.com/lukeautry/tsoa
+        const argsGroupController_getMemberColor: Record<string, TsoaRoute.ParameterSchema> = {
+                id: {"in":"path","name":"id","required":true,"dataType":"string"},
+                userId: {"in":"path","name":"userId","required":true,"dataType":"string"},
+        };
+        app.get('/api/groups/:id/members/:userId/color',
+            ...(fetchMiddlewares<RequestHandler>(GroupController)),
+            ...(fetchMiddlewares<RequestHandler>(GroupController.prototype.getMemberColor)),
+
+            async function GroupController_getMemberColor(request: ExRequest, response: ExResponse, next: any) {
+
+            // WARNING: This file was auto-generated with tsoa. Please do not modify it. Re-run tsoa to re-generate this file: https://github.com/lukeautry/tsoa
+
+            let validatedArgs: any[] = [];
+            try {
+                validatedArgs = templateService.getValidatedArgs({ args: argsGroupController_getMemberColor, request, response });
+
+                const controller = new GroupController();
+
+              await templateService.apiHandler({
+                methodName: 'getMemberColor',
+                controller,
+                response,
+                next,
+                validatedArgs,
+                successStatus: undefined,
+              });
+            } catch (err) {
+                return next(err);
+            }
+        });
+        // WARNING: This file was auto-generated with tsoa. Please do not modify it. Re-run tsoa to re-generate this file: https://github.com/lukeautry/tsoa
+        const argsGroupController_getAllMemberColors: Record<string, TsoaRoute.ParameterSchema> = {
+                userId: {"in":"path","name":"userId","required":true,"dataType":"string"},
+        };
+        app.get('/api/groups/members/:userId/colors',
+            ...(fetchMiddlewares<RequestHandler>(GroupController)),
+            ...(fetchMiddlewares<RequestHandler>(GroupController.prototype.getAllMemberColors)),
+
+            async function GroupController_getAllMemberColors(request: ExRequest, response: ExResponse, next: any) {
+
+            // WARNING: This file was auto-generated with tsoa. Please do not modify it. Re-run tsoa to re-generate this file: https://github.com/lukeautry/tsoa
+
+            let validatedArgs: any[] = [];
+            try {
+                validatedArgs = templateService.getValidatedArgs({ args: argsGroupController_getAllMemberColors, request, response });
+
+                const controller = new GroupController();
+
+              await templateService.apiHandler({
+                methodName: 'getAllMemberColors',
+                controller,
+                response,
+                next,
+                validatedArgs,
+                successStatus: undefined,
               });
             } catch (err) {
                 return next(err);

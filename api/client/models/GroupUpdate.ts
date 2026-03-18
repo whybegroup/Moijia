@@ -7,9 +7,8 @@
  */
 export type GroupUpdate = {
     name?: string;
-    emoji?: string;
-    colorHex?: string;
     desc?: string;
+    thumbnail?: string | null;
     isPublic?: boolean;
     superAdminId?: string;
     adminIds?: Array<string>;

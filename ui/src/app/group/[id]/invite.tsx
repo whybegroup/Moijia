@@ -76,7 +76,7 @@ export default function GroupInviteScreen() {
     if (router.canGoBack()) {
       router.back();
     } else {
-      router.push(`/group/${groupId}`);
+      router.push(`/`);
     }
   };
 

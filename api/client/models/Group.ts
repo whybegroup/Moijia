@@ -15,17 +15,13 @@ export type Group = {
      */
     name: string;
     /**
-     * Group emoji icon
-     */
-    emoji: string;
-    /**
-     * Group color hex code
-     */
-    colorHex: string;
-    /**
      * Group description
      */
     desc: string;
+    /**
+     * Group thumbnail/avatar URL
+     */
+    thumbnail?: string | null;
     /**
      * Whether the group is publicly visible
      */
@@ -42,6 +38,10 @@ export type Group = {
      * Array of member user IDs
      */
     memberIds: Array<string>;
+    /**
+     * Array of pending member request user IDs
+     */
+    pendingMemberIds?: Array<string>;
     /**
      * Timestamp when the group was created
      */

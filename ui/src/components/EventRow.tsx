@@ -8,6 +8,7 @@ import { AvatarStack } from './ui';
 interface EventRowProps {
   ev: EventDetailed;
   group?: Group;
+  groupColorHex?: string;
   onPress: () => void;
   onGroupPress?: (groupId: string) => void;
   isLast?: boolean;
@@ -15,8 +16,8 @@ interface EventRowProps {
   meId?: string;
 }
 
-export function EventRow({ ev, group, onPress, onGroupPress, isLast, showGroup = true, meId }: EventRowProps) {
-  const p      = getGroupColor(group?.colorHex);
+export function EventRow({ ev, group, groupColorHex, onPress, onGroupPress, isLast, showGroup = true, meId }: EventRowProps) {
+  const p      = getGroupColor(groupColorHex || '#EC4899');
   const evStart = typeof ev.start === 'string' ? new Date(ev.start) : ev.start;
   const diff   = dDiff(evStart);
   const isPast = evStart.getTime() < Date.now();
@@ -63,7 +64,7 @@ export function EventRow({ ev, group, onPress, onGroupPress, isLast, showGroup =
             ]}
             disabled={!onGroupPress}
           >
-            <Text style={[styles.groupName, onGroupPress && { color: p.dot }]} numberOfLines={1}>{group.emoji} {group.name}</Text>
+            <Text style={[styles.groupName, onGroupPress && { color: p.dot }]} numberOfLines={1}>{group.name}</Text>
           </Pressable>
         )}
         <Text style={styles.meta} numberOfLines={1}>{metaParts}</Text>

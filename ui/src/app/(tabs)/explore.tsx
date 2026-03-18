@@ -1,9 +1,15 @@
 import React, { useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Fonts, Radius } from '../../constants/theme';
 import { getGroupColor } from '../../utils/helpers';
-import { useGroups } from '../../hooks/api';
+import { useGroups, useAllGroupMemberColors } from '../../hooks/api';
+
+const ME_ID = 'u1';
+
+function defaultGroupAvatarUri(groupId: string): string {
+  return `https://api.dicebear.com/8.x/bottts/png?seed=${encodeURIComponent(groupId)}&size=256&backgroundType=gradientLinear`;
+}
 
 export default function ExploreScreen() {
   const [query,  setQuery]  = useState('');
@@ -11,6 +17,7 @@ export default function ExploreScreen() {
   const [joined, setJoined] = useState<string[]>([]);
 
   const { data: groups = [], isLoading: loading } = useGroups();
+  const { data: groupColors = {} } = useAllGroupMemberColors(ME_ID);
 
   const results = groups.filter(g =>
     g.isPublic && (!query || g.name.toLowerCase().includes(query.toLowerCase()) || g.desc.toLowerCase().includes(query.toLowerCase()))
@@ -53,13 +60,15 @@ export default function ExploreScreen() {
         <Text style={styles.sectionLabel}>{query ? `Results for "${query}"` : 'Public Groups'}</Text>
         <View style={styles.card}>
           {results.map((g, i) => {
-            const p = getGroupColor(g?.colorHex);
+            const userColorHex = groupColors[g.id] || '#EC4899';
+            const p = getGroupColor(userColorHex);
             const isJoined = joined.includes(g.id);
             return (
               <View key={g.id} style={[styles.row, i < results.length - 1 && styles.rowBorder]}>
-                <View style={[styles.groupIcon, { backgroundColor: p.row, borderColor: p.cal }]}>
-                  <Text style={{ fontSize: 22 }}>{g.emoji}</Text>
-                </View>
+                <Image 
+                  source={{ uri: g.thumbnail || defaultGroupAvatarUri(g.id) }} 
+                  style={[styles.groupIcon, { backgroundColor: p.row, borderColor: p.cal }]} 
+                />
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={styles.groupName}>{g.name}</Text>
                   <Text style={styles.groupDesc} numberOfLines={1}>{g.desc}</Text>

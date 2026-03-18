@@ -7,6 +7,7 @@ import type { EventDetailed, Group } from '@boltup/client';
 interface ListViewProps {
   events: EventDetailed[];
   groups?: Group[];
+  groupColors?: Record<string, string>;
   onSelect: (ev: EventDetailed) => void;
   onSelectGroup?: (groupId: string) => void;
   showGroup?: boolean;
@@ -20,6 +21,7 @@ type Row =
 export function ListView({
   events,
   groups = [],
+  groupColors = {},
   onSelect,
   onSelectGroup,
   showGroup = true,
@@ -133,11 +135,13 @@ export function ListView({
     }
     // event
     const group = groupsMap[item.event.groupId];
+    const userColorHex = groupColors[item.event.groupId];
     return (
       <View style={styles.cardWrapper}>
         <EventRow
           ev={item.event}
           group={group}
+          groupColorHex={userColorHex}
           onPress={() => onSelect(item.event)}
           onGroupPress={onSelectGroup}
           isLast={false}

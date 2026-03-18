@@ -45,7 +45,7 @@ export class EventService {
       take: params?.limit,
     });
 
-    return events.map((e) => this.mapEventWithPhotos(e));
+    return events.map((e: any) => this.mapEventWithPhotos(e));
   }
 
   /**
@@ -249,7 +249,7 @@ export class EventService {
       },
     });
 
-    return comments.map((c) => this.mapCommentWithPhotos(c));
+    return comments.map((c: any) => this.mapCommentWithPhotos(c));
   }
 
   /**
@@ -258,15 +258,20 @@ export class EventService {
   public async createComment(eventId: string, input: CommentInput): Promise<Comment> {
     const { photos = [], text, ...commentData } = input;
 
-    const comment = await prisma.comment.create({
-      data: {
-        ...commentData,
-        eventId,
-        ...(text ? { text } : {}),
-        photos: {
-          create: photos.map((photoUrl) => ({ photoUrl })),
-        },
+    const data: any = {
+      ...commentData,
+      eventId,
+      photos: {
+        create: photos.map((photoUrl) => ({ photoUrl })),
       },
+    };
+
+    if (text !== undefined) {
+      data.text = text;
+    }
+
+    const comment = await prisma.comment.create({
+      data,
       include: {
         photos: true,
       },

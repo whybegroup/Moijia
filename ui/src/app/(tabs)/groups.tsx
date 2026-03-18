@@ -1,19 +1,24 @@
 import React from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Colors, Fonts, Radius } from '../../constants/theme';
 import { getGroupColor } from '../../utils/helpers';
-import { useGroups, useEvents } from '../../hooks/api';
+import { useGroups, useEvents, useAllGroupMemberColors } from '../../hooks/api';
 
 const ME_ID = 'u1';
+
+function defaultGroupAvatarUri(groupId: string): string {
+  return `https://api.dicebear.com/8.x/bottts/png?seed=${encodeURIComponent(groupId)}&size=256&backgroundType=gradientLinear`;
+}
 
 export default function GroupsScreen() {
   const router = useRouter();
   const { data: groups = [], isLoading: groupsLoading } = useGroups();
   const { data: events = [], isLoading: eventsLoading } = useEvents();
+  const { data: groupColors = {}, isLoading: colorsLoading } = useAllGroupMemberColors(ME_ID);
   
-  const loading = groupsLoading || eventsLoading;
+  const loading = groupsLoading || eventsLoading || colorsLoading;
 
   // Removed loading state
 
@@ -29,7 +34,8 @@ export default function GroupsScreen() {
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 100 }}>
         <View style={styles.card}>
           {groups.map((g, i) => {
-            const p = getGroupColor(g?.colorHex);
+            const userColorHex = groupColors[g.id] || '#EC4899';
+            const p = getGroupColor(userColorHex);
             const evCount = events.filter(e => {
               const start = new Date(e.start);
               return e.groupId === g.id && start >= new Date();
@@ -41,9 +47,10 @@ export default function GroupsScreen() {
                 style={[styles.row, i < groups.length - 1 && styles.rowBorder]}
                 activeOpacity={0.7}
               >
-                <View style={[styles.groupIcon, { backgroundColor: p.row, borderColor: p.cal }]}>
-                  <Text style={{ fontSize: 22 }}>{g.emoji}</Text>
-                </View>
+                <Image 
+                  source={{ uri: g.thumbnail || defaultGroupAvatarUri(g.id) }} 
+                  style={[styles.groupIcon, { backgroundColor: p.row, borderColor: p.cal }]} 
+                />
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={styles.groupName}>{g.name}</Text>
                   <Text style={styles.groupMeta}>

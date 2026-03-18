@@ -1,14 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Colors, Fonts, Radius } from '../../constants/theme';
 import { getGroupColor, avatarColor } from '../../utils/helpers';
-import { useGroups, useEvents, useUser } from '../../hooks/api';
+import { useGroups, useEvents, useUser, useAllGroupMemberColors } from '../../hooks/api';
 import { Toggle } from '../../components/ui';
 
 // TODO: Replace with actual user authentication
 const ME_ID = 'u1';
+
+function defaultGroupAvatarUri(groupId: string): string {
+  return `https://api.dicebear.com/8.x/bottts/png?seed=${encodeURIComponent(groupId)}&size=256&backgroundType=gradientLinear`;
+}
 
 const REMINDER_OPTIONS = ['Never', '1 hour before', '1 day before', '1 week before'];
 
@@ -18,8 +22,9 @@ export default function ProfileScreen() {
   const { data: groups = [], isLoading: groupsLoading } = useGroups();
   const { data: events = [], isLoading: eventsLoading } = useEvents();
   const { data: me = null, isLoading: meLoading } = useUser(ME_ID);
+  const { data: groupColors = {}, isLoading: colorsLoading } = useAllGroupMemberColors(ME_ID);
 
-  const loading = groupsLoading || eventsLoading || meLoading;
+  const loading = groupsLoading || eventsLoading || meLoading || colorsLoading;
 
   const myEvents = events.filter(e => e.rsvps.some(r => r.userId === ME_ID && r.status === 'going'));
 
@@ -84,7 +89,8 @@ export default function ProfileScreen() {
         <Text style={styles.sectionLabel}>MY GROUPS</Text>
         <View style={[styles.card, { marginBottom: 20 }]}>
           {groups.map((g, i) => {
-            const p = getGroupColor(g?.colorHex);
+            const userColorHex = groupColors[g.id] || '#EC4899';
+            const p = getGroupColor(userColorHex);
             return (
               <TouchableOpacity
                 key={g.id}
@@ -92,9 +98,10 @@ export default function ProfileScreen() {
                 style={[styles.groupRow, i < groups.length - 1 && styles.rowBorder]}
                 activeOpacity={0.7}
               >
-                <View style={[styles.groupIcon, { backgroundColor: p.row, borderColor: p.cal }]}>
-                  <Text style={{ fontSize: 18 }}>{g.emoji}</Text>
-                </View>
+                <Image 
+                  source={{ uri: g.thumbnail || defaultGroupAvatarUri(g.id) }} 
+                  style={[styles.groupIcon, { backgroundColor: p.row, borderColor: p.cal }]} 
+                />
                 <Text style={styles.groupName}>{g.name}</Text>
                 <Text style={{ color: Colors.textMuted, fontSize: 16 }}>›</Text>
               </TouchableOpacity>
@@ -115,7 +122,10 @@ export default function ProfileScreen() {
                   style={styles.notifGroupRow}
                   activeOpacity={0.7}
                 >
-                  <Text style={{ fontSize: 18 }}>{g.emoji}</Text>
+                  <Image 
+                    source={{ uri: g.thumbnail || defaultGroupAvatarUri(g.id) }} 
+                    style={{ width: 28, height: 28, borderRadius: 8 }} 
+                  />
                   <Text style={styles.groupName}>{g.name}</Text>
                   <Text style={{ color: Colors.textMuted, fontSize: 13 }}>{isExpanded ? '▲' : '▼'}</Text>
                 </TouchableOpacity>

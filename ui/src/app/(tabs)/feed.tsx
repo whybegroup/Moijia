@@ -25,7 +25,7 @@ import { ListView } from '../../components/ListView';
 import { CalendarView } from '../../components/CalendarView';
 import { Pill } from '../../components/ui';
 import Svg, { Path } from 'react-native-svg';
-import { useEvents, useGroups, useNotifications, useUser } from '../../hooks/api';
+import { useEvents, useGroups, useNotifications, useUser, useAllGroupMemberColors } from '../../hooks/api';
 
 const ME_ID = 'u1';
 
@@ -36,8 +36,9 @@ export default function FeedScreen() {
   const { data: groups = [], isLoading: groupsLoading } = useGroups();
   const { data: notifs = [], isLoading: notifsLoading } = useNotifications(ME_ID);
   const { data: me = null, isLoading: meLoading } = useUser(ME_ID);
+  const { data: groupColors = {}, isLoading: colorsLoading } = useAllGroupMemberColors(ME_ID);
   
-  const loading = eventsLoading || groupsLoading || notifsLoading || meLoading;
+  const loading = eventsLoading || groupsLoading || notifsLoading || meLoading || colorsLoading;
   
   // Filter state
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
@@ -245,12 +246,13 @@ export default function FeedScreen() {
             onPress={() => setSelectedGroupIds([])}
           />
           {groups.map(g => {
-            const p = getGroupColor(g?.colorHex);
+            const userColorHex = groupColors[g.id] || '#EC4899';
+            const p = getGroupColor(userColorHex);
             const isSelected = selectedGroupIds.includes(g.id);
             return (
               <Pill
                 key={g.id}
-                label={`${g.emoji} ${g.name}`}
+                label={g.name}
                 selected={isSelected}
                 activeColor={p.dot}
                 activeBg={p.label}
@@ -548,6 +550,7 @@ export default function FeedScreen() {
           <ListView
             events={filtered}
             groups={groups}
+            groupColors={groupColors}
             onSelect={ev => router.push(`/event/${ev.id}`)}
             onSelectGroup={groupId => router.push(`/group/${groupId}`)}
           />
@@ -555,6 +558,7 @@ export default function FeedScreen() {
           <CalendarView
             events={filtered}
             groups={groups}
+            groupColors={groupColors}
             onSelectEvent={ev => router.push(`/event/${ev.id}`)}
           />
         )}
@@ -632,7 +636,8 @@ export default function FeedScreen() {
             <ScrollView style={{ maxHeight: 340 }} showsVerticalScrollIndicator={false}>
               {notifs.map((n, i) => {
                 const group = groups.find(g => g.id === n.groupId);
-                const p = getGroupColor(group?.colorHex);
+                const userColorHex = group ? (groupColors[group.id] || '#EC4899') : '#EC4899';
+                const p = getGroupColor(userColorHex);
                 return (
                   <TouchableOpacity
                     key={n.id}

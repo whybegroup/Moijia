@@ -1,0 +1,22 @@
+# Dependencies
+**/node_modules/
+
+# Environment
+**/.env
+**/.env.local
+
+# Database
+**/*.db
+**/*.log
+
+# Expo
+**/.expo/
+**/dist/
+**/web-build/
+
+# macOS
+**/.DS_Store
+
+# IDE
+.vscode/
+.idea/

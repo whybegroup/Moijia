@@ -10,7 +10,7 @@ import {
   Tags,
   SuccessResponse,
 } from 'tsoa';
-import { Group, GroupInput, GroupUpdate, User } from '../models';
+import { Group, GroupInput, GroupUpdate, User, MembershipRequestAction } from '../models';
 import { GroupService } from '../services/GroupService';
 
 @Route('groups')
@@ -88,5 +88,85 @@ export class GroupController extends Controller {
   public async deleteGroup(@Path() id: string): Promise<void> {
     await this.groupService.delete(id);
     this.setStatus(204);
+  }
+
+  /**
+   * Get pending membership requests
+   * @summary Retrieves all pending membership requests for a group
+   */
+  @Get('{id}/requests/pending')
+  public async getPendingRequests(@Path() id: string): Promise<User[]> {
+    const group = await this.groupService.getById(id);
+    if (!group) {
+      this.setStatus(404);
+      throw new Error('Group not found');
+    }
+    return this.groupService.getPendingRequests(id);
+  }
+
+  /**
+   * Handle membership request
+   * @summary Approve or reject a membership request
+   */
+  @Post('{id}/requests/handle')
+  public async handleMembershipRequest(
+    @Path() id: string,
+    @Body() body: MembershipRequestAction
+  ): Promise<void> {
+    const group = await this.groupService.getById(id);
+    if (!group) {
+      this.setStatus(404);
+      throw new Error('Group not found');
+    }
+    await this.groupService.handleMembershipRequest(id, body);
+    this.setStatus(200);
+  }
+
+  /**
+   * Update user's color preference for a group
+   * @summary Sets the user's custom color for a specific group
+   */
+  @Put('{id}/members/{userId}/color')
+  public async updateMemberColor(
+    @Path() id: string,
+    @Path() userId: string,
+    @Body() body: { colorHex: string }
+  ): Promise<void> {
+    const group = await this.groupService.getById(id);
+    if (!group) {
+      this.setStatus(404);
+      throw new Error('Group not found');
+    }
+    await this.groupService.updateMemberColor(id, userId, body.colorHex);
+    this.setStatus(200);
+  }
+
+  /**
+   * Get user's color preference for a group
+   * @summary Retrieves the user's custom color for a specific group
+   */
+  @Get('{id}/members/{userId}/color')
+  public async getMemberColor(
+    @Path() id: string,
+    @Path() userId: string
+  ): Promise<{ colorHex: string | null }> {
+    const group = await this.groupService.getById(id);
+    if (!group) {
+      this.setStatus(404);
+      throw new Error('Group not found');
+    }
+    const colorHex = await this.groupService.getMemberColor(id, userId);
+    return { colorHex };
+  }
+
+  /**
+   * Get user's color preferences for all their groups
+   * @summary Retrieves all group color preferences for a user
+   */
+  @Get('members/{userId}/colors')
+  public async getAllMemberColors(
+    @Path() userId: string
+  ): Promise<Record<string, string>> {
+    return this.groupService.getAllMemberColors(userId);
   }
 }

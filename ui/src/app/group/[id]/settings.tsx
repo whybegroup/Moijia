@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity,
   StyleSheet, Modal, TextInput, Image,
@@ -8,7 +8,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Colors, Fonts, Radius, Shadows } from '../../../constants/theme';
 import { getGroupColor } from '../../../utils/helpers';
 import { Avatar, NavBar } from '../../../components/ui';
-import { useGroup, useUsers } from '../../../hooks/api';
+import { useGroup, useUsers, useUpdateGroup } from '../../../hooks/api';
 import * as ImagePicker from 'expo-image-picker';
 
 const ME_ID = 'u1';
@@ -44,6 +44,7 @@ export default function GroupSettingsScreen() {
 
   const { data: group, isLoading: groupLoading } = useGroup(groupId);
   const { data: users = [] } = useUsers();
+  const updateGroup = useUpdateGroup(groupId);
   
   const [draftName, setDraftName] = useState(group?.name || '');
   const [draftDesc, setDraftDesc] = useState(group?.desc || '');
@@ -56,6 +57,17 @@ export default function GroupSettingsScreen() {
     { userId: 'u26' },
     { userId: 'u27' },
   ]);
+
+  const hasInitialized = useRef(false);
+
+  useEffect(() => {
+    if (group && !hasInitialized.current) {
+      setDraftName(group.name);
+      setDraftDesc(group.desc);
+      setDraftThumbnail(group.thumbnail ?? null);
+      hasInitialized.current = true;
+    }
+  }, [group]);
 
   const usersMap = useMemo(() => {
     const map: Record<string, any> = {};
@@ -100,14 +112,22 @@ export default function GroupSettingsScreen() {
     setNewMember('');
   };
 
-  const saveGroupInfo = () => {
+  const saveGroupInfo = async () => {
     const name = draftName.trim();
     const desc = draftDesc.trim();
     if (!name) return;
-    // TODO: Call API to update group info
-    console.log('Save group info', { name, desc, thumbnail: draftThumbnail });
-    setSavedToast(true);
-    setTimeout(() => setSavedToast(false), 1400);
+    
+    try {
+      await updateGroup.mutateAsync({
+        name,
+        desc,
+        thumbnail: draftThumbnail,
+      });
+      setSavedToast(true);
+      setTimeout(() => setSavedToast(false), 1400);
+    } catch (error) {
+      console.error('Failed to update group:', error);
+    }
   };
 
   const deleteGroup = () => {
@@ -125,22 +145,29 @@ export default function GroupSettingsScreen() {
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.85,
+      base64: true,
     });
 
     if (res.canceled) return;
-    const uri = res.assets?.[0]?.uri;
-    if (!uri) return;
-    setDraftThumbnail(uri);
+    const asset = res.assets?.[0];
+    if (!asset) return;
+    
+    if (asset.base64) {
+      const base64Uri = `data:image/jpeg;base64,${asset.base64}`;
+      setDraftThumbnail(base64Uri);
+    } else if (asset.uri) {
+      setDraftThumbnail(asset.uri);
+    }
   };
 
   const displayThumb = draftThumbnail || group.thumbnail || defaultGroupAvatarUri(group.id);
-  const p = getGroupColor(group?.colorHex);
+  const p = getGroupColor('#EC4899');
 
   const handleBack = () => {
     if (router.canGoBack()) {
       router.back();
     } else {
-      router.push(`/group/${groupId}`);
+      router.push(`/`);
     }
   };
 
@@ -161,7 +188,7 @@ export default function GroupSettingsScreen() {
               <TouchableOpacity onPress={() => setShowIconPicker(true)} style={styles.secondaryBtn} activeOpacity={0.8}>
                 <Text style={styles.secondaryBtnText}>Defaults</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => setDraftThumbnail(null)} style={styles.secondaryBtn} activeOpacity={0.8}>
+              <TouchableOpacity onPress={() => setDraftThumbnail(defaultGroupAvatarUri(group.id))} style={styles.secondaryBtn} activeOpacity={0.8}>
                 <Text style={[styles.secondaryBtnText, { color: Colors.textSub }]}>Reset</Text>
               </TouchableOpacity>
             </View>
@@ -190,87 +217,6 @@ export default function GroupSettingsScreen() {
           <TouchableOpacity onPress={saveGroupInfo} style={styles.saveBtn} activeOpacity={0.8}>
             <Text style={styles.saveBtnText}>Save</Text>
           </TouchableOpacity>
-        </View>
-
-        {/* Invite */}
-        <View style={[styles.card, { marginTop: 16 }]}>
-          <TouchableOpacity onPress={() => router.push(`/group/${groupId}/invite`)} style={styles.inviteRow}>
-            <Text style={{ fontSize: 18 }}>🔗</Text>
-            <Text style={styles.inviteText}>Invite People</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Pending requests */}
-        {pendingReqs.length > 0 && (
-          <>
-            <Text style={[styles.sectionLabel, { marginTop: 16 }]}>PENDING REQUESTS · {pendingReqs.length}</Text>
-            <View style={[styles.card, styles.pendingCard]}>
-              {pendingReqs.map((req, i) => (
-                <View key={req.userId} style={[styles.row, i < pendingReqs.length - 1 && styles.rowBorder]}>
-                  <Avatar name={getUser(req.userId).displayName} size={38} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.memberName}>{getUser(req.userId).displayName}</Text>
-                    <Text style={styles.memberHandle}>@{getUser(req.userId).handle} · wants to join</Text>
-                  </View>
-                  <View style={{ flexDirection: 'row', gap: 6 }}>
-                    <TouchableOpacity onPress={() => approveReq(req.userId)} style={styles.approveBtn}>
-                      <Text style={styles.approveBtnText}>Approve</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={() => declineReq(req.userId)} style={styles.declineBtn}>
-                      <Text style={styles.declineBtnText}>Decline</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ))}
-            </View>
-          </>
-        )}
-
-        {/* Members */}
-        <Text style={[styles.sectionLabel, { marginTop: 16 }]}>MEMBERS · {group.memberIds.length}</Text>
-        <View style={[styles.card, { marginBottom: 16 }]}>
-          {group.memberIds.map((memberId, i) => {
-            const isSuperAdmin = memberId === superAdminId;
-            const isAdmin      = admins.includes(memberId);
-            return (
-              <View key={memberId} style={[styles.row, i < group.memberIds.length - 1 && styles.rowBorder]}>
-                <Avatar name={getUser(memberId).displayName} size={38} />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.memberName}>{getUser(memberId).displayName}</Text>
-                  <Text style={styles.memberRole}>{isSuperAdmin ? 'Super Admin' : isAdmin ? 'Admin' : 'Member'}</Text>
-                </View>
-                {isSuperAdmin
-                  ? <Text style={{ fontSize: 14 }}>👑</Text>
-                  : <TouchableOpacity onPress={() => removeMember(memberId)} style={styles.removeBtn}>
-                      <Text style={styles.removeBtnText}>Remove</Text>
-                    </TouchableOpacity>
-                }
-              </View>
-            );
-          })}
-        </View>
-
-        {/* Add member */}
-        <Text style={styles.sectionLabel}>ADD MEMBER</Text>
-        <View style={[styles.card, { padding: 14, marginBottom: 20 }]}>
-          <Text style={styles.addMemberDesc}>Add directly without approval</Text>
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            <TextInput
-              value={newMember}
-              onChangeText={setNewMember}
-              onSubmitEditing={addMember}
-              placeholder="@handle or username"
-              placeholderTextColor={Colors.textMuted}
-              style={styles.addInput}
-            />
-            <TouchableOpacity
-              onPress={addMember}
-              style={[styles.addBtn, !newMember.trim() && { backgroundColor: Colors.border }]}
-              disabled={!newMember.trim()}
-            >
-              <Text style={[styles.addBtnText, !newMember.trim() && { color: Colors.textMuted }]}>Add</Text>
-            </TouchableOpacity>
-          </View>
         </View>
 
         {isSuperAdmin && (

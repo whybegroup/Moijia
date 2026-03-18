@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { GroupsService, type GroupInput, type GroupUpdate } from '@boltup/client';
+import { GroupsService, type GroupInput, type GroupUpdate, type MembershipRequestAction } from '@boltup/client';
 import { queryKeys } from '../../config/queryClient';
 
 export function useGroups() {
@@ -56,5 +56,54 @@ export function useDeleteGroup() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.groups.all });
     },
+  });
+}
+
+export function usePendingRequests(id: string) {
+  return useQuery({
+    queryKey: queryKeys.groups.pendingRequests(id),
+    queryFn: () => GroupsService.getPendingRequests(id),
+    enabled: !!id,
+  });
+}
+
+export function useHandleMembershipRequest(id: string) {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: (data: MembershipRequestAction) => GroupsService.handleMembershipRequest(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.groups.pendingRequests(id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.groups.detail(id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.groups.members(id) });
+    },
+  });
+}
+
+export function useGroupMemberColor(groupId: string, userId: string) {
+  return useQuery({
+    queryKey: queryKeys.groups.memberColor(groupId, userId),
+    queryFn: () => GroupsService.getMemberColor(groupId, userId),
+    enabled: !!groupId && !!userId,
+  });
+}
+
+export function useUpdateGroupMemberColor(groupId: string, userId: string) {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: (colorHex: string) => GroupsService.updateMemberColor(groupId, userId, { colorHex }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.groups.memberColor(groupId, userId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.groups.allMemberColors(userId) });
+    },
+  });
+}
+
+export function useAllGroupMemberColors(userId: string) {
+  return useQuery({
+    queryKey: queryKeys.groups.allMemberColors(userId),
+    queryFn: () => GroupsService.getAllMemberColors(userId),
+    enabled: !!userId,
   });
 }

@@ -7,7 +7,7 @@
     "build": "npm run generate && tsc",
     "start": "node dist/server.js",
     "dev": "concurrently \"npm run generate:watch\" \"nodemon --exec ts-node src/server.ts\"",
-    "seed": "ts-node prisma/seed.ts",
+    "seed": "npm run db:migrate && ts-node prisma/seed.ts",
     "generate": "npm run generate:routes && npm run generate:client",
     "generate:routes": "tsoa spec-and-routes",
     "generate:client": "npx openapi-typescript-codegen --input src/generated/openapi.yaml --output client --client axios",

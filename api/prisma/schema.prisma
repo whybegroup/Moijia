@@ -38,9 +38,8 @@ model User {
 model Group {
   id        String   @id @default(uuid())
   name      String
-  emoji     String
-  colorHex  String
   desc      String
+  thumbnail String?
   isPublic  Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -57,6 +56,8 @@ model GroupMember {
   groupId   String
   userId    String
   role      String   @default("member") // member, admin, superadmin
+  status    String   @default("active") // pending, active, rejected
+  colorHex  String?  // User's custom color for this group
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
