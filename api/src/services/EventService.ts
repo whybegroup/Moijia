@@ -121,11 +121,13 @@ export class EventService {
    * Create a new event
    */
   public async create(input: EventInput): Promise<Event> {
-    const { coverPhotos = [], ...eventData } = input;
+    const { coverPhotos = [], createdBy, ...eventData } = input;
 
     const event = await prisma.event.create({
       data: {
         ...eventData,
+        createdBy,
+        updatedBy: createdBy,
         start: new Date(eventData.start),
         end: new Date(eventData.end),
         deadline: eventData.deadline ? new Date(eventData.deadline) : null,
@@ -175,7 +177,7 @@ export class EventService {
    * Update an event
    */
   public async update(id: string, input: EventUpdate): Promise<Event> {
-    const { coverPhotos, ...eventData } = input;
+    const { coverPhotos, updatedBy, ...eventData } = input;
 
     // If cover photos are provided, update them
     if (coverPhotos) {
@@ -195,7 +197,7 @@ export class EventService {
     }
 
     // Update event data
-    const updateData: any = { ...eventData };
+    const updateData: any = { ...eventData, updatedBy };
     if (updateData.start) updateData.start = new Date(updateData.start);
     if (updateData.end) updateData.end = new Date(updateData.end);
     if (updateData.deadline) updateData.deadline = new Date(updateData.deadline);
@@ -388,6 +390,7 @@ export class EventService {
       id: event.id,
       groupId: event.groupId,
       createdBy: event.createdBy,
+      updatedBy: event.updatedBy,
       title: event.title,
       subtitle: event.subtitle,
       description: event.description,

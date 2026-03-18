@@ -9,7 +9,6 @@ import { ListView } from '../../components/ListView';
 import { useGroup, useEvents, useUsers, usePendingRequests, useHandleMembershipRequest, useGroupMemberColor, useUpdateGroupMemberColor } from '../../hooks/api';
 import { MembershipRequestAction } from '@boltup/client';
 import ColorPicker, { Panel1, HueSlider, OpacitySlider } from 'reanimated-color-picker';
-import { runOnJS } from 'react-native-reanimated';
 
 const ME_ID = 'u1';
 
@@ -168,6 +167,7 @@ export default function GroupDetailScreen() {
                 </TouchableOpacity>
               </View>
               <Text style={styles.groupDesc}>{group.desc}</Text>
+              <Text style={styles.groupCreator}>Created by {getUser(group.createdBy).displayName}</Text>
             </View>
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -398,8 +398,7 @@ export default function GroupDetailScreen() {
                 style={{ width: '100%' }}
                 value={draftHex || userColorHex}
                 onComplete={({ hex }) => {
-                  'worklet';
-                  runOnJS(setDraftHex)(hex);
+                  setDraftHex(hex);
                 }}
               >
                 <Panel1 />
@@ -441,6 +440,7 @@ const styles = StyleSheet.create({
   groupThumb:       { width: 56, height: 56, borderRadius: 16, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.bg },
   groupName:        { fontSize: 19, fontFamily: Fonts.extraBold, color: Colors.text },
   groupDesc:        { fontSize: 13, color: Colors.textSub, fontFamily: Fonts.regular, lineHeight: 18 },
+  groupCreator:     { fontSize: 12, color: Colors.textMuted, fontFamily: Fonts.regular, marginTop: 4 },
   memberCount:      { fontSize: 13, color: Colors.textSub, fontFamily: Fonts.regular },
   inviteBtn:        { paddingHorizontal: 14, paddingVertical: 7, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border },
   inviteBtnText:    { fontSize: 13, fontFamily: Fonts.medium, color: Colors.text },

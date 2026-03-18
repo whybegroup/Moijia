@@ -214,6 +214,12 @@ components:
             type: string
           type: array
           description: Array of pending member request user IDs
+        createdBy:
+          type: string
+          description: ID of the user who created this group
+        updatedBy:
+          type: string
+          description: ID of the user who last updated this group
         createdAt:
           type: string
           format: date-time
@@ -230,6 +236,8 @@ components:
         - superAdminId
         - adminIds
         - memberIds
+        - createdBy
+        - updatedBy
         - createdAt
         - updatedAt
       type: object
@@ -258,12 +266,15 @@ components:
           items:
             type: string
           type: array
+        createdBy:
+          type: string
       required:
         - id
         - name
         - desc
         - isPublic
         - superAdminId
+        - createdBy
       type: object
       additionalProperties: false
     GroupUpdate:
@@ -288,6 +299,10 @@ components:
           items:
             type: string
           type: array
+        updatedBy:
+          type: string
+      required:
+        - updatedBy
       type: object
       additionalProperties: false
     MembershipRequestAction:
@@ -391,6 +406,9 @@ components:
         createdBy:
           type: string
           description: ID of the user who created this event
+        updatedBy:
+          type: string
+          description: ID of the user who last updated this event
         title:
           type: string
           description: Event title
@@ -458,6 +476,7 @@ components:
         - id
         - groupId
         - createdBy
+        - updatedBy
         - title
         - coverPhotos
         - start
@@ -481,6 +500,9 @@ components:
         createdBy:
           type: string
           description: ID of the user who created this event
+        updatedBy:
+          type: string
+          description: ID of the user who last updated this event
         title:
           type: string
           description: Event title
@@ -538,6 +560,7 @@ components:
         - id
         - groupId
         - createdBy
+        - updatedBy
         - title
         - coverPhotos
         - start
@@ -636,6 +659,10 @@ components:
             - type: string
         allowMaybe:
           type: boolean
+        updatedBy:
+          type: string
+      required:
+        - updatedBy
       type: object
       additionalProperties: false
     RSVPInput:

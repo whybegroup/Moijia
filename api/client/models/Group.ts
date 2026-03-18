@@ -43,6 +43,14 @@ export type Group = {
      */
     pendingMemberIds?: Array<string>;
     /**
+     * ID of the user who created this group
+     */
+    createdBy: string;
+    /**
+     * ID of the user who last updated this group
+     */
+    updatedBy: string;
+    /**
      * Timestamp when the group was created
      */
     createdAt: string;

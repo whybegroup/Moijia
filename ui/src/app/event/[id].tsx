@@ -349,6 +349,7 @@ export default function EventDetailScreen() {
               <InfoRow icon="📅">{fmtDateFull(evStart)} · {fmtTime(evStart)} – {fmtTime(typeof ev.end === 'string' ? new Date(ev.end) : ev.end)}</InfoRow>
               {ev.location && <InfoRow icon="📍">{ev.location}</InfoRow>}
               {(ev.minAttendees || 0) > 0 && <InfoRow icon="👥">Min {ev.minAttendees} needed{ev.deadline ? ` · RSVP by ${fmtTime(typeof ev.deadline === 'string' ? new Date(ev.deadline) : ev.deadline)}` : ''}</InfoRow>}
+              <InfoRow icon="✨">Created by {getUserSafe(ev.createdBy).displayName}</InfoRow>
             </View>
 
             {/* Description */}
@@ -356,7 +357,7 @@ export default function EventDetailScreen() {
               <View style={styles.descBox}>
                 <Text style={styles.descText}><DescText text={ev.description} /></Text>
               </View>
-            )}
+            ) : null}
           </View>
 
           <View style={{ paddingHorizontal: 20 }}>

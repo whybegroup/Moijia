@@ -13,5 +13,6 @@ export type GroupUpdate = {
     superAdminId?: string;
     adminIds?: Array<string>;
     memberIds?: Array<string>;
+    updatedBy: string;
 };
 

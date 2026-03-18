@@ -41,6 +41,8 @@ model Group {
   desc      String
   thumbnail String?
   isPublic  Boolean  @default(false)
+  createdBy String
+  updatedBy String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -77,6 +79,7 @@ model Event {
   id           String    @id @default(uuid())
   groupId      String
   createdBy    String
+  updatedBy    String
   title        String
   subtitle     String?
   description  String?

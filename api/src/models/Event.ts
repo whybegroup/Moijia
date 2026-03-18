@@ -8,6 +8,8 @@ export interface Event {
   groupId: string;
   /** ID of the user who created this event */
   createdBy: string;
+  /** ID of the user who last updated this event */
+  updatedBy: string;
   /** Event title */
   title: string;
   /** Event subtitle */
@@ -81,6 +83,7 @@ export interface EventUpdate {
   minAttendees?: number;
   deadline?: Date | string;
   allowMaybe?: boolean;
+  updatedBy: string;
 }
 
 /**

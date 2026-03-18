@@ -17,5 +17,6 @@ export type EventUpdate = {
     minAttendees?: number;
     deadline?: string;
     allowMaybe?: boolean;
+    updatedBy: string;
 };
 

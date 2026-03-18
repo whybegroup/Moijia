@@ -19,6 +19,10 @@ export type Event = {
      */
     createdBy: string;
     /**
+     * ID of the user who last updated this event
+     */
+    updatedBy: string;
+    /**
      * Event title
      */
     title: string;

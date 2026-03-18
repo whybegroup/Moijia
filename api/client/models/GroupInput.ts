@@ -14,5 +14,6 @@ export type GroupInput = {
     superAdminId: string;
     adminIds?: Array<string>;
     memberIds?: Array<string>;
+    createdBy: string;
 };
 

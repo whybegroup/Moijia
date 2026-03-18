@@ -20,6 +20,10 @@ export interface Group {
   memberIds: string[];
   /** Array of pending member request user IDs */
   pendingMemberIds?: string[];
+  /** ID of the user who created this group */
+  createdBy: string;
+  /** ID of the user who last updated this group */
+  updatedBy: string;
   /** Timestamp when the group was created */
   createdAt: Date;
   /** Timestamp when the group was last updated */
@@ -38,6 +42,7 @@ export interface GroupInput {
   superAdminId: string;
   adminIds?: string[];
   memberIds?: string[];
+  createdBy: string;
 }
 
 /**
@@ -51,6 +56,7 @@ export interface GroupUpdate {
   superAdminId?: string;
   adminIds?: string[];
   memberIds?: string[];
+  updatedBy: string;
 }
 
 /**

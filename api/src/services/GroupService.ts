@@ -45,12 +45,14 @@ export class GroupService {
    * Create a new group with members
    */
   public async create(input: GroupInput): Promise<Group> {
-    const { superAdminId, adminIds = [], memberIds = [], ...groupData } = input;
+    const { superAdminId, adminIds = [], memberIds = [], createdBy, ...groupData } = input;
 
     // Create group with members
     const group = await prisma.group.create({
       data: {
         ...groupData,
+        createdBy,
+        updatedBy: createdBy,
         members: {
           create: [
             // Super admin
@@ -82,7 +84,7 @@ export class GroupService {
    * Update a group
    */
   public async update(id: string, input: GroupUpdate): Promise<Group> {
-    const { superAdminId, adminIds, memberIds, ...groupData } = input;
+    const { superAdminId, adminIds, memberIds, updatedBy, ...groupData } = input;
 
     // If member lists are provided, update them
     if (superAdminId || adminIds || memberIds) {
@@ -124,10 +126,13 @@ export class GroupService {
     }
 
     // Update group data
-    if (Object.keys(groupData).length > 0) {
+    if (Object.keys(groupData).length > 0 || updatedBy) {
       await prisma.group.update({
         where: { id },
-        data: groupData,
+        data: {
+          ...groupData,
+          updatedBy,
+        },
       });
     }
 
@@ -333,6 +338,8 @@ export class GroupService {
       adminIds: admins.map((m: any) => m.userId),
       memberIds: activeMembers.map((m: any) => m.userId),
       pendingMemberIds: pendingMembers.map((m: any) => m.userId),
+      createdBy: group.createdBy,
+      updatedBy: group.updatedBy,
       createdAt: group.createdAt,
       updatedAt: group.updatedAt,
     };

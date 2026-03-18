@@ -107,6 +107,7 @@ export default function EditEventScreen() {
         minAttendees: form.minAttendees.trim() ? parseInt(form.minAttendees, 10) : undefined,
         deadline,
         allowMaybe: form.allowMaybe,
+        updatedBy: ME_ID,
       });
       
       router.push(`/event/${eventId}`);

@@ -15,6 +15,8 @@ CREATE TABLE "groups" (
     "desc" TEXT NOT NULL,
     "thumbnail" TEXT,
     "isPublic" BOOLEAN NOT NULL DEFAULT false,
+    "createdBy" TEXT NOT NULL,
+    "updatedBy" TEXT NOT NULL,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL
 );
@@ -38,6 +40,7 @@ CREATE TABLE "events" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "groupId" TEXT NOT NULL,
     "createdBy" TEXT NOT NULL,
+    "updatedBy" TEXT NOT NULL,
     "title" TEXT NOT NULL,
     "subtitle" TEXT,
     "description" TEXT,

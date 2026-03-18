@@ -122,6 +122,7 @@ export default function GroupSettingsScreen() {
         name,
         desc,
         thumbnail: draftThumbnail,
+        updatedBy: ME_ID,
       });
       setSavedToast(true);
       setTimeout(() => setSavedToast(false), 1400);
