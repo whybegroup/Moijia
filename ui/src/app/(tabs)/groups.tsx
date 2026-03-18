@@ -3,7 +3,7 @@ import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Image } from 'rea
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Colors, Fonts, Radius } from '../../constants/theme';
-import { getGroupColor } from '../../utils/helpers';
+import { getGroupColor, getDefaultGroupThemeFromName } from '../../utils/helpers';
 import { useGroups, useEvents, useAllGroupMemberColors } from '../../hooks/api';
 
 const ME_ID = 'u1';
@@ -34,7 +34,7 @@ export default function GroupsScreen() {
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 100 }}>
         <View style={styles.card}>
           {groups.map((g, i) => {
-            const userColorHex = groupColors[g.id] || '#EC4899';
+            const userColorHex = groupColors[g.id] || getDefaultGroupThemeFromName(g.name);
             const p = getGroupColor(userColorHex);
             const evCount = events.filter(e => {
               const start = new Date(e.start);

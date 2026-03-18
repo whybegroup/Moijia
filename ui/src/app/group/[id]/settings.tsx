@@ -6,7 +6,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Colors, Fonts, Radius, Shadows } from '../../../constants/theme';
-import { getGroupColor } from '../../../utils/helpers';
+import { getGroupColor, getDefaultGroupThemeFromName } from '../../../utils/helpers';
 import { Avatar, NavBar } from '../../../components/ui';
 import { useGroup, useUsers, useUpdateGroup } from '../../../hooks/api';
 import * as ImagePicker from 'expo-image-picker';
@@ -161,7 +161,7 @@ export default function GroupSettingsScreen() {
   };
 
   const displayThumb = draftThumbnail || group.thumbnail || defaultGroupAvatarUri(group.id);
-  const p = getGroupColor('#EC4899');
+  const p = getGroupColor(group ? getDefaultGroupThemeFromName(group.name) : '#EC4899');
 
   const handleBack = () => {
     if (router.canGoBack()) {

@@ -16,6 +16,17 @@ export const queryClient = new QueryClient({
   },
 });
 
+// Refetch notifications more frequently
+queryClient.setQueryDefaults(
+  ['notifications'],
+  {
+    staleTime: 0, // Always consider stale to ensure refetch happens
+    refetchInterval: 5000, // Refetch every 5 seconds
+    refetchOnWindowFocus: true,
+    refetchIntervalInBackground: false, // Don't poll when app is in background
+  }
+);
+
 export const queryKeys = {
   users: {
     all: ['users'] as const,

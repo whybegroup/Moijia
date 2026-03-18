@@ -9,8 +9,10 @@ import {
   Comment,
   CommentInput,
 } from '../models';
+import { NotificationService } from './NotificationService';
 
 const prisma = new PrismaClient();
+const notificationService = new NotificationService();
 
 export class EventService {
   /**
@@ -134,8 +136,37 @@ export class EventService {
       },
       include: {
         coverPhotos: true,
+        group: true,
       },
     });
+
+    // Create in-app notifications for all group members
+    const startDate = new Date(eventData.start);
+    const dateStr = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const timeStr = startDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    
+    // Get all active group members
+    const members = await prisma.groupMember.findMany({
+      where: {
+        groupId: event.groupId,
+        status: 'active',
+      },
+      select: { userId: true },
+    });
+
+    // Create notification for each member
+    await notificationService.createForUsers(
+      members.map(m => m.userId),
+      'New Event Created',
+      `${event.title} on ${dateStr} at ${timeStr}`,
+      {
+        type: 'event_created',
+        icon: '📅',
+        eventId: event.id,
+        groupId: event.groupId,
+        dest: 'event',
+      }
+    ).catch(err => console.error('Failed to create notifications:', err));
 
     return this.mapEventWithPhotos(event);
   }
@@ -212,6 +243,32 @@ export class EventService {
       },
     });
 
+    // Create in-app notification for event creator when someone RSVPs "going"
+    if (input.status === 'going') {
+      const event = await prisma.event.findUnique({
+        where: { id: eventId },
+      });
+      
+      const user = await prisma.user.findUnique({
+        where: { id: input.userId },
+      });
+
+      if (event && user && event.createdBy !== input.userId) {
+        await notificationService.createForUser(
+          event.createdBy,
+          'New RSVP',
+          `${user.displayName} is going to ${event.title}`,
+          {
+            type: 'rsvp',
+            icon: '✓',
+            eventId: event.id,
+            groupId: event.groupId,
+            dest: 'event',
+          }
+        ).catch(err => console.error('Failed to create RSVP notification:', err));
+      }
+    }
+
     return {
       userId: rsvp.userId,
       status: rsvp.status as 'going' | 'maybe' | 'notGoing',
@@ -276,6 +333,40 @@ export class EventService {
         photos: true,
       },
     });
+
+    // Send notification to event creator and other commenters
+    const event = await prisma.event.findUnique({
+      where: { id: eventId },
+      include: {
+        comments: {
+          select: { userId: true },
+          distinct: ['userId'],
+        },
+      },
+    });
+
+    const user = await prisma.user.findUnique({
+      where: { id: input.userId },
+    });
+
+    if (event && user) {
+      // Create in-app notification for event creator
+      if (event.createdBy !== input.userId) {
+        const commentText = text || (photos.length > 0 ? 'shared a photo' : 'commented');
+        await notificationService.createForUser(
+          event.createdBy,
+          'New Comment',
+          `${user.displayName} ${commentText} on ${event.title}`,
+          {
+            type: 'comment',
+            icon: '💬',
+            eventId: event.id,
+            groupId: event.groupId,
+            dest: 'event',
+          }
+        ).catch(err => console.error('Failed to create comment notification:', err));
+      }
+    }
 
     return this.mapCommentWithPhotos(comment);
   }

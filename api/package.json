@@ -28,6 +28,7 @@
     "axios": "^1.13.6",
     "cors": "^2.8.5",
     "dotenv": "^17.3.1",
+    "expo-server-sdk": "^6.1.0",
     "express": "^4.22.1",
     "form-data": "^4.0.5",
     "js-yaml": "^4.1.1",

@@ -3,7 +3,7 @@ import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Image } from 'rea
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Colors, Fonts, Radius } from '../../constants/theme';
-import { getGroupColor, avatarColor } from '../../utils/helpers';
+import { getGroupColor, getDefaultGroupThemeFromName, avatarColor } from '../../utils/helpers';
 import { useGroups, useEvents, useUser, useAllGroupMemberColors } from '../../hooks/api';
 import { Toggle } from '../../components/ui';
 
@@ -89,7 +89,7 @@ export default function ProfileScreen() {
         <Text style={styles.sectionLabel}>MY GROUPS</Text>
         <View style={[styles.card, { marginBottom: 20 }]}>
           {groups.map((g, i) => {
-            const userColorHex = groupColors[g.id] || '#EC4899';
+            const userColorHex = groupColors[g.id] || getDefaultGroupThemeFromName(g.name);
             const p = getGroupColor(userColorHex);
             return (
               <TouchableOpacity

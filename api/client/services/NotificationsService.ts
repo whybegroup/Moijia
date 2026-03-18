@@ -85,4 +85,64 @@ export class NotificationsService {
             mediaType: 'application/json',
         });
     }
+    /**
+     * Deletes a notification
+     * Delete notification
+     * @param id
+     * @returns any Ok
+     * @throws ApiError
+     */
+    public static deleteNotification(
+        id: string,
+    ): CancelablePromise<{
+        success: boolean;
+    }> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/notifications/{id}',
+            path: {
+                'id': id,
+            },
+        });
+    }
+    /**
+     * Gets count of unread notifications for a user
+     * Get unread notification count
+     * @param userId
+     * @returns any Ok
+     * @throws ApiError
+     */
+    public static getUnreadCount(
+        userId: string,
+    ): CancelablePromise<{
+        count: number;
+    }> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/notifications/unread-count/{userId}',
+            path: {
+                'userId': userId,
+            },
+        });
+    }
+    /**
+     * Marks all notifications as read for a user
+     * Mark all as read
+     * @param userId
+     * @returns any Ok
+     * @throws ApiError
+     */
+    public static markAllAsRead(
+        userId: string,
+    ): CancelablePromise<{
+        success: boolean;
+    }> {
+        return __request(OpenAPI, {
+            method: 'PUT',
+            url: '/notifications/mark-all-read/{userId}',
+            path: {
+                'userId': userId,
+            },
+        });
+    }
 }

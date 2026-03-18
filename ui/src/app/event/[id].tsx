@@ -9,7 +9,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
 import { Colors, Fonts, Radius, Shadows } from '../../constants/theme';
-import { getGroupColor, fmtTime, fmtDateFull, timeAgo, dDiff } from '../../utils/helpers';
+import { getGroupColor, getDefaultGroupThemeFromName, fmtTime, fmtDateFull, timeAgo, dDiff } from '../../utils/helpers';
 import { Avatar, AvatarStack, Sheet } from '../../components/ui';
 import { useEvent, useGroup, useUsers, useCreateOrUpdateRSVP, useCreateComment, useGroupMemberColor } from '../../hooks/api';
 import { uid, getNoResponseIds } from '../../utils/api-helpers';
@@ -184,7 +184,7 @@ export default function EventDetailScreen() {
     return null;
   }
 
-  const userColorHex = memberColorData?.colorHex || '#EC4899';
+  const userColorHex = memberColorData?.colorHex || getDefaultGroupThemeFromName(group.name);
   const p       = getGroupColor(userColorHex);
   const rsvps   = ev.rsvps || [];
   const going   = rsvps.filter(r => r.status === 'going');
@@ -312,21 +312,21 @@ export default function EventDetailScreen() {
         {/* Event block */}
         <View style={styles.eventBlock}>
           {/* Banners */}
-          {!isPast && hoursLeft <= 6 && hoursLeft > 0 && (
+          {!isPast && hoursLeft <= 6 && hoursLeft > 0 ? (
             <View style={[styles.banner, styles.bannerAmber]}>
               <Text style={styles.bannerAmberText}>⏰ Starting in <Text style={{ fontFamily: Fonts.bold }}>{hoursLeft}h</Text></Text>
             </View>
-          )}
-          {isPast && <View style={[styles.banner, styles.bannerGray]}><Text style={styles.bannerGrayText}>This event has ended</Text></View>}
-          {needsMore && (
+          ) : null}
+          {isPast ? <View style={[styles.banner, styles.bannerGray]}><Text style={styles.bannerGrayText}>This event has ended</Text></View> : null}
+          {needsMore ? (
             <View style={[styles.banner, styles.bannerAmber]}>
               <Text style={styles.bannerAmberText}>⚠️ Need <Text style={{ fontFamily: Fonts.bold }}>{ev.minAttendees! - going.length} more</Text> to confirm</Text>
             </View>
-          )}
+          ) : null}
 
           <View style={{ paddingHorizontal: 20, paddingTop: 20 }}>
             <Text style={styles.eventTitle}>{ev.title}</Text>
-            {ev.subtitle && <Text style={styles.eventSubtitle}>{ev.subtitle}</Text>}
+            {ev.subtitle ? <Text style={styles.eventSubtitle}>{ev.subtitle}</Text> : null}
           </View>
 
           {/* Cover photos */}
@@ -352,7 +352,7 @@ export default function EventDetailScreen() {
             </View>
 
             {/* Description */}
-            {ev.description && (
+            {ev.description ? (
               <View style={styles.descBox}>
                 <Text style={styles.descText}><DescText text={ev.description} /></Text>
               </View>

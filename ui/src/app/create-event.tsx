@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { Colors, Fonts, Radius } from '../constants/theme';
-import { getGroupColor } from '../utils/helpers';
+import { getGroupColor, getDefaultGroupThemeFromName } from '../utils/helpers';
 import { NavBar, Field, Toggle } from '../components/ui';
 import { useGroups, useCreateEvent, useAllGroupMemberColors } from '../hooks/api';
 import { uid } from '../utils/api-helpers';
@@ -110,7 +110,7 @@ export default function CreateEventScreen() {
         <Field label="Group" required>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
             {groups.map(g => {
-              const userColorHex = groupColors[g.id] || '#EC4899';
+              const userColorHex = groupColors[g.id] || getDefaultGroupThemeFromName(g.name);
               const p = getGroupColor(userColorHex);
               const sel = form.groupId === g.id;
               return (

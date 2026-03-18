@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, Pressable, StyleSheet } from 'react-native';
 import { Colors, Fonts, Radius, Shadows } from '../constants/theme';
-import { getGroupColor, fmtTime, fmtMonthShort, dDiff, isToday as checkToday } from '../utils/helpers';
+import { getGroupColor, getDefaultGroupThemeFromName, fmtTime, fmtMonthShort, dDiff, isToday as checkToday } from '../utils/helpers';
 import type { EventDetailed, Group } from '@boltup/client';
 import { AvatarStack } from './ui';
 
@@ -17,7 +17,7 @@ interface EventRowProps {
 }
 
 export function EventRow({ ev, group, groupColorHex, onPress, onGroupPress, isLast, showGroup = true, meId }: EventRowProps) {
-  const p      = getGroupColor(groupColorHex || '#EC4899');
+  const p      = getGroupColor(groupColorHex || (group ? getDefaultGroupThemeFromName(group.name) : '#EC4899'));
   const evStart = typeof ev.start === 'string' ? new Date(ev.start) : ev.start;
   const diff   = dDiff(evStart);
   const isPast = evStart.getTime() < Date.now();

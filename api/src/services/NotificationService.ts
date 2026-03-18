@@ -54,6 +54,92 @@ export class NotificationService {
   }
 
   /**
+   * Get unread count for a user
+   */
+  public async getUnreadCount(userId: string): Promise<number> {
+    return await prisma.notification.count({
+      where: {
+        userId,
+        read: false,
+      },
+    });
+  }
+
+  /**
+   * Mark all notifications as read for a user
+   */
+  public async markAllAsRead(userId: string): Promise<void> {
+    await prisma.notification.updateMany({
+      where: {
+        userId,
+        read: false,
+      },
+      data: {
+        read: true,
+      },
+    });
+  }
+
+  /**
+   * Delete a notification
+   */
+  public async delete(id: string): Promise<void> {
+    await prisma.notification.delete({
+      where: { id },
+    });
+  }
+
+  /**
+   * Create notification for a user
+   */
+  public async createForUser(
+    userId: string,
+    title: string,
+    body: string,
+    options?: {
+      type?: string;
+      icon?: string;
+      groupId?: string;
+      eventId?: string;
+      dest?: 'group' | 'event';
+    }
+  ): Promise<Notification> {
+    return this.create({
+      id: `notif_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      userId,
+      title,
+      body,
+      type: options?.type || 'general',
+      icon: options?.icon || '🔔',
+      groupId: options?.groupId,
+      eventId: options?.eventId,
+      dest: options?.dest,
+      navigable: !!(options?.groupId || options?.eventId),
+    });
+  }
+
+  /**
+   * Create notification for multiple users
+   */
+  public async createForUsers(
+    userIds: string[],
+    title: string,
+    body: string,
+    options?: {
+      type?: string;
+      icon?: string;
+      groupId?: string;
+      eventId?: string;
+      dest?: 'group' | 'event';
+    }
+  ): Promise<Notification[]> {
+    const notifications = await Promise.all(
+      userIds.map(userId => this.createForUser(userId, title, body, options))
+    );
+    return notifications;
+  }
+
+  /**
    * Map Prisma notification to Notification model
    */
   private mapNotification(n: any): Notification {

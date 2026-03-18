@@ -2,12 +2,14 @@ import React, { useState, useMemo } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Modal, Image, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Colors, Fonts, Radius, Shadows, GroupPalettes } from '../../constants/theme';
-import { getGroupColor } from '../../utils/helpers';
+import { Colors, Fonts, Radius, Shadows } from '../../constants/theme';
+import { getGroupColor, getDefaultGroupThemeFromName } from '../../utils/helpers';
 import { Avatar, AvatarStack, NavBar } from '../../components/ui';
 import { ListView } from '../../components/ListView';
 import { useGroup, useEvents, useUsers, usePendingRequests, useHandleMembershipRequest, useGroupMemberColor, useUpdateGroupMemberColor } from '../../hooks/api';
 import { MembershipRequestAction } from '@boltup/client';
+import ColorPicker, { Panel1, HueSlider, OpacitySlider } from 'reanimated-color-picker';
+import { runOnJS } from 'react-native-reanimated';
 
 const ME_ID = 'u1';
 
@@ -38,6 +40,7 @@ export default function GroupDetailScreen() {
   const [showLeave,   setShowLeave]   = useState(false);
   const [newMember,   setNewMember]   = useState('');
   const [showColorPicker, setShowColorPicker] = useState(false);
+  const [draftHex, setDraftHex] = useState<string | null>(null);
 
   const usersMap = useMemo(() => {
     const map: Record<string, any> = {};
@@ -53,7 +56,7 @@ export default function GroupDetailScreen() {
     return null;
   }
 
-  const userColorHex = memberColorData?.colorHex || '#EC4899';
+  const userColorHex = memberColorData?.colorHex || getDefaultGroupThemeFromName(group.name);
   const p = getGroupColor(userColorHex);
   const groupEvents = events.filter(e => e.groupId === group.id);
   const superAdminId = group.superAdminId;
@@ -154,7 +157,13 @@ export default function GroupDetailScreen() {
             <View style={{ flex: 1 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                 <Text style={styles.groupName}>{group.name}</Text>
-                <TouchableOpacity onPress={() => setShowColorPicker(true)} style={styles.colorBtn}>
+                <TouchableOpacity
+                  onPress={() => {
+                    setDraftHex(memberColorData?.colorHex || getDefaultGroupThemeFromName(group.name));
+                    setShowColorPicker(true);
+                  }}
+                  style={styles.colorBtn}
+                >
                   <View style={[styles.colorDot, { backgroundColor: p.dot }]} />
                 </TouchableOpacity>
               </View>
@@ -382,24 +391,40 @@ export default function GroupDetailScreen() {
       {showColorPicker && (
         <Modal visible transparent animationType="fade" onRequestClose={() => setShowColorPicker(false)}>
           <TouchableOpacity style={styles.menuOverlay} onPress={() => setShowColorPicker(false)} activeOpacity={1}>
-            <View style={styles.colorPickerCard}>
-              <Text style={styles.colorPickerTitle}>Choose your color for {group.name}</Text>
-              <Text style={styles.colorPickerDesc}>This color is just for you and helps you identify this group</Text>
-              <View style={styles.colorGrid}>
-                {GroupPalettes.map((palette, i) => (
-                  <TouchableOpacity
-                    key={i}
-                    onPress={() => selectColor(palette.dot)}
-                    style={[
-                      styles.colorOption,
-                      { backgroundColor: palette.dot },
-                      userColorHex === palette.dot && styles.colorOptionSelected,
-                    ]}
-                    activeOpacity={0.8}
-                  />
-                ))}
-              </View>
-            </View>
+            <TouchableOpacity style={styles.colorPickerCard} activeOpacity={1} onPress={() => {}}>
+              <Text style={styles.colorPickerTitle}>Choose your color for</Text>
+              <Text style={styles.colorPickerGroupName}>{group.name}</Text>
+              <ColorPicker
+                style={{ width: '100%' }}
+                value={draftHex || userColorHex}
+                onComplete={({ hex }) => {
+                  'worklet';
+                  runOnJS(setDraftHex)(hex);
+                }}
+              >
+                <Panel1 />
+                <HueSlider />
+                <OpacitySlider />
+              </ColorPicker>
+              <Text style={styles.hexReadout}>
+                {(draftHex || userColorHex).toUpperCase()}
+              </Text>
+              <TouchableOpacity
+                style={[
+                  styles.colorApplyBtn,
+                  { backgroundColor: Colors.accent, marginTop: 16, opacity: draftHex ? 1 : 0.6 },
+                ]}
+                onPress={() => {
+                  if (draftHex) {
+                    selectColor(draftHex);
+                  }
+                }}
+                activeOpacity={0.8}
+                disabled={!draftHex}
+              >
+                <Text style={styles.colorApplyBtnText}>Save color</Text>
+              </TouchableOpacity>
+            </TouchableOpacity>
           </TouchableOpacity>
         </Modal>
       )}
@@ -460,9 +485,17 @@ const styles = StyleSheet.create({
   colorBtn:         { padding: 4, borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.bg },
   colorDot:         { width: 16, height: 16, borderRadius: 8 },
   colorPickerCard:  { backgroundColor: Colors.surface, borderRadius: 20, padding: 20, width: '100%', maxWidth: 320, ...Shadows.lg },
-  colorPickerTitle: { fontSize: 16, fontFamily: Fonts.extraBold, color: Colors.text, marginBottom: 6 },
-  colorPickerDesc:  { fontSize: 13, color: Colors.textSub, fontFamily: Fonts.regular, lineHeight: 18, marginBottom: 16 },
-  colorGrid:        { flexDirection: 'row', flexWrap: 'wrap', gap: 12, justifyContent: 'center' },
-  colorOption:      { width: 44, height: 44, borderRadius: 22, borderWidth: 2, borderColor: 'transparent' },
-  colorOptionSelected: { borderColor: Colors.text, transform: [{ scale: 1.15 }] },
+  colorPickerTitle: { fontSize: 14, fontFamily: Fonts.medium, color: Colors.textSub, marginBottom: 4 },
+  colorPickerGroupName: { fontSize: 18, fontFamily: Fonts.extraBold, color: Colors.text, marginBottom: 8 },
+  colorPickerDesc:  { fontSize: 13, color: Colors.textSub, fontFamily: Fonts.regular, lineHeight: 18, marginBottom: 12 },
+  colorPreviewRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
+  colorOptionLarge: { width: 48, height: 48, borderRadius: 24 },
+  colorHexInput:    { flex: 1, padding: 10, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.bg, fontSize: 14, color: Colors.text, fontFamily: Fonts.regular },
+  colorPickerHueLabel: { fontSize: 12, fontFamily: Fonts.semiBold, color: Colors.textMuted, marginBottom: 8 },
+  colorGrid:        { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'center', marginBottom: 16 },
+  colorOption:      { width: 36, height: 36, borderRadius: 18, borderWidth: 2, borderColor: 'transparent' },
+  colorOptionSelected: { borderColor: Colors.text, transform: [{ scale: 1.1 }] },
+  colorApplyBtn:    { paddingVertical: 12, borderRadius: Radius.lg, alignItems: 'center' },
+  colorApplyBtnText: { fontSize: 15, fontFamily: Fonts.semiBold, color: '#fff' },
+  hexReadout:       { fontSize: 16, fontFamily: Fonts.semiBold, color: Colors.text, textAlign: 'center', marginTop: 12 },
 });

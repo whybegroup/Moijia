@@ -1,7 +1,9 @@
 import { PrismaClient } from '@prisma/client';
 import { Group, GroupInput, GroupUpdate, GroupRole, MembershipRequestAction, User } from '../models';
+import { NotificationService } from './NotificationService';
 
 const prisma = new PrismaClient();
+const notificationService = new NotificationService();
 
 export class GroupService {
   /**
@@ -206,6 +208,25 @@ export class GroupService {
           status: 'active',
         },
       });
+
+      // Create in-app notification for approved user
+      const group = await prisma.group.findUnique({
+        where: { id: groupId },
+      });
+
+      if (group) {
+        await notificationService.createForUser(
+          userId,
+          'Request Approved',
+          `You've been approved to join ${group.name}`,
+          {
+            type: 'group_approval',
+            icon: '✓',
+            groupId: group.id,
+            dest: 'group',
+          }
+        ).catch(err => console.error('Failed to create approval notification:', err));
+      }
     } else if (requestAction === 'reject') {
       await prisma.groupMember.update({
         where: {

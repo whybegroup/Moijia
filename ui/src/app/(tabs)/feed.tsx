@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity,
   StyleSheet, Modal, TextInput, Platform,
@@ -19,26 +19,41 @@ if (Platform.OS === 'web') {
   require('./react-datepicker-overrides.css');
 }
 import { useRouter } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
 import { Colors, Fonts, Radius } from '../../constants/theme';
-import { getGroupColor } from '../../utils/helpers';
+import { getGroupColor, getDefaultGroupThemeFromName } from '../../utils/helpers';
 import { ListView } from '../../components/ListView';
 import { CalendarView } from '../../components/CalendarView';
 import { Pill } from '../../components/ui';
 import Svg, { Path } from 'react-native-svg';
-import { useEvents, useGroups, useNotifications, useUser, useAllGroupMemberColors } from '../../hooks/api';
+import { useEvents, useGroups, useNotifications, useUser, useAllGroupMemberColors, useUpdateNotification, useMarkAllNotificationsRead } from '../../hooks/api';
+import { queryKeys } from '../../config/queryClient';
 
 const ME_ID = 'u1';
 
 export default function FeedScreen() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   
   const { data: events = [], isLoading: eventsLoading } = useEvents();
   const { data: groups = [], isLoading: groupsLoading } = useGroups();
   const { data: notifs = [], isLoading: notifsLoading } = useNotifications(ME_ID);
   const { data: me = null, isLoading: meLoading } = useUser(ME_ID);
   const { data: groupColors = {}, isLoading: colorsLoading } = useAllGroupMemberColors(ME_ID);
+  const updateNotification = useUpdateNotification();
+  const markAllAsRead = useMarkAllNotificationsRead();
   
   const loading = eventsLoading || groupsLoading || notifsLoading || meLoading || colorsLoading;
+  
+  // Manual polling for notifications every 5 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      console.log('[Feed] Invalidating notifications at', new Date().toLocaleTimeString());
+      queryClient.invalidateQueries({ queryKey: queryKeys.notifications.user(ME_ID) });
+    }, 5000);
+    
+    return () => clearInterval(interval);
+  }, [queryClient]);
   
   // Filter state
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
@@ -246,7 +261,7 @@ export default function FeedScreen() {
             onPress={() => setSelectedGroupIds([])}
           />
           {groups.map(g => {
-            const userColorHex = groupColors[g.id] || '#EC4899';
+            const userColorHex = groupColors[g.id] || getDefaultGroupThemeFromName(g.name);
             const p = getGroupColor(userColorHex);
             const isSelected = selectedGroupIds.includes(g.id);
             return (
@@ -626,8 +641,7 @@ export default function FeedScreen() {
               <Text style={styles.notifTitle}>Notifications</Text>
               {unread > 0 && (
                 <TouchableOpacity onPress={() => {
-                  // TODO: Add bulk mark as read API endpoint
-                  console.log('Mark all as read');
+                  markAllAsRead.mutate(ME_ID);
                 }}>
                   <Text style={styles.notifMarkAll}>Mark all read</Text>
                 </TouchableOpacity>
@@ -636,13 +650,18 @@ export default function FeedScreen() {
             <ScrollView style={{ maxHeight: 340 }} showsVerticalScrollIndicator={false}>
               {notifs.map((n, i) => {
                 const group = groups.find(g => g.id === n.groupId);
-                const userColorHex = group ? (groupColors[group.id] || '#EC4899') : '#EC4899';
+                const userColorHex = group ? (groupColors[group.id] || getDefaultGroupThemeFromName(group.name)) : '#EC4899';
                 const p = getGroupColor(userColorHex);
                 return (
                   <TouchableOpacity
                     key={n.id}
                     onPress={() => {
-                      // TODO: Mark notification as read
+                      // Mark notification as read
+                      if (!n.read) {
+                        updateNotification.mutate({ id: n.id, read: true });
+                      }
+                      
+                      // Navigate if applicable
                       if (!n.navigable) return;
                       setShowNotifs(false);
                       if (n.dest === 'event' && n.eventId) router.push(`/event/${n.eventId}`);

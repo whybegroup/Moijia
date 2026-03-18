@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Fonts, Radius } from '../../constants/theme';
-import { getGroupColor } from '../../utils/helpers';
+import { getGroupColor, getDefaultGroupThemeFromName } from '../../utils/helpers';
 import { useGroups, useAllGroupMemberColors } from '../../hooks/api';
 
 const ME_ID = 'u1';
@@ -60,7 +60,7 @@ export default function ExploreScreen() {
         <Text style={styles.sectionLabel}>{query ? `Results for "${query}"` : 'Public Groups'}</Text>
         <View style={styles.card}>
           {results.map((g, i) => {
-            const userColorHex = groupColors[g.id] || '#EC4899';
+            const userColorHex = groupColors[g.id] || getDefaultGroupThemeFromName(g.name);
             const p = getGroupColor(userColorHex);
             const isJoined = joined.includes(g.id);
             return (

@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
 import { Colors, Fonts, Radius } from '../constants/theme';
-import { getGroupColor } from '../utils/helpers';
+import { getGroupColor, getDefaultGroupThemeFromName } from '../utils/helpers';
 import { isSameDay, isToday, fmtTime } from '../utils/helpers';
 import type { EventDetailed, Group } from '@boltup/client';
 
@@ -124,7 +124,7 @@ export function CalendarView({ events, groups, groupColors = {}, onSelectEvent }
                     <View style={styles.dotWrap}>
                       {dayEvents.slice(0, 2).map(ev => {
                         const group = groupsMap[ev.groupId];
-                        const userColorHex = groupColors[ev.groupId] || '#EC4899';
+                        const userColorHex = groupColors[ev.groupId] || (group ? getDefaultGroupThemeFromName(group.name) : '#EC4899');
                         const p = getGroupColor(userColorHex);
                         return (
                           <View
@@ -168,7 +168,7 @@ export function CalendarView({ events, groups, groupColors = {}, onSelectEvent }
               })
               .map(ev => {
                 const group = groupsMap[ev.groupId];
-                const userColorHex = groupColors[ev.groupId] || '#EC4899';
+                const userColorHex = groupColors[ev.groupId] || (group ? getDefaultGroupThemeFromName(group.name) : '#EC4899');
                 const p = getGroupColor(userColorHex);
                 const startDate = new Date(ev.start);
                 return (

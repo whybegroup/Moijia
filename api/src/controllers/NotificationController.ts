@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Path,
   Post,
@@ -62,5 +63,35 @@ export class NotificationController extends Controller {
     @Body() body: { read: boolean }
   ): Promise<Notification> {
     return this.notificationService.updateReadStatus(id, body.read);
+  }
+
+  /**
+   * Get unread notification count
+   * @summary Gets count of unread notifications for a user
+   */
+  @Get('unread-count/{userId}')
+  public async getUnreadCount(@Path() userId: string): Promise<{ count: number }> {
+    const count = await this.notificationService.getUnreadCount(userId);
+    return { count };
+  }
+
+  /**
+   * Mark all as read
+   * @summary Marks all notifications as read for a user
+   */
+  @Put('mark-all-read/{userId}')
+  public async markAllAsRead(@Path() userId: string): Promise<{ success: boolean }> {
+    await this.notificationService.markAllAsRead(userId);
+    return { success: true };
+  }
+
+  /**
+   * Delete notification
+   * @summary Deletes a notification
+   */
+  @Delete('{id}')
+  public async deleteNotification(@Path() id: string): Promise<{ success: boolean }> {
+    await this.notificationService.delete(id);
+    return { success: true };
   }
 }

@@ -882,6 +882,84 @@ paths:
               required:
                 - read
               type: object
+    delete:
+      operationId: DeleteNotification
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                properties:
+                  success:
+                    type: boolean
+                required:
+                  - success
+                type: object
+      description: Delete notification
+      summary: Deletes a notification
+      tags:
+        - Notifications
+      security: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+  /notifications/unread-count/{userId}:
+    get:
+      operationId: GetUnreadCount
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                properties:
+                  count:
+                    type: number
+                    format: double
+                required:
+                  - count
+                type: object
+      description: Get unread notification count
+      summary: Gets count of unread notifications for a user
+      tags:
+        - Notifications
+      security: []
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema:
+            type: string
+  /notifications/mark-all-read/{userId}:
+    put:
+      operationId: MarkAllAsRead
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                properties:
+                  success:
+                    type: boolean
+                required:
+                  - success
+                type: object
+      description: Mark all as read
+      summary: Marks all notifications as read for a user
+      tags:
+        - Notifications
+      security: []
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema:
+            type: string
   /groups:
     get:
       operationId: GetGroups

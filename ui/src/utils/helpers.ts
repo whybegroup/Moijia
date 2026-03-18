@@ -1,4 +1,3 @@
-import { GroupPalettes } from '../constants/theme';
 import type { Group } from '@boltup/client';
 
 // ── Date formatting ───────────────────────────────────────────────────────────
@@ -54,6 +53,35 @@ export function timeAgo(d: Date): string {
   if (m < 60)   return `${m}m`;
   if (m < 1440) return `${Math.floor(m / 60)}h`;
   return `${Math.floor(m / 1440)}d`;
+}
+
+// ── Color helpers ────────────────────────────────────────────────────────────
+/** Convert HSL to hex. h 0–360, s and l 0–100. */
+export function hslToHex(h: number, s: number, l: number): string {
+  s /= 100;
+  l /= 100;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n: number) => {
+    const k = (n + h / 30) % 12;
+    const x = a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+    return Math.round((l - x) * 255);
+  };
+  const r = f(0), g = f(8), b = f(4);
+  return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+}
+
+/** Parse input to #RRGGBB or null if invalid. */
+export function normalizeHex(input: string): string | null {
+  const m = /^#?([a-f\d]{6})$/i.exec((input || '').trim());
+  return m ? '#' + m[1].toLowerCase() : null;
+}
+
+// ── Group theme from name (when user-specific color not set) ──────────────────
+/** Hash group name to a hue and return a stable hex color (any hue, fixed saturation/lightness). */
+export function getDefaultGroupThemeFromName(groupName: string): string {
+  const hash = [...(groupName || '')].reduce((acc, c) => acc + c.charCodeAt(0) * 31, 0);
+  const hue = Math.abs(hash) % 360;
+  return hslToHex(hue, 65, 55);
 }
 
 // ── Group helpers ─────────────────────────────────────────────────────────────
