@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, TouchableOpacity, Pressable, StyleSheet } from 'react-native';
 import { Colors, Fonts, Radius, Shadows } from '../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName, fmtTime, fmtMonthShort, dDiff, isToday as checkToday } from '../utils/helpers';
-import type { EventDetailed, GroupScoped } from '@boltup/client';
+import type { EventDetailed, GroupScoped, User } from '@boltup/client';
 import { AvatarStack } from './ui';
 
 interface EventRowProps {
@@ -14,9 +14,10 @@ interface EventRowProps {
   isLast?: boolean;
   showGroup?: boolean;
   meId?: string;
+  users?: User[];
 }
 
-export function EventRow({ ev, group, groupColorHex, onPress, onGroupPress, isLast, showGroup = true, meId }: EventRowProps) {
+export function EventRow({ ev, group, groupColorHex, onPress, onGroupPress, isLast, showGroup = true, meId, users = [] }: EventRowProps) {
   const p      = getGroupColor(groupColorHex || (group ? getDefaultGroupThemeFromName(group.name) : '#EC4899'));
   const evStart = typeof ev.start === 'string' ? new Date(ev.start) : ev.start;
   const diff   = dDiff(evStart);
@@ -29,6 +30,23 @@ export function EventRow({ ev, group, groupColorHex, onPress, onGroupPress, isLa
   const needsMore = (ev.minAttendees || 0) > 0 && going.length < (ev.minAttendees || 0) && !isPast;
   const hoursLeft = Math.max(0, Math.floor((evStart.getTime() - Date.now()) / 3600000));
   const showHoursLeft = !isPast && hoursLeft <= 6 && hoursLeft > 0;
+  const usersWithMemos = new Set(rsvps.filter(r => r.memo && r.memo.trim()).map(r => r.userId));
+  
+  const usersMap: Record<string, User> = {};
+  users.forEach(u => {
+    usersMap[u.id] = u;
+  });
+  
+  const getUserSafe = (userId: string): User => {
+    return usersMap[userId] || { 
+      id: userId, 
+      displayName: userId, 
+      email: '', 
+      profilePhoto: null, 
+      createdAt: new Date(), 
+      updatedAt: new Date() 
+    };
+  };
 
   const metaParts = [
     fmtTime(evStart),
@@ -73,12 +91,17 @@ export function EventRow({ ev, group, groupColorHex, onPress, onGroupPress, isLa
         ) : null}
         {(ev.minAttendees || 0) > 0 && !isPast && (
           <Text style={styles.minAttendees} numberOfLines={1}>
-            👥 Min {ev.minAttendees} needed{ev.deadline ? ` · RSVP by ${fmtTime(typeof ev.deadline === 'string' ? new Date(ev.deadline) : ev.deadline)}` : ''}
+            👥 Min {ev.minAttendees} needed
           </Text>
         )}
         {going.length > 0 && (
           <View style={styles.avatarRow}>
-            <AvatarStack names={going.map(r => r.userId)} size={20} max={10} />
+            <AvatarStack 
+              names={going.map(r => getUserSafe(r.userId).displayName)} 
+              size={20} 
+              max={10} 
+              dotsForNames={Array.from(usersWithMemos).map(userId => getUserSafe(userId).displayName)}
+            />
           </View>
         )}
         {needsMore && (

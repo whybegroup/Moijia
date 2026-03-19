@@ -35,6 +35,7 @@ export namespace RSVP {
         GOING = 'going',
         MAYBE = 'maybe',
         NOT_GOING = 'notGoing',
+        WAITLIST = 'waitlist',
     }
 }
 

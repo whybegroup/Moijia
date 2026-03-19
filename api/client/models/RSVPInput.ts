@@ -15,6 +15,7 @@ export namespace RSVPInput {
         GOING = 'going',
         MAYBE = 'maybe',
         NOT_GOING = 'notGoing',
+        WAITLIST = 'waitlist',
     }
 }
 

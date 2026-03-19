@@ -90,11 +90,12 @@ model Event {
   description  String?
   start        DateTime
   end          DateTime
-  isAllDay     Boolean?  @default(false)
-  location     String?
-  minAttendees Int?
-  deadline     DateTime?
-  allowMaybe   Boolean   @default(true)
+  isAllDay       Boolean?  @default(false)
+  location       String?
+  minAttendees   Int?
+  maxAttendees   Int?
+  enableWaitlist Boolean?  @default(false)
+  allowMaybe     Boolean   @default(true)
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
@@ -129,7 +130,7 @@ model RSVP {
   id        Int      @id @default(autoincrement())
   eventId   String
   userId    String
-  status    String   @default("notGoing") // going, maybe, notGoing
+  status    String   @default("notGoing") // going, maybe, notGoing, waitlist
   memo      String   @default("")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

@@ -15,7 +15,8 @@ export type EventUpdate = {
     isAllDay?: boolean;
     location?: string;
     minAttendees?: number;
-    deadline?: string;
+    maxAttendees?: number;
+    enableWaitlist?: boolean;
     allowMaybe?: boolean;
     updatedBy: string;
 };

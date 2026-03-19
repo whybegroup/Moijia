@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity,
-  StyleSheet, Modal, TextInput, Platform,
+  StyleSheet, Modal, TextInput, Platform, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -124,6 +124,7 @@ export default function FeedScreen() {
   const [showPast,    setShowPast]    = useState(false);
   const [showNotifs, setShowNotifs] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
+  const [showNoGroupAlert, setShowNoGroupAlert] = useState(false);
 
   const unread = notifs.filter(n => !n.read).length;
 
@@ -226,7 +227,13 @@ export default function FeedScreen() {
 
           {/* Create */}
           <TouchableOpacity
-            onPress={() => router.push('/create-event')}
+            onPress={() => {
+              if (groups.length === 0) {
+                setShowNoGroupAlert(true);
+                return;
+              }
+              router.push('/create-event');
+            }}
             style={styles.createBtn}
           >
             <Text style={styles.createBtnText}>+ Event</Text>
@@ -693,6 +700,27 @@ export default function FeedScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* No Group Alert */}
+      <Modal
+        visible={showNoGroupAlert}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowNoGroupAlert(false)}
+      >
+        <View style={styles.alertOverlay}>
+          <View style={styles.alertBox}>
+            <Text style={styles.alertTitle}>No Groups</Text>
+            <Text style={styles.alertMessage}>You need to join or create a group before creating an event.</Text>
+            <TouchableOpacity 
+              onPress={() => setShowNoGroupAlert(false)}
+              style={styles.alertButton}
+            >
+              <Text style={styles.alertButtonText}>OK</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -983,4 +1011,10 @@ const styles = StyleSheet.create({
   emptyDesc:   { fontSize: 14, fontFamily: Fonts.regular, color: Colors.textMuted, textAlign: 'center', marginBottom: 24, lineHeight: 20 },
   emptyBtn:    { paddingHorizontal: 24, paddingVertical: 12, borderRadius: Radius.lg, backgroundColor: Colors.accent },
   emptyBtnText:{ fontSize: 15, fontFamily: Fonts.semiBold, color: Colors.accentFg },
+  alertOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center', padding: 24 },
+  alertBox: { backgroundColor: Colors.surface, borderRadius: Radius['2xl'], padding: 24, width: '100%', maxWidth: 320, alignItems: 'center' },
+  alertTitle: { fontSize: 18, fontFamily: Fonts.bold, color: Colors.text, marginBottom: 12 },
+  alertMessage: { fontSize: 14, fontFamily: Fonts.regular, color: Colors.textSub, textAlign: 'center', marginBottom: 20, lineHeight: 20 },
+  alertButton: { paddingHorizontal: 32, paddingVertical: 10, borderRadius: Radius.lg, backgroundColor: Colors.accent, width: '100%' },
+  alertButtonText: { fontSize: 15, fontFamily: Fonts.semiBold, color: Colors.accentFg, textAlign: 'center' },
 });
