@@ -539,12 +539,23 @@ export class GroupService {
       throw new Error('Cannot remove superadmin from group');
     }
     
-    // Delete member's RSVPs for all events in this group
+    // Get member's RSVPs to check which were "going"
     const groupEvents = await prisma.event.findMany({
       where: { groupId },
       select: { id: true },
     });
     const eventIds = groupEvents.map(e => e.id);
+    
+    const memberRsvps = await prisma.rSVP.findMany({
+      where: {
+        userId: memberId,
+        eventId: { in: eventIds },
+      },
+    });
+    
+    const goingEventIds = memberRsvps
+      .filter(r => r.status === 'going')
+      .map(r => r.eventId);
     
     await prisma.$transaction([
       // Delete RSVPs for this user in all group events
@@ -559,6 +570,13 @@ export class GroupService {
         where: { groupId, userId: memberId },
       }),
     ]);
+    
+    // Promote waitlisted users for events where this member was "going"
+    const { EventService } = await import('./EventService');
+    const eventService = new EventService();
+    for (const eventId of goingEventIds) {
+      await (eventService as any).promoteFromWaitlist(eventId);
+    }
   }
 
   /**
@@ -635,12 +653,23 @@ export class GroupService {
       throw new Error('Superadmin cannot leave the group.');
     }
     
-    // Delete user's RSVPs for all events in this group
+    // Get user's RSVPs to check which were "going"
     const groupEvents = await prisma.event.findMany({
       where: { groupId },
       select: { id: true },
     });
     const eventIds = groupEvents.map(e => e.id);
+    
+    const userRsvps = await prisma.rSVP.findMany({
+      where: {
+        userId,
+        eventId: { in: eventIds },
+      },
+    });
+    
+    const goingEventIds = userRsvps
+      .filter(r => r.status === 'going')
+      .map(r => r.eventId);
     
     await prisma.$transaction([
       // Delete RSVPs for this user in all group events
@@ -658,6 +687,13 @@ export class GroupService {
         },
       }),
     ]);
+    
+    // Promote waitlisted users for events where this user was "going"
+    const { EventService } = await import('./EventService');
+    const eventService = new EventService();
+    for (const eventId of goingEventIds) {
+      await (eventService as any).promoteFromWaitlist(eventId);
+    }
   }
 
   /**
@@ -701,12 +737,23 @@ export class GroupService {
         ).catch(err => console.error('Failed to create approval notification:', err));
       }
     } else if (requestAction === 'reject') {
-      // Delete user's RSVPs for all events in this group
+      // Get user's RSVPs to check which were "going"
       const groupEvents = await prisma.event.findMany({
         where: { groupId },
         select: { id: true },
       });
       const eventIds = groupEvents.map(e => e.id);
+      
+      const userRsvps = await prisma.rSVP.findMany({
+        where: {
+          userId,
+          eventId: { in: eventIds },
+        },
+      });
+      
+      const goingEventIds = userRsvps
+        .filter(r => r.status === 'going')
+        .map(r => r.eventId);
       
       await prisma.$transaction([
         // Delete RSVPs for this user in all group events
@@ -724,6 +771,13 @@ export class GroupService {
           },
         }),
       ]);
+      
+      // Promote waitlisted users for events where this user was "going"
+      const { EventService } = await import('./EventService');
+      const eventService = new EventService();
+      for (const eventId of goingEventIds) {
+        await (eventService as any).promoteFromWaitlist(eventId);
+      }
     }
   }
 
