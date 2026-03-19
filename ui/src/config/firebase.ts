@@ -5,6 +5,8 @@ import {
   GoogleAuthProvider,
   signInWithCredential,
   signInWithPopup,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
   signOut as firebaseSignOut,
   onAuthStateChanged,
   browserLocalPersistence,
@@ -111,6 +113,16 @@ export const signInWithGoogle = async (idToken?: string, accessToken?: string) =
   }
 };
 
+
+export const signInWithEmail = async (email: string, password: string) => {
+  const result = await signInWithEmailAndPassword(auth, email.trim(), password);
+  return result.user;
+};
+
+export const signUpWithEmail = async (email: string, password: string) => {
+  const result = await createUserWithEmailAndPassword(auth, email.trim(), password);
+  return result.user;
+};
 
 export const signOut = async () => {
   try {

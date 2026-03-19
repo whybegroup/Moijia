@@ -1,90 +1,194 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Platform, TextInput, ScrollView, KeyboardAvoidingView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
-import { signInWithGoogle } from '../config/firebase';
-import { useAuth } from '../contexts/AuthContext';
+import { signInWithGoogle, signInWithEmail, signUpWithEmail } from '../config/firebase';
 import { Colors, Fonts, Radius, Shadows } from '../constants/theme';
 
 WebBrowser.maybeCompleteAuthSession();
 
-export default function LoginScreen() {
-  const router = useRouter();
-  const { user } = useAuth();
-  const [loading, setLoading] = useState(false);
+type AuthMode = 'signin' | 'signup';
 
-  const handleSignInPress = async () => {
+function authErrorMessage(code: string): string {
+  const map: Record<string, string> = {
+    'auth/invalid-email': 'Please enter a valid email address.',
+    'auth/user-disabled': 'This account has been disabled.',
+    'auth/user-not-found': 'No account found with this email.',
+    'auth/wrong-password': 'Incorrect password.',
+    'auth/invalid-credential': 'Invalid email or password.',
+    'auth/email-already-in-use': 'An account with this email already exists. Try signing in instead.',
+    'auth/weak-password': 'Password should be at least 6 characters.',
+    'auth/operation-not-allowed': 'Email/password sign-in is not enabled. Contact support.',
+    'auth/popup-closed-by-user': 'Sign-in was cancelled',
+    'auth/popup-blocked': 'Pop-up was blocked. Please allow pop-ups for this site.',
+  };
+  return map[code] || 'Something went wrong. Please try again.';
+}
+
+export default function LoginScreen() {
+  const [mode, setMode] = useState<AuthMode>('signin');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const showError = (msg: string) => {
+    setError(msg);
+    if (Platform.OS === 'web') window.alert(msg);
+    else Alert.alert('Error', msg);
+  };
+
+  const handleEmailAuth = async () => {
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail || !password) {
+      showError('Please enter email and password');
+      return;
+    }
+    if (mode === 'signup') {
+      if (password.length < 6) {
+        showError('Password must be at least 6 characters');
+        return;
+      }
+      if (password !== confirmPassword) {
+        showError('Passwords do not match');
+        return;
+      }
+    }
+    setError('');
+    setLoading(true);
     try {
-      setLoading(true);
-      console.log('Initiating Firebase Google sign in...');
-      
-      await signInWithGoogle();
-      
-      console.log('Sign in successful');
-    } catch (error: any) {
-      console.error('Error initiating sign in:', error);
-      
-      let errorMessage = error.message || 'Failed to sign in';
-      
-      if (error.code === 'auth/popup-closed-by-user') {
-        errorMessage = 'Sign-in was cancelled';
-      } else if (error.code === 'auth/popup-blocked') {
-        errorMessage = 'Pop-up was blocked by your browser. Please allow pop-ups for this site.';
-      }
-      
-      if (Platform.OS === 'web') {
-        window.alert(errorMessage);
+      if (mode === 'signup') {
+        await signUpWithEmail(trimmedEmail, password);
       } else {
-        Alert.alert('Sign In Error', errorMessage);
+        await signInWithEmail(trimmedEmail, password);
       }
+    } catch (err: any) {
+      showError(authErrorMessage(err?.code) || err?.message || 'Failed to sign in');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      await signInWithGoogle();
+    } catch (err: any) {
+      showError(authErrorMessage(err?.code) || err?.message || 'Failed to sign in');
+    } finally {
       setLoading(false);
     }
   };
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.content}>
-        <View style={styles.header}>
-          <View style={styles.logoContainer}>
-            <Text style={styles.logo}>⚡</Text>
-          </View>
-          <Text style={styles.appName}>BoltUp</Text>
-          <Text style={styles.tagline}>Connect, plan, and hang out with your crew</Text>
-          
-          {loading && (
-            <View style={{ marginTop: 16, padding: 12, backgroundColor: Colors.surface, borderRadius: 8 }}>
-              <Text style={{ fontSize: 12, color: Colors.textMuted, textAlign: 'center' }}>
-                Signing in...
-              </Text>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 0}
+      >
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.header}>
+            <View style={styles.logoContainer}>
+              <Text style={styles.logo}>⚡</Text>
             </View>
-          )}
-        </View>
+            <Text style={styles.appName}>BoltUp</Text>
+            <Text style={styles.tagline}>Connect, plan, and hang out with your crew</Text>
+          </View>
 
-        <View style={styles.buttonContainer}>
-          <TouchableOpacity
-            style={[styles.googleButton, loading && styles.buttonDisabled]}
-            onPress={handleSignInPress}
-            disabled={loading}
-            activeOpacity={0.8}
-          >
-            {loading ? (
-              <ActivityIndicator color={Colors.text} />
-            ) : (
-              <>
-                <View style={styles.googleIcon}>
-                  <Text style={styles.googleIconText}>G</Text>
-                </View>
-                <Text style={styles.googleButtonText}>Continue with Google</Text>
-              </>
+          <View style={styles.form}>
+            <View style={styles.toggleRow}>
+              <TouchableOpacity
+                onPress={() => { setMode('signin'); setError(''); }}
+                style={[styles.toggleBtn, mode === 'signin' && styles.toggleBtnActive]}
+              >
+                <Text style={[styles.toggleText, mode === 'signin' && styles.toggleTextActive]}>Sign in</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => { setMode('signup'); setError(''); }}
+                style={[styles.toggleBtn, mode === 'signup' && styles.toggleBtnActive]}
+              >
+                <Text style={[styles.toggleText, mode === 'signup' && styles.toggleTextActive]}>Sign up</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TextInput
+              placeholder="Email"
+              placeholderTextColor={Colors.textMuted}
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="email-address"
+              style={styles.input}
+              editable={!loading}
+            />
+            <TextInput
+              placeholder="Password"
+              placeholderTextColor={Colors.textMuted}
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry
+              style={styles.input}
+              editable={!loading}
+            />
+            {mode === 'signup' && (
+              <TextInput
+                placeholder="Confirm password"
+                placeholderTextColor={Colors.textMuted}
+                value={confirmPassword}
+                onChangeText={setConfirmPassword}
+                secureTextEntry
+                style={styles.input}
+                editable={!loading}
+              />
             )}
-          </TouchableOpacity>
+
+            {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
+            <TouchableOpacity
+              style={[styles.emailButton, loading && styles.buttonDisabled]}
+              onPress={handleEmailAuth}
+              disabled={loading}
+              activeOpacity={0.8}
+            >
+              {loading ? (
+                <ActivityIndicator color={Colors.accentFg} />
+              ) : (
+                <Text style={styles.emailButtonText}>{mode === 'signup' ? 'Create account' : 'Sign in'}</Text>
+              )}
+            </TouchableOpacity>
+
+            <View style={styles.divider}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>or</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            <TouchableOpacity
+              style={[styles.googleButton, loading && styles.buttonDisabled]}
+              onPress={handleGoogleSignIn}
+              disabled={loading}
+              activeOpacity={0.8}
+            >
+              <View style={styles.googleIcon}>
+                <Text style={styles.googleIconText}>G</Text>
+              </View>
+              <Text style={styles.googleButtonText}>Continue with Google</Text>
+            </TouchableOpacity>
+          </View>
 
           <Text style={styles.disclaimer}>
             By continuing, you agree to our Terms of Service and Privacy Policy
           </Text>
-        </View>
-      </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -94,16 +198,89 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.bg,
   },
-  content: {
-    flex: 1,
-    justifyContent: 'space-between',
+  scrollContent: {
+    flexGrow: 1,
     padding: 24,
-    paddingTop: 60,
+    paddingTop: 40,
     paddingBottom: 40,
   },
   header: {
     alignItems: 'center',
     gap: 16,
+    marginBottom: 32,
+  },
+  form: {
+    gap: 12,
+    marginBottom: 24,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  toggleBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+    alignItems: 'center',
+  },
+  toggleBtnActive: {
+    borderColor: Colors.text,
+    backgroundColor: Colors.text,
+  },
+  toggleText: {
+    fontSize: 14,
+    fontFamily: Fonts.semiBold,
+    color: Colors.textSub,
+  },
+  toggleTextActive: {
+    color: Colors.accentFg,
+  },
+  input: {
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+    fontSize: 16,
+    color: Colors.text,
+    fontFamily: Fonts.regular,
+    ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' as any, outlineWidth: 0 } as any) : {}),
+  },
+  errorText: {
+    fontSize: 13,
+    fontFamily: Fonts.regular,
+    color: Colors.notGoing,
+  },
+  emailButton: {
+    paddingVertical: 16,
+    borderRadius: Radius.lg,
+    backgroundColor: Colors.accent,
+    alignItems: 'center',
+  },
+  emailButtonText: {
+    fontSize: 16,
+    fontFamily: Fonts.semiBold,
+    color: Colors.accentFg,
+  },
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: Colors.border,
+  },
+  dividerText: {
+    fontSize: 13,
+    fontFamily: Fonts.regular,
+    color: Colors.textMuted,
   },
   logoContainer: {
     width: 100,

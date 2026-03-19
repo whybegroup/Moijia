@@ -1,7 +1,37 @@
 import { createAvatar } from '@dicebear/core';
-import { bottts, icons } from '@dicebear/collection';
+import { initials, icons } from '@dicebear/collection';
+import { hslToHex, normalizeHex } from './helpers';
 
 const DEFAULT_SIZE = 256;
+
+/** DiceBear initials expects 6-char hex without # (e.g. "6366f1"). Normalize any color format. */
+function toDiceBearHex(color: string): string {
+  const s = (color || '').trim();
+  if (!s) return '6366f1';
+
+  // Already 6-char hex (no #)
+  if (/^[a-fA-F0-9]{6}$/.test(s)) return s.toLowerCase();
+
+  // Hex with # (6 or 3 char)
+  const hex6 = normalizeHex(s);
+  if (hex6) return hex6.slice(1).toLowerCase();
+  const hex3 = /^#?([a-f\d]{3})$/i.exec(s);
+  if (hex3) {
+    const [r, g, b] = hex3[1].split('').map((c) => parseInt(c + c, 16));
+    return [r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('').toLowerCase();
+  }
+
+  // hsl(h, s%, l%)
+  const hslMatch = /^hsl\((\d+),\s*([\d.]+)%,\s*([\d.]+)%\)$/.exec(s);
+  if (hslMatch) {
+    const h = parseInt(hslMatch[1], 10);
+    const sVal = parseFloat(hslMatch[2]);
+    const l = parseFloat(hslMatch[3]);
+    return hslToHex(h, sVal, l).slice(1).toLowerCase();
+  }
+
+  return '6366f1';
+}
 
 /** DiceBear icons style supports explicit icon selection. These can be used as seed. */
 export const ICON_OPTIONS = [
@@ -34,11 +64,15 @@ export function isIconOption(seed: string): seed is IconOption {
 /**
  * Generate bottts avatar SVG string (offline, no API calls).
  */
-export function generateBotttsSvg(seed: string, size = DEFAULT_SIZE): string {
-  const avatar = createAvatar(bottts, {
+export function generateInitialsSvg(seed: string, backgroundColor: string[], size = DEFAULT_SIZE): string {
+  const normalized = backgroundColor.filter(Boolean).map(toDiceBearHex);
+  const bg = normalized.length > 0 ? normalized : [toDiceBearHex('6366f1')];
+  const avatar = createAvatar(initials, {
     seed,
     size,
-    backgroundColor: ['transparent'],
+    backgroundColor: bg,
+    backgroundType: ['solid'],
+    randomizeIds: true,
   });
   return avatar.toString();
 }
@@ -52,7 +86,8 @@ export function generateIconsSvg(seed: string, size = DEFAULT_SIZE): string {
     seed,
     size,
     backgroundType: ['solid'],
+    randomizeIds: true,
     ...(isIconOption(seed) && { icon: [seed] }),
-  } as Parameters<typeof createAvatar>[1]);
+  });
   return avatar.toString();
 }

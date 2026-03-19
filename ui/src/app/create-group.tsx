@@ -12,7 +12,7 @@ import { NavBar, Toggle } from '../components/ui';
 import { useCreateGroup } from '../hooks/api/useGroups';
 import { useAuth } from '../contexts/AuthContext';
 import { GroupAvatar } from '../components/GroupAvatar';
-import { GroupAvatarPicker } from '../components/GroupAvatarPicker';
+import { AvatarPickerModal } from '../components/AvatarPickerModal';
 
 const DEFAULT_AVATAR_SEED = 'auto';
 
@@ -142,7 +142,8 @@ export default function CreateGroupScreen() {
         </View>
       </ScrollView>
 
-      <GroupAvatarPicker
+      <AvatarPickerModal
+        variant="group"
         visible={showAvatarPicker}
         onClose={() => setShowAvatarPicker(false)}
         seed={draftSeed}

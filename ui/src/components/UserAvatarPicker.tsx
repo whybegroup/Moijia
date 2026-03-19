@@ -1,96 +1,82 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, ScrollView } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ScrollView } from 'react-native';
 import { Colors, Fonts, Radius } from '../constants/theme';
-import { AvatarSeedPicker } from './AvatarSeedPicker';
+import { UserAvatar } from './UserAvatar';
+import { getGroupColor, getDefaultGroupThemeFromName, groupAvatarBorderRadius, avatarColor } from '../utils/helpers';
+import { IconsAvatar, InitialsAvatar } from './Avatar';
+import { ICON_OPTIONS, BOTTT_PRESETS } from '../utils/avatar';
+import ColorPicker, { ColorFormatsObject, HueSlider, OpacitySlider, Panel1 } from 'reanimated-color-picker';
 
-const DEFAULT_AVATAR_SEED = 'auto';
+const DEFAULT_COLOR_PICKER_HEX = '#6366f1';
+
+function toValidHex(s: string): string {
+  const trimmed = (s || '').trim();
+  if (/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/.test(trimmed)) return trimmed;
+  return DEFAULT_COLOR_PICKER_HEX;
+}
 
 interface UserAvatarPickerProps {
-  visible: boolean;
-  onClose: () => void;
-  seed: string;
-  onSeedChange: (text: string) => void;
-  thumbnail: string | null;
-  onThumbnailChange: (text: string | null) => void;
-  /** User's name for "Use initial" option. */
+  value: string;
+  onChangeBackgroundColor: (colors: ColorFormatsObject) => void;
+  /** When provided, shows URL input. Avatar uses thumbnail if valid URL, otherwise seed. */
+  thumbnail?: string | null;
+  onThumbnailChange?: (text: string | null) => void;
+  /** For user variant: when provided, shows "Use initial" option to clear to letter avatar. */
   userName?: string;
-  /** When provided, shows Save button that calls this with current values. Only updates backend when Save is pressed. */
-  onSave?: (avatarSeed: string, thumbnail: string | null) => void | Promise<void>;
-  isSaving?: boolean;
+  disabled?: boolean;
+  loading?: boolean;
+  inputStyle?: object;
+  buttonStyle?: object;
+  buttonTextStyle?: object;
 }
 
 export function UserAvatarPicker({
-  visible,
-  onClose,
-  seed,
-  onSeedChange,
+  value,
+  onChangeBackgroundColor,
   thumbnail,
   onThumbnailChange,
   userName,
-  onSave,
-  isSaving,
+  inputStyle,
 }: UserAvatarPickerProps) {
-  if (!visible) return null;
-
-  const handleSave = async () => {
-    if (!onSave) return;
-    try {
-      await onSave(seed.trim() || DEFAULT_AVATAR_SEED, thumbnail);
-      onClose();
-    } catch (e) {
-      console.error('Failed to save avatar', e);
-    }
-  };
+  const baseInputStyle = [{ padding: 10, paddingHorizontal: 12, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.bg, fontSize: 14, color: Colors.text, fontFamily: Fonts.regular, flex: 1 }, inputStyle];
+  const pickerValue = toValidHex(value);
 
   return (
-    <View style={[StyleSheet.absoluteFill, styles.overlay]} pointerEvents="box-none">
-      <TouchableOpacity style={StyleSheet.absoluteFill} onPress={onClose} activeOpacity={1} />
-      <View style={styles.card}>
-        <View style={styles.header}>
-          <Text style={styles.title}>Choose avatar</Text>
-          <TouchableOpacity onPress={onClose} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }} activeOpacity={0.7}>
-            <Text style={styles.closeBtn}>✕</Text>
-          </TouchableOpacity>
-        </View>
-        <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 400 }}>
-          <AvatarSeedPicker
-            variant="user"
-            defaultSeed={DEFAULT_AVATAR_SEED}
-            value={seed}
-            onChangeText={onSeedChange}
-            thumbnail={thumbnail}
-            onThumbnailChange={onThumbnailChange}
-            userName={userName}
-            inputStyle={styles.input}
+    <View>
+      {onThumbnailChange != null ? (
+        <View style={{ marginBottom: 12 }}>
+          <Text style={{ fontSize: 12, fontFamily: Fonts.semiBold, color: Colors.textMuted, marginBottom: 6 }}>Add from URL</Text>
+          <TextInput
+            value={thumbnail ?? ''}
+            onChangeText={(t) => onThumbnailChange(t.trim() || null)}
+            placeholder="https://example.com/image.jpg"
+            placeholderTextColor={Colors.textMuted}
+            style={[baseInputStyle, { flex: 1 }]}
+            autoCapitalize="none"
+            autoCorrect={false}
           />
-        </ScrollView>
-        {onSave ? (
-          <TouchableOpacity
-            onPress={handleSave}
-            disabled={isSaving}
-            style={[styles.saveBtn, isSaving && styles.saveBtnDisabled]}
-            activeOpacity={0.8}
-          >
-            {isSaving ? (
-              <ActivityIndicator size="small" color={Colors.textMuted} />
-            ) : (
-              <Text style={styles.saveBtnText}>Save</Text>
-            )}
-          </TouchableOpacity>
-        ) : null}
+          <Text style={{ fontSize: 11, color: Colors.textMuted, fontFamily: Fonts.regular, marginTop: 4 }}>
+            Use this image when a valid URL is provided; otherwise it uses the seed below.
+          </Text>
+        </View>
+      ) : null}
+      <View style={{ marginBottom: 12 }}>
+        <Text style={{ fontSize: 12, fontFamily: Fonts.semiBold, color: Colors.textMuted, marginBottom: 6 }}>
+          Choose background color
+        </Text>
+        <ColorPicker
+          style={{ width: '100%' }}
+          value={pickerValue}
+          onComplete={onChangeBackgroundColor}
+        >
+          <Panel1 />
+          <HueSlider />
+          <OpacitySlider />
+        </ColorPicker>
+      </View>
+      <View style={{ marginTop: 8, alignItems: 'center' }}>
+        <UserAvatar seed={userName} backgroundColor={[pickerValue]} thumbnail={thumbnail} size={56} style={{ width: 56, height: 56 }} />
       </View>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  overlay:  { backgroundColor: 'rgba(0,0,0,0.32)', alignItems: 'center', justifyContent: 'center', padding: 24 },
-  card:    { backgroundColor: Colors.surface, borderRadius: 18, borderWidth: 1, borderColor: Colors.border, padding: 16, width: '100%', maxWidth: 360, maxHeight: '80%' },
-  header:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
-  title:   { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.text },
-  closeBtn:{ fontSize: 20, color: Colors.textMuted, lineHeight: 24 },
-  input:   { padding: 10, paddingHorizontal: 12, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.bg, fontSize: 14, color: Colors.text, fontFamily: Fonts.regular },
-  saveBtn: { marginTop: 12, paddingVertical: 10, borderRadius: Radius.lg, backgroundColor: Colors.accent, alignItems: 'center' },
-  saveBtnDisabled: { backgroundColor: Colors.border },
-  saveBtnText: { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.accentFg },
-});

@@ -64,7 +64,7 @@ export default function GroupPreferencesScreen() {
         {/* Group header */}
         <View style={styles.headerCard}>
           <View style={[styles.groupThumb, { backgroundColor: p.row, borderColor: p.cal, borderRadius: groupAvatarBorderRadius(56) }]}>
-            <GroupAvatar group={group} size={56} style={{ width: 56, height: 56 }} />
+            <GroupAvatar seed={group.avatarSeed} thumbnail={group.thumbnail} name={group.name} size={56} style={{ width: 56, height: 56 }} />
           </View>
           <View style={{ flex: 1 }}>
             <Text style={styles.groupName}>{group.name}</Text>

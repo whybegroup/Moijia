@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
+import type { User } from '@boltup/client';
 import { useAuth } from '../contexts/AuthContext';
 import { useUser, useCreateUser } from './api';
 
@@ -11,15 +12,21 @@ export const useCurrentUser = () => {
   const [userId, setUserId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const creationAttempted = useRef<Set<string>>(new Set());
-  
+  const lastUserRef = useRef<User | null>(null);
+
   // Try to get user from database
   const { data: dbUser, isLoading: dbLoading } = useUser(userId || '');
   const createUser = useCreateUser();
+
+  // Cache last known user so we don't lose it when switching tabs (query can briefly return undefined)
+  if (dbUser) lastUserRef.current = dbUser;
+  const user = dbUser ?? (userId ? lastUserRef.current : null);
 
   useEffect(() => {
     const syncUser = async () => {
       if (authLoading || !firebaseUser) {
         setUserId(null);
+        lastUserRef.current = null;
         return;
       }
 
@@ -78,7 +85,7 @@ export const useCurrentUser = () => {
 
   return {
     userId,
-    user: dbUser,
+    user,
     firebaseUser,
     loading: authLoading || dbLoading || isCreating,
   };

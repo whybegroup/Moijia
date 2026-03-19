@@ -8,20 +8,17 @@ import { useGroups, useEvents, useAllGroupMemberColors, useUpdateUser } from '..
 import { useAuth } from '../../contexts/AuthContext';
 import { useCurrentUserContext } from '../../contexts/CurrentUserContext';
 import { UserAvatar } from '../../components/UserAvatar';
-import { UserAvatarPicker } from '../../components/UserAvatarPicker';
+import { AvatarPickerModal } from '../../components/AvatarPickerModal';
 import { GroupAvatar } from '../../components/GroupAvatar';
 
 export default function ProfileScreen() {
   const router = useRouter();
   const { user: firebaseUser, signOut } = useAuth();
-  const { userId, user: me, loading: userLoading } = useCurrentUserContext();
+  const { userId, user } = useCurrentUserContext();
   const updateUser = useUpdateUser(userId || '');
 
-  const { data: groups = [], isLoading: groupsLoading } = useGroups(userId ?? '');
-  const { data: events = [], isLoading: eventsLoading } = useEvents({ userId: userId ?? '', groupId: undefined });
-  const { data: groupColors = {}, isLoading: colorsLoading } = useAllGroupMemberColors(userId || '');
-
-  const loading = groupsLoading || eventsLoading || userLoading || colorsLoading;
+  const { data: groups = [] } = useGroups(userId ?? '');
+  const { data: groupColors = {} } = useAllGroupMemberColors(userId || '');
 
   const handleSignOut = async () => {
     console.log('[Profile] Sign out button clicked');
@@ -72,36 +69,20 @@ export default function ProfileScreen() {
     }
   };
 
-  const myEvents = events.filter(e => e.rsvps.some(r => r.userId === userId && r.status === 'going'));
-
   const [draftDisplayName, setDraftDisplayName] = useState('');
   const [editingDisplayName, setEditingDisplayName] = useState(false);
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
-  const [avatarSeedDraft, setAvatarSeedDraft] = useState('');
-  const [avatarThumbnailDraft, setAvatarThumbnailDraft] = useState<string | null>(null);
+  const [draftAvatarSeed, setDraftAvatarSeed] = useState('');
+  const [draftThumbnail, setDraftThumbnail] = useState<string | null>(null);
 
   useEffect(() => {
-    if (me && !editingDisplayName) {
-      setDraftDisplayName(me.displayName || me.name || '');
+    if (showAvatarPicker) {
+      setDraftAvatarSeed(user?.avatarSeed ?? '');
+      setDraftThumbnail(user?.thumbnail ?? null);
     }
-  }, [me?.displayName, me?.name, editingDisplayName]);
+  }, [showAvatarPicker, user?.avatarSeed, user?.thumbnail]);
 
-  useEffect(() => {
-    if (showAvatarPicker && me) {
-      setAvatarSeedDraft(me.avatarSeed ?? me.name ?? '');
-      setAvatarThumbnailDraft(me.thumbnail ?? null);
-    }
-  }, [showAvatarPicker, me?.avatarSeed, me?.name, me?.thumbnail]);
-
-  const myGroups = useMemo(
-    () =>
-      groups.filter(
-        (g) => g.membershipStatus === 'member' || g.membershipStatus === 'admin' || g.membershipStatus === 'pending'
-      ),
-    [groups]
-  );
-
-  if (!me) {
+  if (!user) {
     return null;
   }
 
@@ -117,14 +98,10 @@ export default function ProfileScreen() {
         <View style={styles.userCard}>
           <TouchableOpacity
             onPress={() => setShowAvatarPicker(true)}
-            style={[styles.bigAvatar, { backgroundColor: avatarColor(me.name) }]}
+            style={styles.bigAvatar}
             activeOpacity={0.8}
           >
-            {(me.avatarSeed ?? me.thumbnail) ? (
-              <UserAvatar user={me} size={60} style={styles.bigAvatarImg} />
-            ) : (
-              <Text style={styles.bigAvatarText}>{me.name[0]}</Text>
-            )}
+            <UserAvatar seed={user.displayName || user.name} thumbnail={user.thumbnail} backgroundColor={[user.avatarSeed]} size={60} style={styles.bigAvatarImg} />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
             <View style={styles.displayNameRow}>
@@ -143,7 +120,7 @@ export default function ProfileScreen() {
                 ) : (
                   <View style={styles.displayNameReadRow}>
                     <Text style={styles.userName} numberOfLines={1}>
-                      {me.displayName || me.name}
+                      {user.displayName || user.name}
                     </Text>
                   </View>
                 )}
@@ -207,7 +184,7 @@ export default function ProfileScreen() {
         {/* My groups */}
         <Text style={styles.sectionLabel}>My Group Settings</Text>
         <View style={[styles.card, { marginBottom: 20 }]}>
-          {myGroups.map((g, i) => {
+          {groups.map((g, i) => {
             const userColorHex = groupColors[g.id] || getDefaultGroupThemeFromName(g.name);
             const p = getGroupColor(userColorHex);
             const isPending = g.membershipStatus === 'pending';
@@ -215,11 +192,11 @@ export default function ProfileScreen() {
               <TouchableOpacity
                 key={g.id}
                 onPress={() => router.push(isPending ? `/group/${g.id}` : `/group/${g.id}/preferences`)}
-                style={[styles.groupRow, i < myGroups.length - 1 && styles.rowBorder]}
+                style={[styles.groupRow, i < groups.length - 1 && styles.rowBorder]}
                 activeOpacity={0.7}
               >
                 <View style={[styles.groupIcon, { backgroundColor: p.row, borderColor: p.cal }]}>
-                  <GroupAvatar group={g} size={36} />
+                  <GroupAvatar seed={g.avatarSeed} thumbnail={g.thumbnail} name={g.name} size={36} />
                 </View>
                 <Text style={styles.groupName}>{g.name}</Text>
                 {isPending && (
@@ -239,20 +216,26 @@ export default function ProfileScreen() {
         </TouchableOpacity>
       </ScrollView>
 
-      {/* Avatar picker */}
-      <UserAvatarPicker
+      <AvatarPickerModal
+        variant="user"
         visible={showAvatarPicker}
         onClose={() => setShowAvatarPicker(false)}
-        seed={avatarSeedDraft}
-        onSeedChange={setAvatarSeedDraft}
-        thumbnail={avatarThumbnailDraft}
-        onThumbnailChange={setAvatarThumbnailDraft}
-        userName={me?.name}
-        onSave={async (avatarSeed, thumbnail) => {
-          await updateUser.mutateAsync({
-            avatarSeed: avatarSeed.trim() || null,
-            thumbnail: thumbnail ?? null,
-          });
+        seed={draftAvatarSeed}
+        onSeedChange={setDraftAvatarSeed}
+        thumbnail={draftThumbnail}
+        onThumbnailChange={setDraftThumbnail}
+        userName={user.displayName || user.name}
+        onSave={async (seed, thumbnail) => {
+          try {
+            await updateUser.mutateAsync({
+              avatarSeed: seed.trim() === 'auto' || seed.trim() === '' ? null : seed.trim(),
+              thumbnail: thumbnail ?? null,
+            });
+          } catch (e) {
+            if (Platform.OS === 'web') window.alert('Failed to update avatar');
+            else Alert.alert('Error', 'Failed to update avatar');
+            throw e;
+          }
         }}
         isSaving={updateUser.isPending}
       />

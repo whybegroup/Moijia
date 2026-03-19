@@ -11,7 +11,7 @@ import { MembershipRequestAction } from '@boltup/client';
 import { useCurrentUserContext } from '../../contexts/CurrentUserContext';
 import Svg, { Path, Rect } from 'react-native-svg';
 import { GroupAvatar } from '../../components/GroupAvatar';
-import { GroupAvatarPicker } from '../../components/GroupAvatarPicker';
+import { AvatarPickerModal } from '../../components/AvatarPickerModal';
 import { UserAvatar } from '../../components/UserAvatar';
 
 export default function GroupDetailScreen() {
@@ -246,7 +246,7 @@ export default function GroupDetailScreen() {
               activeOpacity={isAdmin ? 0.8 : 1}
               disabled={!isAdmin}
             >
-              <GroupAvatar group={group} size={56} style={{ width: 56, height: 56 }} />
+              <GroupAvatar seed={group.avatarSeed} thumbnail={group.thumbnail} name={group.name} size={56} style={{ width: 56, height: 56 }} />
             </TouchableOpacity>
             <View style={{ flex: 1, minWidth: 0 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
@@ -432,7 +432,7 @@ export default function GroupDetailScreen() {
                   <View style={[styles.card, styles.pendingCard]}>
                     {pendingRequestUsers.map((user, i) => (
                       <View key={user.id} style={[styles.memberRow, i < pendingRequestUsers.length - 1 && styles.rowBorder]}>
-                        <UserAvatar user={user} size={38} />
+                        <UserAvatar seed={user.displayName || user.name} backgroundColor={[user.avatarSeed]} thumbnail={user.thumbnail} size={38} />
                         <View style={{ flex: 1 }}>
                           <Text style={styles.memberName}>{user.displayName}</Text>
                           <Text style={styles.memberHandle}>{user.name} · wants to join</Text>
@@ -469,7 +469,7 @@ export default function GroupDetailScreen() {
                       style={[styles.memberRow, i < (group.memberIds ?? []).length - 1 && styles.rowBorder]}
                       activeOpacity={canAction ? 0.7 : 1}
                     >
-                      <UserAvatar user={user} size={38} />
+                      <UserAvatar seed={user.displayName || user.name} backgroundColor={[user.avatarSeed]} thumbnail={user.thumbnail} size={38} />
                       <View style={{ flex: 1 }}>
                         <Text style={styles.memberName}>
                           {displayName}{isMe ? <Text style={styles.youLabel}> · you</Text> : ''}
@@ -528,7 +528,7 @@ export default function GroupDetailScreen() {
                 const displayName = user.displayName;
                 return (
                   <View key={i} style={[styles.memberRow, i < (group.memberIds ?? []).length - 1 && styles.rowBorder]}>
-                    <UserAvatar user={user} size={38} />
+                    <UserAvatar seed={user.displayName || user.name} backgroundColor={[user.avatarSeed]} thumbnail={user.thumbnail} size={38} />
                     <View style={{ flex: 1 }}>
                       <Text style={styles.memberName}>{displayName}</Text>
                       <Text style={styles.memberRole}>{isSuperAdmin ? 'Super Admin' : isAdmin ? 'Admin' : 'Member'}</Text>
@@ -591,7 +591,8 @@ export default function GroupDetailScreen() {
         )}
       </ScrollView>
 
-      <GroupAvatarPicker
+      <AvatarPickerModal
+        variant="group"
         visible={showAvatarPicker}
         onClose={() => setShowAvatarPicker(false)}
         seed={avatarSeedDraft}
@@ -601,7 +602,7 @@ export default function GroupDetailScreen() {
         onSave={async (avatarSeed, thumbnail) => {
           try {
             await updateGroup.mutateAsync({
-              avatarSeed: avatarSeed.trim() || null,
+              avatarSeed: avatarSeed.trim() === 'auto' || avatarSeed.trim() === '' ? null : avatarSeed.trim(),
               thumbnail: thumbnail ?? null,
               updatedBy: currentUserId ?? '',
             });

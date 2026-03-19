@@ -1,17 +1,13 @@
-import React, { useState, useEffect } from 'react';
-import { Image, View, Text, StyleProp, ViewStyle } from 'react-native';
-import { BotttsAvatar } from './Avatar';
+import React, { useState } from 'react';
+import { Image, View, StyleProp, ViewStyle } from 'react-native';
 import { avatarColor } from '../utils/helpers';
-import { Colors, Fonts } from '../constants/theme';
-
-const DEFAULT_AVATAR_SEED = 'auto';
+import { InitialsAvatar } from './Avatar';
 
 interface UserAvatarProps {
   /** Seed for generated avatar (DiceBear bottts). Fallback: user.avatarSeed ?? user.name ?? DEFAULT_AVATAR_SEED */
-  seed?: string;
+  seed: string;
+  backgroundColor?: string[];
   thumbnail?: string | null;
-  /** When provided, uses user.avatarSeed/name for seed and user.thumbnail - overrides seed/thumbnail */
-  user?: { avatarSeed?: string | null; thumbnail?: string | null; name?: string; displayName?: string } | null;
   size?: number;
   style?: StyleProp<ViewStyle>;
 }
@@ -20,41 +16,37 @@ function isUrl(s: string): boolean {
   return s.startsWith('data:') || s.includes('://');
 }
 
-/** Renders user avatar: Image if thumbnail is valid URL and loads, BotttsAvatar (seed) otherwise. */
-export function UserAvatar({ seed, thumbnail, user, size = 36, style }: UserAvatarProps) {
-  const [loadError, setLoadError] = useState(false);
-  const resolvedThumbnail = user?.thumbnail ?? thumbnail;
-  useEffect(() => { setLoadError(false); }, [resolvedThumbnail]);
-  const resolvedSeed = (user?.avatarSeed ?? user?.name ?? seed ?? DEFAULT_AVATAR_SEED).trim() || DEFAULT_AVATAR_SEED;
+/** Renders user avatar: Image if thumbnail/bottts URL loads, letter initial otherwise. */
+export function UserAvatar({ seed, backgroundColor, thumbnail, size = 36, style }: UserAvatarProps) {
+  const [thumbnailError, setThumbnailError] = useState(false);
   const radius = size / 2;
   const containerStyle: StyleProp<ViewStyle> = [
     { width: size, height: size, borderRadius: radius, overflow: 'hidden' },
     style,
   ];
 
-  const useImage = resolvedThumbnail && isUrl(resolvedThumbnail) && !loadError;
-  if (useImage) {
+  const useImage = thumbnail && isUrl(thumbnail);
+  if (useImage && !thumbnailError) {
     return (
       <View style={containerStyle}>
         <Image
-          source={{ uri: resolvedThumbnail!.trim() }}
+          source={{ uri: thumbnail!.trim() }}
           style={{ width: size, height: size, borderRadius: radius }}
-          onError={() => setLoadError(true)}
+          onError={() => setThumbnailError(true)}
         />
       </View>
     );
   }
-  // When seed is 'auto' or user has no custom avatar (avatarSeed), use Google-style name initial
-  const hasCustomAvatar = !!user?.avatarSeed;
-  const useLetterAvatar = resolvedSeed === DEFAULT_AVATAR_SEED || (user && !hasCustomAvatar);
-  if (useLetterAvatar) {
-    const name = (user?.displayName ?? user?.name ?? '').trim() || '?';
-    const letter = name[0]?.toUpperCase() || '?';
-    return (
-      <View style={[containerStyle, { backgroundColor: avatarColor(name), alignItems: 'center', justifyContent: 'center' }]}>
-        <Text style={{ color: '#fff', fontSize: size * 0.38, fontFamily: Fonts.bold }}>{letter}</Text>
-      </View>
-    );
+
+  let resolvedBackgroundColor = [];
+  for (const color of backgroundColor ?? []) {
+    if (color) {
+      resolvedBackgroundColor.push(color);
+    }
   }
-  return <BotttsAvatar key={`bottts-${resolvedSeed}-${size}`} seed={resolvedSeed} size={size} style={[containerStyle, { borderWidth: 1, borderColor: Colors.border }]} />;
+  if (resolvedBackgroundColor.length === 0) {
+    resolvedBackgroundColor = [avatarColor(seed)];
+  }
+
+  return <InitialsAvatar seed={seed.trim()} backgroundColor={resolvedBackgroundColor} size={size} style={containerStyle} />;
 }
