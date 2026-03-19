@@ -22,6 +22,12 @@ export function useEvents(filters: EventFilters) {
         filters.limit
       ),
     enabled: !!filters.userId,
+    staleTime: 0,
+    refetchInterval: 3000,
+    refetchOnWindowFocus: true,
+    refetchOnMount: true,
+    refetchOnReconnect: true,
+    refetchIntervalInBackground: false,
   });
 }
 
@@ -30,6 +36,12 @@ export function useEvent(id: string, userId: string) {
     queryKey: queryKeys.events.detail(id, userId),
     queryFn: () => EventsService.getEvent(id, userId),
     enabled: !!id && !!userId,
+    staleTime: 0,
+    refetchInterval: 3000,
+    refetchOnWindowFocus: true,
+    refetchOnMount: true,
+    refetchOnReconnect: true,
+    refetchIntervalInBackground: false,
   });
 }
 

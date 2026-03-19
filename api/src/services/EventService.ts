@@ -153,7 +153,6 @@ export class EventService {
         updatedBy: createdBy,
         start: new Date(eventData.start),
         end: new Date(eventData.end),
-        deadline: eventData.deadline ? new Date(eventData.deadline) : null,
         allowMaybe: eventData.allowMaybe ?? true,
         coverPhotos: {
           create: coverPhotos.map((photoUrl) => ({ photoUrl })),
@@ -223,7 +222,6 @@ export class EventService {
     const updateData: any = { ...eventData, updatedBy };
     if (updateData.start) updateData.start = new Date(updateData.start);
     if (updateData.end) updateData.end = new Date(updateData.end);
-    if (updateData.deadline) updateData.deadline = new Date(updateData.deadline);
 
     const event = await prisma.event.update({
       where: { id },
@@ -249,6 +247,16 @@ export class EventService {
    * Create or update an RSVP
    */
   public async upsertRSVP(eventId: string, input: RSVPInput): Promise<RSVP> {
+    // Get existing RSVP to check if status is changing from "going"
+    const existingRsvp = await prisma.rSVP.findUnique({
+      where: {
+        eventId_userId: {
+          eventId,
+          userId: input.userId,
+        },
+      },
+    });
+
     const rsvp = await prisma.rSVP.upsert({
       where: {
         eventId_userId: {
@@ -267,6 +275,11 @@ export class EventService {
         memo: input.memo || '',
       },
     });
+
+    // If someone cancelled "going", promote waitlist
+    if (existingRsvp?.status === 'going' && input.status !== 'going') {
+      await this.promoteFromWaitlist(eventId);
+    }
 
     // Create in-app notification for event creator when someone RSVPs "going"
     if (input.status === 'going') {
@@ -296,7 +309,7 @@ export class EventService {
 
     return {
       userId: rsvp.userId,
-      status: rsvp.status as 'going' | 'maybe' | 'notGoing',
+      status: rsvp.status as 'going' | 'maybe' | 'notGoing' | 'waitlist',
       memo: rsvp.memo,
       createdAt: rsvp.createdAt,
       updatedAt: rsvp.updatedAt,
@@ -307,6 +320,16 @@ export class EventService {
    * Delete an RSVP
    */
   public async deleteRSVP(eventId: string, userId: string): Promise<void> {
+    // Get existing RSVP to check if it was "going"
+    const existingRsvp = await prisma.rSVP.findUnique({
+      where: {
+        eventId_userId: {
+          eventId,
+          userId,
+        },
+      },
+    });
+
     await prisma.rSVP.delete({
       where: {
         eventId_userId: {
@@ -315,6 +338,77 @@ export class EventService {
         },
       },
     });
+
+    // If deleted RSVP was "going", promote waitlist
+    if (existingRsvp?.status === 'going') {
+      await this.promoteFromWaitlist(eventId);
+    }
+  }
+
+  /**
+   * Promote users from waitlist to going when spots become available
+   */
+  private async promoteFromWaitlist(eventId: string): Promise<void> {
+    const event = await prisma.event.findUnique({
+      where: { id: eventId },
+      include: {
+        rsvps: {
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+    });
+
+    if (!event || !event.maxAttendees || !event.enableWaitlist) {
+      return;
+    }
+
+    const goingCount = event.rsvps.filter(r => r.status === 'going').length;
+    const availableSpots = event.maxAttendees - goingCount;
+
+    if (availableSpots <= 0) {
+      return;
+    }
+
+    // Get waitlisted users in order of when they joined waitlist
+    const waitlisted = event.rsvps
+      .filter(r => r.status === 'waitlist')
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+      .slice(0, availableSpots);
+
+    // Promote each waitlisted user to "going"
+    for (const rsvp of waitlisted) {
+      await prisma.rSVP.update({
+        where: {
+          eventId_userId: {
+            eventId,
+            userId: rsvp.userId,
+          },
+        },
+        data: {
+          status: 'going',
+        },
+      });
+
+      // Notify promoted user
+      const user = await prisma.user.findUnique({
+        where: { id: rsvp.userId },
+      });
+
+      if (user) {
+        await notificationService.createForUser(
+          rsvp.userId,
+          'Promoted from Waitlist',
+          `You've been moved from waitlist to going for ${event.title}`,
+          {
+            type: 'waitlist_promotion',
+            icon: '🎉',
+            eventId: event.id,
+            groupId: event.groupId,
+            dest: 'event',
+          }
+        ).catch(err => console.error('Failed to create promotion notification:', err));
+      }
+    }
   }
 
   /**
@@ -423,7 +517,8 @@ export class EventService {
       isAllDay: event.isAllDay,
       location: event.location,
       minAttendees: event.minAttendees,
-      deadline: event.deadline,
+      maxAttendees: event.maxAttendees,
+      enableWaitlist: event.enableWaitlist,
       allowMaybe: event.allowMaybe,
       createdAt: event.createdAt,
       updatedAt: event.updatedAt,

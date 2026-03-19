@@ -445,6 +445,7 @@ components:
             - going
             - maybe
             - notGoing
+            - waitlist
           description: RSVP status
         memo:
           type: string
@@ -551,11 +552,15 @@ components:
           format: double
           nullable: true
           description: Minimum number of attendees required
-        deadline:
-          type: string
-          format: date-time
+        maxAttendees:
+          type: number
+          format: double
           nullable: true
-          description: RSVP deadline
+          description: Maximum number of attendees allowed
+        enableWaitlist:
+          type: boolean
+          nullable: true
+          description: Whether waitlist is enabled when max capacity is reached
         allowMaybe:
           type: boolean
           description: Whether 'maybe' RSVPs are allowed
@@ -645,11 +650,15 @@ components:
           format: double
           nullable: true
           description: Minimum number of attendees required
-        deadline:
-          type: string
-          format: date-time
+        maxAttendees:
+          type: number
+          format: double
           nullable: true
-          description: RSVP deadline
+          description: Maximum number of attendees allowed
+        enableWaitlist:
+          type: boolean
+          nullable: true
+          description: Whether waitlist is enabled when max capacity is reached
         allowMaybe:
           type: boolean
           description: Whether 'maybe' RSVPs are allowed
@@ -711,11 +720,11 @@ components:
         minAttendees:
           type: number
           format: double
-        deadline:
-          anyOf:
-            - type: string
-              format: date-time
-            - type: string
+        maxAttendees:
+          type: number
+          format: double
+        enableWaitlist:
+          type: boolean
         allowMaybe:
           type: boolean
       required:
@@ -757,11 +766,11 @@ components:
         minAttendees:
           type: number
           format: double
-        deadline:
-          anyOf:
-            - type: string
-              format: date-time
-            - type: string
+        maxAttendees:
+          type: number
+          format: double
+        enableWaitlist:
+          type: boolean
         allowMaybe:
           type: boolean
         updatedBy:
@@ -781,6 +790,7 @@ components:
             - going
             - maybe
             - notGoing
+            - waitlist
         memo:
           type: string
       required:

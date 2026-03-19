@@ -30,14 +30,14 @@ export function Avatar({ name, size = 36, dot = false, onPress }: AvatarProps) {
   return content;
 }
 
-export function AvatarStack({ names, size = 22, max = 5 }: { names: string[]; size?: number; max?: number }) {
+export function AvatarStack({ names, size = 22, max = 5, dotsForNames = [] }: { names: string[]; size?: number; max?: number; dotsForNames?: string[] }) {
   const shown = names.slice(0, max);
   const extra = names.length - max;
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
       {shown.map((n, i) => (
         <View key={i} style={{ marginLeft: i > 0 ? -(size * 0.3) : 0, zIndex: shown.length - i, borderRadius: size / 2, borderWidth: 2, borderColor: Colors.surface }}>
-          <Avatar name={n} size={size} />
+          <Avatar name={n} size={size} dot={dotsForNames.includes(n)} />
         </View>
       ))}
       {extra > 0 && (
@@ -218,7 +218,7 @@ const styles = StyleSheet.create({
   avatarDot: {
     position: 'absolute', top: -2, right: -2,
     width: 9, height: 9,
-    backgroundColor: Colors.notGoing,
+    backgroundColor: '#10B981',
     borderWidth: 2, borderColor: Colors.surface,
   },
   avatarExtra: {

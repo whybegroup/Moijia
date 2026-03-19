@@ -9,7 +9,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Colors, Fonts, Radius, Shadows } from '../../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName, fmtTime, fmtDateFull, timeAgo, dDiff } from '../../utils/helpers';
 import { Avatar, AvatarStack, Sheet } from '../../components/ui';
-import { useEvent, useGroup, useUsers, useCreateOrUpdateRSVP, useCreateComment, useGroupMemberColor } from '../../hooks/api';
+import { useEvent, useGroup, useUsers, useCreateOrUpdateRSVP, useDeleteRSVP, useCreateComment, useGroupMemberColor } from '../../hooks/api';
 import { uid, getNoResponseIds } from '../../utils/api-helpers';
 import type { EventDetailed, User, GroupScoped, RSVP } from '@boltup/client';
 import { RSVPInput } from '@boltup/client';
@@ -127,6 +127,7 @@ export default function EventDetailScreen() {
   const { data: allUsers = [] } = useUsers();
   const { data: memberColorData } = useGroupMemberColor(ev?.groupId || '', currentUserId);
   const createOrUpdateRSVPMutation = useCreateOrUpdateRSVP(eventId || '');
+  const deleteRSVPMutation = useDeleteRSVP(eventId || '');
   const createCommentMutation = useCreateComment(eventId || '');
 
   const [showAttend,  setShowAttend]  = useState(false);
@@ -189,7 +190,9 @@ export default function EventDetailScreen() {
   const going   = rsvps.filter(r => r.status === 'going');
   const notGoing= rsvps.filter(r => r.status === 'notGoing');
   const maybe   = rsvps.filter(r => r.status === 'maybe');
+  const waitlist= rsvps.filter(r => r.status === 'waitlist');
   const myRsvp  = rsvps.find(r => r.userId === currentUserId);
+  const usersWithMemos = new Set(rsvps.filter(r => r.memo && r.memo.trim()).map(r => r.userId));
   const evStart = typeof ev.start === 'string' ? new Date(ev.start) : ev.start;
   const diff    = dDiff(evStart);
   const isPast  = diff < 0;
@@ -203,15 +206,37 @@ export default function EventDetailScreen() {
   const canEdit = ev.createdBy === currentUserId || 
                   group.superAdminId === currentUserId || 
                   group.adminIds.includes(currentUserId);
+  
+  const maxCapacity = ev.maxAttendees || 0;
+  const isAtCapacity = maxCapacity > 0 && going.length >= maxCapacity;
+  const canGoGoing = !isAtCapacity || myRsvp?.status === 'going';
+  const hasWaitlist = ev.enableWaitlist && maxCapacity > 0;
 
   const applyRsvp = async (status: RSVPInput.status, memo?: string) => {
     if (!ev) return;
+    
+    // Check if trying to RSVP "going" when at capacity - join waitlist instead
+    if (status === RSVPInput.status.GOING && !canGoGoing && hasWaitlist) {
+      status = RSVPInput.status.WAITLIST;
+    }
+    
+    // If at capacity and no waitlist, don't allow going
+    if (status === RSVPInput.status.GOING && !canGoGoing && !hasWaitlist) {
+      Alert.alert('Event Full', 'This event has reached maximum capacity.');
+      return;
+    }
+    
     try {
-      await createOrUpdateRSVPMutation.mutateAsync({
-        userId: currentUserId,
-        status: status,
-        memo: memo ?? '',
-      });
+      // If clicking the same status, toggle it off (delete RSVP)
+      if (myRsvp?.status === status) {
+        await deleteRSVPMutation.mutateAsync(currentUserId);
+      } else {
+        await createOrUpdateRSVPMutation.mutateAsync({
+          userId: currentUserId,
+          status: status,
+          memo: memo ?? '',
+        });
+      }
     } catch (error) {
       console.error('Failed to update RSVP:', error);
       Alert.alert('Error', 'Failed to update RSVP');
@@ -255,7 +280,8 @@ export default function EventDetailScreen() {
   };
 
   const attendLabel = [
-    going.length > 0     && `${going.length} Going`,
+    going.length > 0     && `${going.length}${maxCapacity > 0 ? `/${maxCapacity}` : ''} Going`,
+    waitlist.length > 0  && `${waitlist.length} Waitlist`,
     maybe.length > 0     && `${maybe.length} Maybe`,
     notGoing.length > 0  && `${notGoing.length} Not Attending`,
   ].filter(Boolean).join(' · ');
@@ -331,7 +357,14 @@ export default function EventDetailScreen() {
             <View style={{ gap: 8, marginBottom: 16 }}>
               <InfoRow icon="📅">{fmtDateFull(evStart)} · {fmtTime(evStart)} – {fmtTime(typeof ev.end === 'string' ? new Date(ev.end) : ev.end)}</InfoRow>
               {ev.location && <InfoRow icon="📍">{ev.location}</InfoRow>}
-              {(ev.minAttendees || 0) > 0 && <InfoRow icon="👥">Min {ev.minAttendees} needed{ev.deadline ? ` · RSVP by ${fmtTime(typeof ev.deadline === 'string' ? new Date(ev.deadline) : ev.deadline)}` : ''}</InfoRow>}
+              {((ev.minAttendees || 0) > 0 || (ev.maxAttendees || 0) > 0) && (
+                <InfoRow icon="👥">
+                  {(ev.minAttendees || 0) > 0 && `Min ${ev.minAttendees}`}
+                  {(ev.minAttendees || 0) > 0 && (ev.maxAttendees || 0) > 0 && ' · '}
+                  {(ev.maxAttendees || 0) > 0 && `Max ${ev.maxAttendees}`}
+                  {(ev.maxAttendees || 0) > 0 && ev.enableWaitlist && ' · Waitlist enabled'}
+                </InfoRow>
+              )}
               <InfoRow icon="✨">Created by {getUserSafe(ev.createdBy).displayName}</InfoRow>
             </View>
 
@@ -348,10 +381,20 @@ export default function EventDetailScreen() {
             {!isPast && (
               <>
                 <View style={{ flexDirection: 'row', gap: 8, marginBottom: 6 }}>
-                  <RsvpBtn status="going"    active={myRsvp?.status === 'going'}    onPress={() => applyRsvp(RSVPInput.status.GOING)}    onLongPress={() => setMemoFor(RSVPInput.status.GOING)} />
+                  <RsvpBtn 
+                    status={myRsvp?.status === 'waitlist' ? 'waitlist' : 'going'}
+                    active={myRsvp?.status === 'going' || myRsvp?.status === 'waitlist'} 
+                    disabled={isAtCapacity && !canGoGoing && !hasWaitlist}
+                    isWaitlist={isAtCapacity && !canGoGoing && hasWaitlist}
+                    onPress={() => applyRsvp(RSVPInput.status.GOING)} 
+                    onLongPress={() => setMemoFor(isAtCapacity && !canGoGoing && hasWaitlist ? RSVPInput.status.WAITLIST : RSVPInput.status.GOING)} 
+                  />
                   {ev.allowMaybe && <RsvpBtn status="maybe"    active={myRsvp?.status === 'maybe'}    onPress={() => applyRsvp(RSVPInput.status.MAYBE)}    onLongPress={() => setMemoFor(RSVPInput.status.MAYBE)} />}
                   <RsvpBtn status="notGoing" active={myRsvp?.status === 'notGoing'} onPress={() => applyRsvp(RSVPInput.status.NOT_GOING)} onLongPress={() => setMemoFor(RSVPInput.status.NOT_GOING)} />
                 </View>
+                {isAtCapacity && !canGoGoing && !hasWaitlist && (
+                  <Text style={styles.capacityHint}>Event has reached maximum capacity</Text>
+                )}
                 <Text style={styles.holdHint}>Hold to add a note</Text>
               </>
             )}
@@ -359,7 +402,14 @@ export default function EventDetailScreen() {
             {/* Attendance row */}
             <TouchableOpacity onPress={() => setShowAttend(true)} style={styles.attendRow}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                {going.length > 0 && <AvatarStack names={going.map(r => getUserSafe(r.userId).displayName)} size={24} max={5} />}
+                {going.length > 0 && (
+                  <AvatarStack 
+                    names={going.map(r => getUserSafe(r.userId).displayName)} 
+                    size={24} 
+                    max={5} 
+                    dotsForNames={Array.from(usersWithMemos).map(userId => getUserSafe(userId).displayName)}
+                  />
+                )}
                 <Text style={styles.attendText}>{attendLabel || 'No responses yet'}</Text>
               </View>
               <Text style={{ color: Colors.textMuted, fontSize: 16 }}>›</Text>
@@ -526,15 +576,48 @@ function InfoRow({ icon, children }: { icon: string; children: React.ReactNode }
   );
 }
 
-function RsvpBtn({ status, active, onPress, onLongPress }: { status: string; active: boolean; onPress: () => void; onLongPress: () => void }) {
+function RsvpBtn({ status, active, disabled, isWaitlist, onPress, onLongPress }: { status: string; active: boolean; disabled?: boolean; isWaitlist?: boolean; onPress: () => void; onLongPress: () => void }) {
   const isGoing = status === 'going';
   const isMaybe = status === 'maybe';
-  const bg = active ? (isGoing ? Colors.going : isMaybe ? Colors.maybe : Colors.notGoing) : Colors.surface;
-  const border = active ? (isGoing ? Colors.going : isMaybe ? Colors.maybe : Colors.notGoing) : Colors.border;
-  const label = isGoing ? (active ? '✓ Going' : 'Going') : isMaybe ? 'Maybe' : (active ? '✗ Can\'t go' : 'Can\'t go');
+  const isWaitlistStatus = status === 'waitlist';
+  const waitlistColor = '#F59E0B';
+  
+  let bg = Colors.surface;
+  let border = Colors.border;
+  let label = '';
+  
+  if (isWaitlistStatus) {
+    bg = active ? waitlistColor : Colors.surface;
+    border = active ? waitlistColor : waitlistColor;
+    label = active ? '⏳ Waitlisted' : 'Join Waitlist';
+  } else if (isGoing) {
+    bg = active ? Colors.going : Colors.surface;
+    border = active ? Colors.going : Colors.border;
+    label = active ? '✓ Going' : 'Going';
+    if (isWaitlist && !active) {
+      label = 'Join Waitlist';
+      border = waitlistColor;
+    }
+  } else if (isMaybe) {
+    bg = active ? Colors.maybe : Colors.surface;
+    border = active ? Colors.maybe : Colors.border;
+    label = 'Maybe';
+  } else {
+    bg = active ? Colors.notGoing : Colors.surface;
+    border = active ? Colors.notGoing : Colors.border;
+    label = active ? '✗ Can\'t go' : 'Can\'t go';
+  }
+  
+  const textColor = disabled ? Colors.textMuted : active ? '#fff' : Colors.textSub;
   return (
-    <TouchableOpacity onPress={onPress} onLongPress={onLongPress} style={[styles.rsvpBtn, { borderColor: border, backgroundColor: bg }]} activeOpacity={0.8}>
-      <Text style={[styles.rsvpBtnText, { color: active ? '#fff' : Colors.textSub }]}>{label}</Text>
+    <TouchableOpacity 
+      onPress={onPress} 
+      onLongPress={onLongPress} 
+      style={[styles.rsvpBtn, { borderColor: border, backgroundColor: bg, opacity: disabled ? 0.5 : 1 }]} 
+      activeOpacity={0.8}
+      disabled={disabled}
+    >
+      <Text style={[styles.rsvpBtnText, { color: textColor }]}>{label}</Text>
     </TouchableOpacity>
   );
 }
@@ -545,6 +628,7 @@ function AttendanceSheet({ ev, group, users, visible, onClose }: { ev: EventDeta
   const going    = (ev.rsvps || []).filter(r => r.status === 'going');
   const notGoing = (ev.rsvps || []).filter(r => r.status === 'notGoing');
   const maybe    = (ev.rsvps || []).filter(r => r.status === 'maybe');
+  const waitlist = (ev.rsvps || []).filter(r => r.status === 'waitlist');
   const noResponseIds = getNoResponseIds(ev, group);
 
   const RsvpRow = ({ r, faded }: { r: RSVP; faded?: boolean }) => {
@@ -555,7 +639,7 @@ function AttendanceSheet({ ev, group, users, visible, onClose }: { ev: EventDeta
         style={styles.attendRsvpRow} 
         activeOpacity={r.memo ? 0.7 : 1}
       >
-        <Avatar name={user.displayName} size={38} dot={!!r.memo} onPress={r.memo ? () => setMemoPopup(r) : undefined} />
+        <Avatar name={user.displayName} size={38} onPress={r.memo ? () => setMemoPopup(r) : undefined} />
         <View style={{ flex: 1 }}>
           <Text style={[styles.attendName, faded && { color: Colors.textMuted }]}>{user.displayName}</Text>
           {r.memo ? <Text style={styles.attendMemo} numberOfLines={1}>"{r.memo}"</Text> : null}
@@ -572,6 +656,12 @@ function AttendanceSheet({ ev, group, users, visible, onClose }: { ev: EventDeta
           <>
             <Text style={styles.attendSection}>GOING · {going.length}</Text>
             {going.map(r => <RsvpRow key={r.userId} r={r} />)}
+          </>
+        )}
+        {waitlist.length > 0 && (
+          <>
+            <Text style={[styles.attendSection, { color: '#F59E0B' }]}>WAITLIST · {waitlist.length}</Text>
+            {waitlist.map(r => <RsvpRow key={r.userId} r={r} />)}
           </>
         )}
         {maybe.length > 0 && (
@@ -631,8 +721,10 @@ function MemoSheet({ status, existing, onConfirm, onClose }: { status: RSVPInput
   const [val, setVal] = useState(existing || '');
   const isGoing = status === RSVPInput.status.GOING;
   const isMaybe = status === RSVPInput.status.MAYBE;
-  const color = isGoing ? Colors.going : isMaybe ? Colors.maybe : Colors.notGoing;
-  const label = isGoing ? 'Going' : isMaybe ? 'Maybe' : "Can't go";
+  const isWaitlist = status === RSVPInput.status.WAITLIST;
+  const waitlistColor = '#F59E0B';
+  const color = isGoing ? Colors.going : isMaybe ? Colors.maybe : isWaitlist ? waitlistColor : Colors.notGoing;
+  const label = isGoing ? 'Going' : isMaybe ? 'Maybe' : isWaitlist ? 'Waitlist' : "Can't go";
 
   return (
     <Sheet visible onClose={onClose}>
@@ -715,7 +807,8 @@ const styles = StyleSheet.create({
   rsvpBtn:          { flex: 1, paddingVertical: 10, borderRadius: Radius.lg, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
   rsvpBtnText:      { fontSize: 14, fontFamily: Fonts.semiBold },
   holdHint:         { fontSize: 11, color: Colors.textMuted, textAlign: 'center', marginBottom: 14, marginTop: 4 },
-  attendRow:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 12, borderTopWidth: 1, borderTopColor: Colors.border },
+  capacityHint:     { fontSize: 12, color: '#EF4444', textAlign: 'center', marginBottom: 8, fontFamily: Fonts.medium },
+  attendRow:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12, borderTopWidth: 1, borderTopColor: Colors.border },
   attendText:       { fontSize: 13, color: Colors.textSub, fontFamily: Fonts.regular },
   galleryBlock:     { backgroundColor: Colors.surface, marginTop: 8, padding: 16 },
   galleryTitle:     { fontSize: 13, fontFamily: Fonts.bold, color: Colors.text, marginBottom: 12 },

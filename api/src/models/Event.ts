@@ -28,8 +28,10 @@ export interface Event {
   location?: string | null;
   /** Minimum number of attendees required */
   minAttendees?: number | null;
-  /** RSVP deadline */
-  deadline?: Date | null;
+  /** Maximum number of attendees allowed */
+  maxAttendees?: number | null;
+  /** Whether waitlist is enabled when max capacity is reached */
+  enableWaitlist?: boolean | null;
   /** Whether 'maybe' RSVPs are allowed */
   allowMaybe: boolean;
   /** Timestamp when the event was created */
@@ -64,7 +66,8 @@ export interface EventInput {
   isAllDay?: boolean;
   location?: string;
   minAttendees?: number;
-  deadline?: Date | string;
+  maxAttendees?: number;
+  enableWaitlist?: boolean;
   allowMaybe?: boolean;
 }
 
@@ -81,7 +84,8 @@ export interface EventUpdate {
   isAllDay?: boolean;
   location?: string;
   minAttendees?: number;
-  deadline?: Date | string;
+  maxAttendees?: number;
+  enableWaitlist?: boolean;
   allowMaybe?: boolean;
   updatedBy: string;
 }
@@ -93,7 +97,7 @@ export interface RSVP {
   /** User ID who made the RSVP */
   userId: string;
   /** RSVP status */
-  status: 'going' | 'maybe' | 'notGoing';
+  status: 'going' | 'maybe' | 'notGoing' | 'waitlist';
   /** Optional memo or note */
   memo: string;
   /** Timestamp when created */
@@ -107,7 +111,7 @@ export interface RSVP {
  */
 export interface RSVPInput {
   userId: string;
-  status: 'going' | 'maybe' | 'notGoing';
+  status: 'going' | 'maybe' | 'notGoing' | 'waitlist';
   memo?: string;
 }
 

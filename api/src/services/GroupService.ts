@@ -538,9 +538,27 @@ export class GroupService {
     if (target.role === 'superadmin') {
       throw new Error('Cannot remove superadmin from group');
     }
-    await prisma.groupMember.deleteMany({
-      where: { groupId, userId: memberId },
+    
+    // Delete member's RSVPs for all events in this group
+    const groupEvents = await prisma.event.findMany({
+      where: { groupId },
+      select: { id: true },
     });
+    const eventIds = groupEvents.map(e => e.id);
+    
+    await prisma.$transaction([
+      // Delete RSVPs for this user in all group events
+      prisma.rSVP.deleteMany({
+        where: {
+          userId: memberId,
+          eventId: { in: eventIds },
+        },
+      }),
+      // Remove member from group
+      prisma.groupMember.deleteMany({
+        where: { groupId, userId: memberId },
+      }),
+    ]);
   }
 
   /**
@@ -616,12 +634,30 @@ export class GroupService {
     if (member?.role === 'superadmin') {
       throw new Error('Superadmin cannot leave the group.');
     }
-    await prisma.groupMember.deleteMany({
-      where: {
-        groupId,
-        userId,
-      },
+    
+    // Delete user's RSVPs for all events in this group
+    const groupEvents = await prisma.event.findMany({
+      where: { groupId },
+      select: { id: true },
     });
+    const eventIds = groupEvents.map(e => e.id);
+    
+    await prisma.$transaction([
+      // Delete RSVPs for this user in all group events
+      prisma.rSVP.deleteMany({
+        where: {
+          userId,
+          eventId: { in: eventIds },
+        },
+      }),
+      // Remove user from group
+      prisma.groupMember.deleteMany({
+        where: {
+          groupId,
+          userId,
+        },
+      }),
+    ]);
   }
 
   /**
@@ -665,12 +701,29 @@ export class GroupService {
         ).catch(err => console.error('Failed to create approval notification:', err));
       }
     } else if (requestAction === 'reject') {
-      await prisma.groupMember.deleteMany({
-        where: {
-          groupId,
-          userId,
-        },
+      // Delete user's RSVPs for all events in this group
+      const groupEvents = await prisma.event.findMany({
+        where: { groupId },
+        select: { id: true },
       });
+      const eventIds = groupEvents.map(e => e.id);
+      
+      await prisma.$transaction([
+        // Delete RSVPs for this user in all group events
+        prisma.rSVP.deleteMany({
+          where: {
+            userId,
+            eventId: { in: eventIds },
+          },
+        }),
+        // Remove member from group
+        prisma.groupMember.deleteMany({
+          where: {
+            groupId,
+            userId,
+          },
+        }),
+      ]);
     }
   }
 

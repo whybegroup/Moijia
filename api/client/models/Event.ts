@@ -59,9 +59,13 @@ export type Event = {
      */
     minAttendees?: number | null;
     /**
-     * RSVP deadline
+     * Maximum number of attendees allowed
      */
-    deadline?: string | null;
+    maxAttendees?: number | null;
+    /**
+     * Whether waitlist is enabled when max capacity is reached
+     */
+    enableWaitlist?: boolean | null;
     /**
      * Whether 'maybe' RSVPs are allowed
      */

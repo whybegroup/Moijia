@@ -166,7 +166,6 @@ function generateEvents() {
     end: past1End,
     location: 'Starbucks, KTown',
     minAttendees: null,
-    deadline: null,
     allowMaybe: true,
     createdAt: new Date(past1Start.getTime() - 24 * 60 * 60 * 1000),
   });
@@ -187,7 +186,6 @@ function generateEvents() {
     end: past2End,
     location: 'Din Tai Fung, Arcadia',
     minAttendees: null,
-    deadline: null,
     allowMaybe: false,
     createdAt: new Date(past2Start.getTime() - 2 * 24 * 60 * 60 * 1000),
   });
@@ -208,7 +206,6 @@ function generateEvents() {
     end: past3End,
     location: 'Platform LA, Culver City',
     minAttendees: null,
-    deadline: null,
     allowMaybe: true,
     createdAt: new Date(past3Start.getTime() - 5 * 24 * 60 * 60 * 1000),
   });
@@ -229,7 +226,6 @@ function generateEvents() {
     end: past4End,
     location: 'Runyon Canyon Park',
     minAttendees: 3,
-    deadline: null,
     allowMaybe: true,
     createdAt: new Date(past4Start.getTime() - 3 * 24 * 60 * 60 * 1000),
   });
@@ -250,7 +246,6 @@ function generateEvents() {
     end: past5End,
     location: 'Kyochon Chicken, Koreatown',
     minAttendees: null,
-    deadline: null,
     allowMaybe: true,
     createdAt: new Date('2025-03-08T10:00:00'),
   });
@@ -288,7 +283,6 @@ function generateEvents() {
     end: future1End,
     location: 'OB Bear KTown',
     minAttendees: 4,
-    deadline: new Date(future1Start.getTime() - 2 * 60 * 60 * 1000),
     allowMaybe: true,
     createdAt: new Date(now.getTime() - 24 * 60 * 60 * 1000),
   });
@@ -308,7 +302,6 @@ function generateEvents() {
     end: future2End,
     location: 'ArcLight Cinemas, Hollywood',
     minAttendees: null,
-    deadline: null,
     allowMaybe: true,
     createdAt: new Date(now.getTime() - 6 * 60 * 60 * 1000),
   });
@@ -328,7 +321,6 @@ function generateEvents() {
     end: future3End,
     location: 'Din Tai Fung, Arcadia',
     minAttendees: 5,
-    deadline: new Date(future3Start.getTime() - 12 * 60 * 60 * 1000),
     allowMaybe: false,
     createdAt: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000),
   });
@@ -348,7 +340,6 @@ function generateEvents() {
     end: future4End,
     location: 'La Cienega Park Basketball Courts',
     minAttendees: 6,
-    deadline: new Date(future4Start.getTime() - 12 * 60 * 60 * 1000),
     allowMaybe: false,
     createdAt: new Date(now.getTime() - 24 * 60 * 60 * 1000),
   });
@@ -368,7 +359,6 @@ function generateEvents() {
     end: future5End,
     location: 'Platform LA, Culver City',
     minAttendees: null,
-    deadline: null,
     allowMaybe: true,
     createdAt: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000),
   });
