@@ -3,7 +3,8 @@ CREATE TABLE "users" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "name" TEXT NOT NULL,
     "displayName" TEXT NOT NULL,
-    "avatar" TEXT,
+    "avatarSeed" TEXT,
+    "thumbnail" TEXT,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL
 );
@@ -53,7 +54,8 @@ CREATE TABLE "events" (
     "isAllDay" BOOLEAN DEFAULT false,
     "location" TEXT,
     "minAttendees" INTEGER,
-    "deadline" DATETIME,
+    "maxAttendees" INTEGER,
+    "enableWaitlist" BOOLEAN DEFAULT false,
     "allowMaybe" BOOLEAN NOT NULL DEFAULT true,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
