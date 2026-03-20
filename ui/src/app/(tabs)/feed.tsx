@@ -207,7 +207,7 @@ export default function FeedScreen() {
       {/* Header */}
       <View style={styles.header}>
         {/* Title */}
-        <Text style={styles.pageTitle}>My Events</Text>
+        <Text style={styles.pageTitle}>Events</Text>
 
         {/* Actions */}
         <View style={styles.actions}>
@@ -556,7 +556,7 @@ export default function FeedScreen() {
         </View>
       </View>
 
-      {/* Feed */}
+      {/* Events */}
       <View style={styles.feedContent}>
         {filtered.length === 0 ? (
           <View style={styles.emptyState}>

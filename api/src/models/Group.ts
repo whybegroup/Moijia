@@ -65,6 +65,12 @@ export interface GroupScoped {
   deletedBy?: string | null;
 }
 
+/** Paginated public groups for discovery (server-side offset/limit) */
+export interface PublicGroupsPage {
+  items: GroupScoped[];
+  total: number;
+}
+
 /**
  * Input for creating a new group
  */

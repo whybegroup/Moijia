@@ -155,6 +155,67 @@ export class GroupService {
   }
 
   /**
+   * Paginated public groups for discovery. Scoped like getAllForUser per userId.
+   * When includeJoined is false, only groups the user is not an active or pending member of.
+   */
+  public async getPublicGroupsPage(
+    userId: string,
+    opts: { limit: number; offset: number; q?: string; includeJoined?: boolean }
+  ): Promise<{ items: GroupScoped[]; total: number }> {
+    const q = opts.q?.trim();
+    const includeJoined = opts.includeJoined !== false;
+
+    const searchClause =
+      q && q.length > 0
+        ? {
+            OR: [{ name: { contains: q } }, { desc: { contains: q } }],
+          }
+        : {};
+
+    const membershipClause = !includeJoined
+      ? {
+          NOT: {
+            members: {
+              some: {
+                userId,
+                status: { in: ['active', 'pending'] },
+              },
+            },
+          },
+        }
+      : {};
+
+    const where = {
+      deletedAt: null,
+      isPublic: true,
+      ...searchClause,
+      ...membershipClause,
+    };
+
+    const [total, groups] = await prisma.$transaction([
+      prisma.group.count({ where }),
+      prisma.group.findMany({
+        where,
+        skip: opts.offset,
+        take: opts.limit,
+        orderBy: { name: 'asc' },
+        include: {
+          members: {
+            include: {
+              user: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    return {
+      items: groups.map((g) => this.mapGroupScoped(g, userId)),
+      total,
+    };
+  }
+
+  /**
    * Get group by ID with member information
    */
   public async getById(id: string): Promise<Group | null> {

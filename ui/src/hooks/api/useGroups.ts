@@ -1,6 +1,26 @@
-import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, keepPreviousData, useInfiniteQuery } from '@tanstack/react-query';
 import { GroupsService, type GroupInput, type GroupUpdate, type MembershipRequestAction } from '@boltup/client';
 import { queryKeys } from '../../config/queryClient';
+
+const PUBLIC_GROUPS_PAGE_SIZE = 10;
+
+export function usePublicGroupsInfinite(
+  userId: string | undefined,
+  q: string,
+  includeJoined: boolean
+) {
+  return useInfiniteQuery({
+    queryKey: queryKeys.groups.public(userId ?? '', q, includeJoined),
+    queryFn: ({ pageParam }) =>
+      GroupsService.getPublicGroups(userId!, PUBLIC_GROUPS_PAGE_SIZE, pageParam, q || undefined, includeJoined),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, _pages, lastPageParam) => {
+      const next = (lastPageParam as number) + lastPage.items.length;
+      return next < lastPage.total ? next : undefined;
+    },
+    enabled: !!userId?.trim(),
+  });
+}
 
 export function useGroups(userId: string, includeDeleted = false) {
   return useQuery({

@@ -21,6 +21,7 @@ export { MembershipRequestAction } from './models/MembershipRequestAction';
 export { MembershipStatus } from './models/MembershipStatus';
 export { Notification } from './models/Notification';
 export { NotificationInput } from './models/NotificationInput';
+export type { PublicGroupsPage } from './models/PublicGroupsPage';
 export type { Record_string_string_ } from './models/Record_string_string_';
 export { RSVP } from './models/RSVP';
 export { RSVPInput } from './models/RSVPInput';

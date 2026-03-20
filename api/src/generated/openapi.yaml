@@ -265,6 +265,21 @@ components:
         - membershipStatus
       type: object
       additionalProperties: false
+    PublicGroupsPage:
+      description: Paginated public groups for discovery (server-side offset/limit)
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/GroupScoped"
+          type: array
+        total:
+          type: number
+          format: double
+      required:
+        - items
+        - total
+      type: object
+      additionalProperties: false
     Group:
       description: Group model - represents a social group (full, for members/admins)
       properties:
@@ -1155,6 +1170,53 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/GroupInput"
+  /groups/public:
+    get:
+      operationId: GetPublicGroups
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicGroupsPage"
+      description: List public groups with pagination (offset/limit). Must be
+        registered before `GET /groups/:id`.
+      summary: Paginated public groups for discovery. includeJoined=false hides groups
+        you already belong to or have a pending request for.
+      tags:
+        - Groups
+      security: []
+      parameters:
+        - in: query
+          name: userId
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: limit
+          required: false
+          schema:
+            default: 10
+            format: double
+            type: number
+        - in: query
+          name: offset
+          required: false
+          schema:
+            default: 0
+            format: double
+            type: number
+        - in: query
+          name: q
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: includeJoined
+          required: false
+          schema:
+            type: boolean
   /groups/{id}:
     get:
       operationId: GetGroup

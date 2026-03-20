@@ -128,6 +128,15 @@ const models: TsoaRoute.Models = {
         "additionalProperties": false,
     },
     // WARNING: This file was auto-generated with tsoa. Please do not modify it. Re-run tsoa to re-generate this file: https://github.com/lukeautry/tsoa
+    "PublicGroupsPage": {
+        "dataType": "refObject",
+        "properties": {
+            "items": {"dataType":"array","array":{"dataType":"refObject","ref":"GroupScoped"},"required":true},
+            "total": {"dataType":"double","required":true},
+        },
+        "additionalProperties": false,
+    },
+    // WARNING: This file was auto-generated with tsoa. Please do not modify it. Re-run tsoa to re-generate this file: https://github.com/lukeautry/tsoa
     "Group": {
         "dataType": "refObject",
         "properties": {
@@ -736,6 +745,40 @@ export function RegisterRoutes(app: Router) {
 
               await templateService.apiHandler({
                 methodName: 'getGroups',
+                controller,
+                response,
+                next,
+                validatedArgs,
+                successStatus: undefined,
+              });
+            } catch (err) {
+                return next(err);
+            }
+        });
+        // WARNING: This file was auto-generated with tsoa. Please do not modify it. Re-run tsoa to re-generate this file: https://github.com/lukeautry/tsoa
+        const argsGroupController_getPublicGroups: Record<string, TsoaRoute.ParameterSchema> = {
+                userId: {"in":"query","name":"userId","required":true,"dataType":"string"},
+                limit: {"default":10,"in":"query","name":"limit","dataType":"double"},
+                offset: {"default":0,"in":"query","name":"offset","dataType":"double"},
+                q: {"in":"query","name":"q","dataType":"string"},
+                includeJoined: {"in":"query","name":"includeJoined","dataType":"boolean"},
+        };
+        app.get('/api/groups/public',
+            ...(fetchMiddlewares<RequestHandler>(GroupController)),
+            ...(fetchMiddlewares<RequestHandler>(GroupController.prototype.getPublicGroups)),
+
+            async function GroupController_getPublicGroups(request: ExRequest, response: ExResponse, next: any) {
+
+            // WARNING: This file was auto-generated with tsoa. Please do not modify it. Re-run tsoa to re-generate this file: https://github.com/lukeautry/tsoa
+
+            let validatedArgs: any[] = [];
+            try {
+                validatedArgs = templateService.getValidatedArgs({ args: argsGroupController_getPublicGroups, request, response });
+
+                const controller = new GroupController();
+
+              await templateService.apiHandler({
+                methodName: 'getPublicGroups',
                 controller,
                 response,
                 next,

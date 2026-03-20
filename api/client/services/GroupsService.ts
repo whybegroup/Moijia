@@ -7,6 +7,7 @@ import type { GroupInput } from '../models/GroupInput';
 import type { GroupScoped } from '../models/GroupScoped';
 import type { GroupUpdate } from '../models/GroupUpdate';
 import type { MembershipRequestAction } from '../models/MembershipRequestAction';
+import type { PublicGroupsPage } from '../models/PublicGroupsPage';
 import type { Record_string_string_ } from '../models/Record_string_string_';
 import type { User } from '../models/User';
 import type { CancelablePromise } from '../core/CancelablePromise';
@@ -49,6 +50,36 @@ export class GroupsService {
             url: '/groups',
             body: requestBody,
             mediaType: 'application/json',
+        });
+    }
+    /**
+     * Paginated public groups for discovery. includeJoined=false hides groups you already belong to or have a pending request for.
+     * List public groups with pagination (offset/limit). Must be registered before `GET /groups/:id`.
+     * @param userId
+     * @param limit
+     * @param offset
+     * @param q
+     * @param includeJoined
+     * @returns PublicGroupsPage Ok
+     * @throws ApiError
+     */
+    public static getPublicGroups(
+        userId: string,
+        limit: number = 10,
+        offset?: number,
+        q?: string,
+        includeJoined?: boolean,
+    ): CancelablePromise<PublicGroupsPage> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/groups/public',
+            query: {
+                'userId': userId,
+                'limit': limit,
+                'offset': offset,
+                'q': q,
+                'includeJoined': includeJoined,
+            },
         });
     }
     /**

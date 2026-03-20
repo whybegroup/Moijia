@@ -54,19 +54,13 @@ export default function TabLayout() {
       <Tabs.Screen
         name="feed"
         options={{
-          tabBarIcon: ({ focused }) => <TabIcon focused={focused} label="Feed" icon="⚡" />,
+          tabBarIcon: ({ focused }) => <TabIcon focused={focused} label="Events" icon="⚡" />,
         }}
       />
       <Tabs.Screen
         name="groups"
         options={{
           tabBarIcon: ({ focused }) => <TabIcon focused={focused} label="Groups" icon="💬" />,
-        }}
-      />
-      <Tabs.Screen
-        name="explore"
-        options={{
-          tabBarIcon: ({ focused }) => <TabIcon focused={focused} label="Explore" icon="🔍" />,
         }}
       />
       <Tabs.Screen
