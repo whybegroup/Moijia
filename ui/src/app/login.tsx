@@ -1,15 +1,15 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Platform, TextInput, ScrollView, KeyboardAvoidingView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import * as WebBrowser from 'expo-web-browser';
 import { signInWithGoogle, signInWithEmail, signUpWithEmail } from '../config/firebase';
+import { googleIosClientId, googleWebClientId } from '../config/googleAuth';
+import { signInWithGoogleIdTokenNative } from '../config/googleSignIn';
 import { Colors, Fonts, Radius, Shadows } from '../constants/theme';
-
-WebBrowser.maybeCompleteAuthSession();
 
 type AuthMode = 'signin' | 'signup';
 
-function authErrorMessage(code: string): string {
+function authErrorMessage(code: string | undefined): string | undefined {
+  if (!code) return undefined;
   const map: Record<string, string> = {
     'auth/invalid-email': 'Please enter a valid email address.',
     'auth/user-disabled': 'This account has been disabled.',
@@ -22,7 +22,17 @@ function authErrorMessage(code: string): string {
     'auth/popup-closed-by-user': 'Sign-in was cancelled',
     'auth/popup-blocked': 'Pop-up was blocked. Please allow pop-ups for this site.',
   };
-  return map[code] || 'Something went wrong. Please try again.';
+  return map[code];
+}
+
+/** Android Google Sign-In status 10 = DEVELOPER_ERROR (SHA-1 / OAuth client mismatch). */
+function nativeGoogleSignInHint(err: unknown): string | undefined {
+  if (typeof err !== 'object' || err === null || !('code' in err)) return undefined;
+  const c = String((err as { code: unknown }).code);
+  if (c === '10') {
+    return 'Google Sign-In is not registered for this Android build. In Firebase Console → Project settings → Your Android app (com.popin.app), add the SHA-1 from the debug keystore (run: cd android && ./gradlew signingReport, use Variant: debug). Use EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID = Web client ID from the same Firebase project (not the Android client ID).';
+  }
+  return undefined;
 }
 
 export default function LoginScreen() {
@@ -64,7 +74,7 @@ export default function LoginScreen() {
         await signInWithEmail(trimmedEmail, password);
       }
     } catch (err: any) {
-      showError(authErrorMessage(err?.code) || err?.message || 'Failed to sign in');
+      showError(authErrorMessage(err?.code) ?? err?.message ?? 'Failed to sign in');
     } finally {
       setLoading(false);
     }
@@ -72,15 +82,52 @@ export default function LoginScreen() {
 
   const handleGoogleSignIn = async () => {
     setError('');
+    if (Platform.OS === 'web') {
+      setLoading(true);
+      try {
+        await signInWithGoogle();
+      } catch (err: any) {
+        showError(authErrorMessage(err?.code) ?? err?.message ?? 'Failed to sign in');
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+    if (!googleWebClientId) {
+      showError('Google sign-in is not configured (missing EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID).');
+      return;
+    }
+    if (Platform.OS === 'ios' && !googleIosClientId) {
+      showError('Google sign-in is not configured (missing EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID).');
+      return;
+    }
     setLoading(true);
     try {
-      await signInWithGoogle();
+      const tokens = await signInWithGoogleIdTokenNative(googleWebClientId);
+      if (!tokens) {
+        return;
+      }
+      await signInWithGoogle(tokens.idToken, tokens.accessToken);
     } catch (err: any) {
-      showError(authErrorMessage(err?.code) || err?.message || 'Failed to sign in');
+      const firebaseGoogle =
+        err?.code === 'auth/invalid-credential'
+          ? 'Google sign-in could not be verified. On Android, add the debug SHA-1 in Firebase for com.popin.app and set EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID to the OAuth Web client ID from the same project.'
+          : undefined;
+      showError(
+        nativeGoogleSignInHint(err) ??
+          firebaseGoogle ??
+          authErrorMessage(err?.code) ??
+          err?.message ??
+          'Failed to sign in',
+      );
     } finally {
       setLoading(false);
     }
   };
+
+  const googleReady =
+    Platform.OS === 'web' ||
+    (!!googleWebClientId && (Platform.OS !== 'ios' || !!googleIosClientId));
 
   return (
     <SafeAreaView style={styles.container}>
@@ -172,9 +219,9 @@ export default function LoginScreen() {
             </View>
 
             <TouchableOpacity
-              style={[styles.googleButton, loading && styles.buttonDisabled]}
+              style={[styles.googleButton, (loading || !googleReady) && styles.buttonDisabled]}
               onPress={handleGoogleSignIn}
-              disabled={loading}
+              disabled={loading || !googleReady}
               activeOpacity={0.8}
             >
               <View style={styles.googleIcon}>

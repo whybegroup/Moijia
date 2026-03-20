@@ -35,6 +35,7 @@ import {
 import { useCurrentUserContext } from '../../contexts/CurrentUserContext';
 import Svg, { Path } from 'react-native-svg';
 import { GroupAvatar } from '../../components/GroupAvatar';
+import { NotificationListIcon } from '../../components/NotificationListIcon';
 import { GroupsPeopleGlyph } from '../../components/TabScreenIcons';
 
 /** Web: remove default focus outline on the search field */
@@ -462,7 +463,11 @@ export default function GroupsScreen() {
                     activeOpacity={n.navigable ? 0.7 : 1}
                   >
                     <View style={[styles.notifIcon, { backgroundColor: n.read ? Colors.bg : p.row, borderColor: n.read ? Colors.border : p.cal }]}>
-                      <Text style={{ fontSize: 16 }}>{n.icon}</Text>
+                      <NotificationListIcon
+                        type={n.type}
+                        icon={n.icon}
+                        color={n.read ? Colors.textSub : p.text}
+                      />
                     </View>
                     <View style={{ flex: 1, minWidth: 0 }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>

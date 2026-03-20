@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { 
-  getAuth, 
+import {
+  getAuth,
   initializeAuth,
   GoogleAuthProvider,
   signInWithCredential,
@@ -11,8 +11,10 @@ import {
   onAuthStateChanged,
   browserLocalPersistence,
   indexedDBLocalPersistence,
-  User
+  User,
+  type Persistence,
 } from 'firebase/auth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 
@@ -64,8 +66,16 @@ const initAuth = () => {
       // If already initialized, just get the existing instance
       return getAuth(app);
     }
-  } else {
-    // For mobile, use default auth
+  }
+  // RN-only export (not on firebase/auth types); resolves to @firebase/auth dist/rn via Metro.
+  const { getReactNativePersistence } = require('@firebase/auth') as {
+    getReactNativePersistence: (storage: typeof AsyncStorage) => Persistence;
+  };
+  try {
+    return initializeAuth(app, {
+      persistence: getReactNativePersistence(AsyncStorage),
+    });
+  } catch {
     return getAuth(app);
   }
 };
@@ -98,11 +108,11 @@ export const signInWithGoogle = async (idToken?: string, accessToken?: string) =
       return result.user;
     }
     
-    // For mobile, use credential sign-in
-    if (!idToken || !accessToken) {
-      throw new Error('Missing tokens for mobile sign-in');
+    // For mobile, caller must obtain an ID token (e.g. @react-native-google-signin/google-signin).
+    if (!idToken) {
+      throw new Error('Missing id token for mobile sign-in');
     }
-    const credential = GoogleAuthProvider.credential(idToken, accessToken);
+    const credential = GoogleAuthProvider.credential(idToken, accessToken ?? undefined);
     const result = await signInWithCredential(auth, credential);
     return result.user;
   } catch (error: any) {

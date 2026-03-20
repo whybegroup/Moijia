@@ -24,6 +24,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Colors, Fonts, Radius } from '../../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName } from '../../utils/helpers';
 import { ListView } from '../../components/ListView';
+import { NotificationListIcon } from '../../components/NotificationListIcon';
 import { CalendarView } from '../../components/CalendarView';
 import { Pill } from '../../components/ui';
 import Svg, { Path } from 'react-native-svg';
@@ -696,7 +697,11 @@ export default function FeedScreen() {
                     activeOpacity={n.navigable ? 0.7 : 1}
                   >
                     <View style={[styles.notifIcon, { backgroundColor: n.read ? Colors.bg : p.row, borderColor: n.read ? Colors.border : p.cal }]}>
-                      <Text style={{ fontSize: 16 }}>{n.icon}</Text>
+                      <NotificationListIcon
+                        type={n.type}
+                        icon={n.icon}
+                        color={n.read ? Colors.textSub : p.text}
+                      />
                     </View>
                     <View style={{ flex: 1, minWidth: 0 }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
