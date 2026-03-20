@@ -29,6 +29,7 @@ import Svg, { Path } from 'react-native-svg';
 import { useEvents, useGroups, useNotifications, useAllGroupMemberColors, useUpdateNotification, useMarkAllNotificationsRead } from '../../hooks/api';
 import { queryKeys } from '../../config/queryClient';
 import { useCurrentUserContext } from '../../contexts/CurrentUserContext';
+import { EventsCalendarGlyph } from '../../components/TabScreenIcons';
 
 export default function FeedScreen() {
   const router = useRouter();
@@ -206,8 +207,10 @@ export default function FeedScreen() {
     <SafeAreaView style={styles.safe}>
       {/* Header */}
       <View style={styles.header}>
-        {/* Title */}
-        <Text style={styles.pageTitle}>Events</Text>
+        <View style={styles.headerTitleRow}>
+          <EventsCalendarGlyph size={22} color={Colors.text} />
+          <Text style={styles.pageTitle}>Events</Text>
+        </View>
 
         {/* Actions */}
         <View style={styles.actions}>
@@ -720,6 +723,7 @@ export default function FeedScreen() {
 const styles = StyleSheet.create({
   safe:        { flex: 1, backgroundColor: Colors.bg },
   header:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border },
+  headerTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   pageTitle:   { fontSize: 18, fontFamily: Fonts.extraBold, color: Colors.text },
   filtersContainer: { backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border },
   actions:     { flexDirection: 'row', alignItems: 'center', gap: 8 },

@@ -34,6 +34,7 @@ import {
 import { useCurrentUserContext } from '../../contexts/CurrentUserContext';
 import Svg, { Path } from 'react-native-svg';
 import { GroupAvatar } from '../../components/GroupAvatar';
+import { GroupsPeopleGlyph } from '../../components/TabScreenIcons';
 
 /** Web: remove default focus outline on the search field */
 const searchInputWebNoFocusRing = {
@@ -113,9 +114,12 @@ export default function GroupsScreen() {
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
         <View style={styles.headerTopRow}>
-          <Text style={styles.title} numberOfLines={1}>
-            Groups
-          </Text>
+          <View style={styles.headerTitleRow}>
+            <GroupsPeopleGlyph size={22} color={Colors.text} />
+            <Text style={styles.title} numberOfLines={1}>
+              Groups
+            </Text>
+          </View>
           {searchExpanded ? (
             <View style={styles.searchMid}>
               <TextInput
@@ -483,7 +487,8 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
   },
   headerTopRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  title: { fontSize: 18, fontFamily: Fonts.extraBold, color: Colors.text, flexShrink: 0 },
+  headerTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1, minWidth: 0 },
+  title: { fontSize: 18, fontFamily: Fonts.extraBold, color: Colors.text, flexShrink: 1 },
   headerMidSpacer: { flex: 1, minWidth: 0 },
   searchMid: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 4 },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 12, flexShrink: 0 },

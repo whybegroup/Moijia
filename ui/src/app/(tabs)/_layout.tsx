@@ -1,11 +1,27 @@
+import React from 'react';
 import { Tabs } from 'expo-router';
 import { View, Text, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Fonts } from '../../constants/theme';
 import { useCurrentUserContext } from '../../contexts/CurrentUserContext';
 import { UserAvatar } from '../../components/UserAvatar';
+import { EventsCalendarGlyph, GroupsPeopleGlyph } from '../../components/TabScreenIcons';
 
-function TabIcon({ focused, label, icon, isAvatar, user }: { focused: boolean; label: string; icon: string; isAvatar?: boolean; user?: { name: string; displayName?: string; thumbnail?: string | null; avatarSeed?: string | null } | null }) {
+function TabIcon({
+  focused,
+  label,
+  icon,
+  iconNode,
+  isAvatar,
+  user,
+}: {
+  focused: boolean;
+  label: string;
+  icon?: string;
+  iconNode?: React.ReactNode;
+  isAvatar?: boolean;
+  user?: { name: string; displayName?: string; thumbnail?: string | null; avatarSeed?: string | null } | null;
+}) {
   if (isAvatar && user) {
     return (
       <View style={styles.tabItem}>
@@ -22,11 +38,11 @@ function TabIcon({ focused, label, icon, isAvatar, user }: { focused: boolean; l
       </View>
     );
   }
-  
+
   return (
     <View style={styles.tabItem}>
       <View style={[styles.iconWrap, focused && styles.iconWrapActive]}>
-        <Text style={styles.iconText}>{icon}</Text>
+        {iconNode ?? <Text style={styles.iconText}>{icon}</Text>}
       </View>
       <Text style={[styles.tabLabel, focused && styles.tabLabelActive]}>{label}</Text>
     </View>
@@ -54,13 +70,25 @@ export default function TabLayout() {
       <Tabs.Screen
         name="feed"
         options={{
-          tabBarIcon: ({ focused }) => <TabIcon focused={focused} label="Events" icon="⚡" />,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon
+              focused={focused}
+              label="Events"
+              iconNode={<EventsCalendarGlyph size={20} color={focused ? Colors.text : Colors.textMuted} />}
+            />
+          ),
         }}
       />
       <Tabs.Screen
         name="groups"
         options={{
-          tabBarIcon: ({ focused }) => <TabIcon focused={focused} label="Groups" icon="💬" />,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon
+              focused={focused}
+              label="Groups"
+              iconNode={<GroupsPeopleGlyph size={20} color={focused ? Colors.text : Colors.textMuted} />}
+            />
+          ),
         }}
       />
       <Tabs.Screen
