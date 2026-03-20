@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, Pressable, StyleSheet } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Colors, Fonts, Radius, Shadows } from '../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName, fmtTime, fmtMonthShort, dDiff, isToday as checkToday, getMyWaitlistPosition } from '../utils/helpers';
 import type { EventDetailed, GroupScoped, User } from '@boltup/client';
@@ -55,8 +56,8 @@ export function EventRow({ ev, group, groupColorHex, onPress, onGroupPress, isLa
 
   const metaParts = [
     fmtTime(evStart),
-    myRsvp?.status === 'going'    ? '✓ Going'    : null,
-    myRsvp?.status === 'notGoing' ? '✗ Can\'t go' : null,
+    myRsvp?.status === 'going' ? 'Going' : null,
+    myRsvp?.status === 'notGoing' ? 'Can\'t go' : null,
     cc > 0 ? `${cc} comment${cc !== 1 ? 's' : ''}` : null,
   ].filter(Boolean).join(' · ');
 
@@ -95,15 +96,17 @@ export function EventRow({ ev, group, groupColorHex, onPress, onGroupPress, isLa
           <Text style={styles.location} numberOfLines={1}>{ev.location}</Text>
         ) : null}
         {(minN > 0 || maxN > 0) && !isPast && (
-          <Text style={styles.minAttendees} numberOfLines={2}>
-            👥{' '}
-            {[
-              minN > 0 ? `Min ${minN}` : null,
-              maxN > 0 ? `Max ${maxN}` : null,
-            ]
-              .filter(Boolean)
-              .join(' · ')}
-          </Text>
+          <View style={styles.minAttendeesRow}>
+            <Ionicons name="people-outline" size={14} color={Colors.textMuted} style={styles.minAttendeesIcon} />
+            <Text style={styles.minAttendees} numberOfLines={2}>
+              {[
+                minN > 0 ? `Min ${minN}` : null,
+                maxN > 0 ? `Max ${maxN}` : null,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+            </Text>
+          </View>
         )}
         {going.length > 0 && (
           <View style={styles.avatarRow}>
@@ -118,29 +121,33 @@ export function EventRow({ ev, group, groupColorHex, onPress, onGroupPress, isLa
         )}
         {needsMore && (
           <View style={styles.needsTextWrap}>
+            <Ionicons name="warning-outline" size={14} color="#92400E" style={styles.pillIcon} />
             <Text style={styles.needsText}>
-              ⚠️ {minN - going.length} more needed
+              {minN - going.length} more needed
             </Text>
           </View>
         )}
         {showLowSpots && (
           <View style={styles.needsTextWrap}>
+            <Ionicons name="warning-outline" size={14} color="#92400E" style={styles.pillIcon} />
             <Text style={styles.needsText}>
-              ⚠️ {spotsLeft} spot{spotsLeft === 1 ? '' : 's'} left
+              {spotsLeft} spot{spotsLeft === 1 ? '' : 's'} left
             </Text>
           </View>
         )}
         {imWaitlisted && (
           <View style={styles.needsTextWrap}>
+            <Ionicons name="warning-outline" size={14} color="#92400E" style={styles.pillIcon} />
             <Text style={styles.needsText}>
-              ⚠️ waitlisted{myWaitlistPos != null ? ` · #${myWaitlistPos} in queue` : ''}
+              Waitlisted{myWaitlistPos != null ? ` · #${myWaitlistPos} in queue` : ''}
             </Text>
           </View>
         )}
         {showHoursLeft && (
           <View style={styles.hoursLeftWrap}>
+            <Ionicons name="time-outline" size={14} color="#92400E" style={styles.pillIcon} />
             <Text style={styles.hoursLeftText}>
-              ⏰ Starting in {hoursLeft}h
+              Starting in {hoursLeft}h
             </Text>
           </View>
         )}
@@ -191,7 +198,10 @@ const styles = StyleSheet.create({
     fontSize: 12, fontFamily: Fonts.regular, color: Colors.textMuted,
   },
   needsTextWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
     alignSelf: 'flex-start',
+    gap: 5,
     borderWidth: 1,
     borderColor: '#F59E0B',
     backgroundColor: '#FFFBEB',
@@ -200,11 +210,15 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     marginTop: 4,
   },
+  pillIcon: { marginTop: 0 },
   needsText: {
     fontSize: 12, fontFamily: Fonts.medium, color: '#92400E',
   },
   hoursLeftWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
     alignSelf: 'flex-start',
+    gap: 5,
     borderWidth: 1,
     borderColor: '#F59E0B',
     backgroundColor: '#FFFBEB',
@@ -219,8 +233,16 @@ const styles = StyleSheet.create({
   location: {
     fontSize: 12, fontFamily: Fonts.regular, color: Colors.textMuted, marginTop: 1,
   },
+  minAttendeesRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginTop: 1,
+    gap: 5,
+  },
+  minAttendeesIcon: { marginTop: 1 },
   minAttendees: {
-    fontSize: 12, fontFamily: Fonts.regular, color: Colors.textMuted, marginTop: 1,
+    flex: 1,
+    fontSize: 12, fontFamily: Fonts.regular, color: Colors.textMuted,
   },
   avatarRow: {
     marginTop: 6,

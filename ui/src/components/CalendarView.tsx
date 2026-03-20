@@ -1,10 +1,12 @@
 import React, { useState, useMemo } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
-import { Colors, Fonts, Radius } from '../constants/theme';
+import { Colors, Fonts } from '../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName } from '../utils/helpers';
-import { isSameDay, isToday, fmtTime, getMyWaitlistPosition } from '../utils/helpers';
+import { isSameDay, isToday } from '../utils/helpers';
 import type { EventDetailed, GroupScoped } from '@boltup/client';
 import { useCurrentUserContext } from '../contexts/CurrentUserContext';
+import { EventRow } from './EventRow';
+import { useUsers } from '../hooks/api';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -13,6 +15,7 @@ interface CalendarViewProps {
   groups: GroupScoped[];
   groupColors?: Record<string, string>;
   onSelectEvent: (ev: EventDetailed) => void;
+  onSelectGroup?: (groupId: string) => void;
 }
 
 function getMonthGrid(year: number, month: number): (Date | null)[][] {
@@ -37,8 +40,9 @@ function getMonthGrid(year: number, month: number): (Date | null)[][] {
   return rows;
 }
 
-export function CalendarView({ events, groups, groupColors = {}, onSelectEvent }: CalendarViewProps) {
+export function CalendarView({ events, groups, groupColors = {}, onSelectEvent, onSelectGroup }: CalendarViewProps) {
   const { userId: meId } = useCurrentUserContext();
+  const { data: allUsers = [] } = useUsers();
   const [focusDate, setFocusDate] = useState(() => new Date());
   const year = focusDate.getFullYear();
   const month = focusDate.getMonth();
@@ -170,35 +174,21 @@ export function CalendarView({ events, groups, groupColors = {}, onSelectEvent }
               })
               .map(ev => {
                 const group = groupsMap[ev.groupId];
-                const userColorHex = groupColors[ev.groupId] || (group ? getDefaultGroupThemeFromName(group.name) : '#EC4899');
-                const p = getGroupColor(userColorHex);
-                const startDate = new Date(ev.start);
-                const isPast = startDate.getTime() < Date.now();
-                const imWaitlisted =
-                  !!meId &&
-                  !isPast &&
-                  !!(ev.rsvps || []).find((r) => r.userId === meId && r.status === 'waitlist');
-                const myWaitlistPos = imWaitlisted ? getMyWaitlistPosition(ev.rsvps, meId) : null;
+                const userColorHex = groupColors[ev.groupId];
                 return (
-                  <TouchableOpacity
-                    key={ev.id}
-                    style={[styles.eventCard, { borderLeftColor: p.dot }]}
-                    onPress={() => onSelectEvent(ev)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.eventTime}>{fmtTime(startDate)}</Text>
-                    <Text style={styles.eventTitle} numberOfLines={1}>{ev.title}</Text>
-                    {ev.subtitle && (
-                      <Text style={styles.eventSubtitle} numberOfLines={1}>{ev.subtitle}</Text>
-                    )}
-                    {imWaitlisted ? (
-                      <View style={styles.calendarWaitlistPill}>
-                        <Text style={styles.calendarWaitlistText}>
-                          ⚠️ waitlisted{myWaitlistPos != null ? ` · #${myWaitlistPos} in queue` : ''}
-                        </Text>
-                      </View>
-                    ) : null}
-                  </TouchableOpacity>
+                  <View key={ev.id} style={styles.cardWrapper}>
+                    <EventRow
+                      ev={ev}
+                      group={group}
+                      groupColorHex={userColorHex}
+                      onPress={() => onSelectEvent(ev)}
+                      onGroupPress={onSelectGroup}
+                      isLast={false}
+                      showGroup
+                      meId={meId ?? undefined}
+                      users={allUsers}
+                    />
+                  </View>
                 );
               })}
           </View>
@@ -300,44 +290,13 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     fontFamily: Fonts.regular,
   },
-  eventList: { gap: 10 },
-  eventCard: {
+  eventList: {},
+  cardWrapper: {
     backgroundColor: Colors.surface,
-    borderRadius: Radius.lg,
-    padding: 14,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: Colors.border,
-    borderLeftWidth: 4,
-  },
-  eventTime: {
-    fontSize: 12,
-    fontFamily: Fonts.medium,
-    color: Colors.textMuted,
-    marginBottom: 4,
-  },
-  eventTitle: {
-    fontSize: 15,
-    fontFamily: Fonts.bold,
-    color: Colors.text,
-  },
-  calendarWaitlistPill: {
-    alignSelf: 'flex-start',
-    marginTop: 6,
-    borderWidth: 1,
-    borderColor: '#F59E0B',
-    backgroundColor: '#FFFBEB',
-    borderRadius: Radius.md,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-  calendarWaitlistText: {
-    fontSize: 11,
-    fontFamily: Fonts.medium,
-    color: '#92400E',
-  },
-  eventSubtitle: {
-    fontSize: 13,
-    color: Colors.textSub,
-    marginTop: 2,
+    overflow: 'hidden',
+    marginBottom: 0.5,
   },
 });

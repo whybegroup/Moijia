@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, Image, Alert, Modal, Platform } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter } from 'expo-router';
@@ -270,7 +271,9 @@ export default function CreateEventScreen() {
       <NavBar title="New Event" onBack={() => router.replace('/(tabs)/feed')}
         right={
           <TouchableOpacity onPress={submit} style={[styles.headerBtn, !ok && styles.headerBtnDis]}>
-            <Text style={[styles.headerBtnText, !ok && { color: Colors.textMuted }]}>Create</Text>
+            <Text style={[styles.headerBtnText, !ok && { color: Colors.textMuted }]} numberOfLines={1}>
+              Create
+            </Text>
           </TouchableOpacity>
         }
       />
@@ -511,7 +514,7 @@ export default function CreateEventScreen() {
                     <Image source={{ uri }} style={{ width: 80, height: 80, borderRadius: Radius.lg }} />
                     <TouchableOpacity onPress={() => set('coverPhotos', form.coverPhotos.filter((_, j) => j !== i))}
                       style={styles.removeThumb}>
-                      <Text style={{ fontSize: 9, color: '#fff' }}>✕</Text>
+                      <Ionicons name="close" size={11} color="#fff" />
                     </TouchableOpacity>
                   </View>
                 ))}
@@ -523,7 +526,10 @@ export default function CreateEventScreen() {
               multiline numberOfLines={5} style={styles.descInput} />
             <View style={styles.descToolbar}>
               <TouchableOpacity onPress={() => setShowCoverPhotoModal(true)} style={styles.photoBtn}>
-                <Text style={{ fontSize: 12, color: Colors.textSub, fontFamily: Fonts.medium }}>📷 Add photo</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                  <Ionicons name="camera-outline" size={16} color={Colors.textSub} />
+                  <Text style={{ fontSize: 12, color: Colors.textSub, fontFamily: Fonts.medium }}>Add photo</Text>
+                </View>
               </TouchableOpacity>
               <Text style={{ fontSize: 11, color: Colors.textMuted }}>{form.description.length}/500</Text>
             </View>
@@ -569,7 +575,9 @@ export default function CreateEventScreen() {
         </Field>
 
         <TouchableOpacity onPress={submit} style={[styles.submitBtn, !ok && { backgroundColor: Colors.border }]} disabled={!ok}>
-          <Text style={[styles.submitBtnText, !ok && { color: Colors.textMuted }]}>Create Event</Text>
+          <Text style={[styles.submitBtnText, !ok && { color: Colors.textMuted }]} numberOfLines={1}>
+            Create Event
+          </Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
@@ -578,7 +586,7 @@ export default function CreateEventScreen() {
 
 const styles = StyleSheet.create({
   safe:          { flex: 1, backgroundColor: Colors.bg },
-  headerBtn:     { paddingHorizontal: 14, paddingVertical: 6, borderRadius: Radius.lg, backgroundColor: Colors.accent },
+  headerBtn:     { paddingHorizontal: 16, paddingVertical: 8, borderRadius: Radius.lg, backgroundColor: Colors.accent, flexShrink: 0 },
   headerBtnDis:  { backgroundColor: Colors.border },
   headerBtnText: { fontSize: 13, fontFamily: Fonts.semiBold, color: Colors.accentFg },
   groupChip:     { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 6, borderRadius: Radius.full, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surface },
@@ -601,6 +609,6 @@ const styles = StyleSheet.create({
   urlModalTitle:   { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.text, marginBottom: 12 },
   secondaryBtn:    { paddingHorizontal: 12, paddingVertical: 8, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surface },
   secondaryBtnText:{ fontSize: 12, fontFamily: Fonts.semiBold, color: Colors.text },
-  submitBtn:     { padding: 13, borderRadius: Radius.lg, backgroundColor: Colors.accent, alignItems: 'center', marginTop: 8 },
-  submitBtnText: { fontSize: 15, fontFamily: Fonts.bold, color: Colors.accentFg },
+  submitBtn:     { paddingVertical: 14, paddingHorizontal: 20, borderRadius: Radius.lg, backgroundColor: Colors.accent, alignItems: 'center', justifyContent: 'center', marginTop: 8, minHeight: 48 },
+  submitBtnText: { fontSize: 15, fontFamily: Fonts.bold, color: Colors.accentFg, textAlign: 'center' },
 });

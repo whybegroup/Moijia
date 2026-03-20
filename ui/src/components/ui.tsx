@@ -52,6 +52,8 @@ export function AvatarStack({ names, size = 22, max = 5, dotsForNames = [] }: { 
 // ── Pill / Chip ───────────────────────────────────────────────────────────────
 interface PillProps {
   label: string;
+  /** Renders before label (e.g. vector icon); avoids emoji in custom-font Text on iOS */
+  leading?: React.ReactNode;
   selected?: boolean;
   onPress?: () => void;
   onLongPress?: () => void;
@@ -60,13 +62,16 @@ interface PillProps {
   activeText?: string;
   inactiveBorderColor?: string;
 }
-export function Pill({ label, selected, onPress, onLongPress, activeColor, activeBg, activeText, inactiveBorderColor }: PillProps) {
+export function Pill({ label, leading, selected, onPress, onLongPress, activeColor, activeBg, activeText, inactiveBorderColor }: PillProps) {
+  const fg = selected ? (activeText || Colors.accentFg) : Colors.textSub;
+  const ff = selected ? Fonts.semiBold : Fonts.regular;
   return (
     <TouchableOpacity
       onPress={onPress}
       onLongPress={onLongPress}
       style={[
         styles.pill,
+        leading && styles.pillWithLeading,
         selected ? {
           borderColor: activeColor || Colors.accent,
           backgroundColor: activeBg || Colors.accent,
@@ -76,7 +81,8 @@ export function Pill({ label, selected, onPress, onLongPress, activeColor, activ
         },
       ]}
     >
-      <Text style={[styles.pillText, { color: selected ? (activeText || Colors.accentFg) : Colors.textSub, fontFamily: selected ? Fonts.semiBold : Fonts.regular }]}>
+      {leading ? <View style={styles.pillLeading}>{leading}</View> : null}
+      <Text style={[styles.pillText, { color: fg, fontFamily: ff }]}>
         {label}
       </Text>
     </TouchableOpacity>
@@ -231,6 +237,15 @@ const styles = StyleSheet.create({
     borderRadius: Radius.full, borderWidth: 1,
     flexShrink: 0,
   },
+  pillWithLeading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  pillLeading: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   pillText: { fontSize: 12 },
   btn: {
     borderRadius: Radius.lg, borderWidth: 1,
@@ -254,10 +269,10 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface,
     borderBottomWidth: 1, borderBottomColor: Colors.border,
   },
-  navBack: { width: 70 },
+  navBack: { width: 70, flexShrink: 0 },
   navBackText: { fontSize: 14, color: Colors.textSub, fontFamily: Fonts.medium },
-  navTitle: { flex: 1, fontSize: 16, fontFamily: Fonts.bold, color: Colors.text, textAlign: 'center' },
-  navRight: { width: 70, alignItems: 'flex-end' },
+  navTitle: { flex: 1, fontSize: 16, fontFamily: Fonts.bold, color: Colors.text, textAlign: 'center', minWidth: 0 },
+  navRight: { minWidth: 70, alignItems: 'flex-end', justifyContent: 'center', flexShrink: 0 },
   sheetOverlay: { flex: 1, backgroundColor: Colors.overlay, justifyContent: 'flex-end' },
   sheetContainer: {
     backgroundColor: Colors.surface,

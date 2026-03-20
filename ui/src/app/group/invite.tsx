@@ -3,6 +3,7 @@ import {
   View, Text, ScrollView, TouchableOpacity,
   StyleSheet, TextInput, Share, Linking,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -106,18 +107,20 @@ export default function GroupInviteScreen() {
 
         {/* Share options */}
         <View style={[styles.card, { padding: 0 }]}>
-          {[
-            { icon: '📋', label: 'Copy full invite message', action: copyMessage },
-            { icon: '💬', label: 'Share via iMessage',       action: shareIMessage },
-            { icon: '📧', label: 'Share via Email',           action: shareEmail },
-          ].map((item, i, arr) => (
+          {(
+            [
+              { ion: 'clipboard-outline' as const, label: 'Copy full invite message', action: copyMessage },
+              { ion: 'chatbubble-outline' as const, label: 'Share via iMessage', action: shareIMessage },
+              { ion: 'mail-outline' as const, label: 'Share via Email', action: shareEmail },
+            ] as const
+          ).map((item, i, arr) => (
             <TouchableOpacity
               key={i}
               onPress={item.action}
               style={[styles.shareRow, i < arr.length - 1 && styles.rowBorder]}
               activeOpacity={0.7}
             >
-              <Text style={{ fontSize: 20 }}>{item.icon}</Text>
+              <Ionicons name={item.ion} size={22} color={Colors.textSub} />
               <Text style={styles.shareLabel}>{item.label}</Text>
             </TouchableOpacity>
           ))}

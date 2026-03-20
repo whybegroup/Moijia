@@ -3,6 +3,7 @@ import {
   View, Text, ScrollView, TouchableOpacity,
   StyleSheet, Modal, TextInput, Platform, Alert,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker from '@react-native-community/datetimepicker';
 // Web datetime picker (react-datepicker) – only used on web
@@ -216,16 +217,24 @@ export default function FeedScreen() {
         <View style={styles.actions}>
           {/* View toggle */}
           <View style={styles.viewToggle}>
-            {([['list','☰'],['calendar','📅']] as const).map(([v, icon]) => (
-              <TouchableOpacity
-                key={v}
-                style={[styles.viewBtn, viewMode === v && styles.viewBtnActive]}
-                onPress={() => setViewMode(v)}
-                activeOpacity={0.7}
-              >
-                <Text style={{ fontSize: 13, color: viewMode === v ? Colors.text : Colors.textMuted }}>{icon}</Text>
-              </TouchableOpacity>
-            ))}
+            {(
+              [
+                ['list', 'list-outline'] as const,
+                ['calendar', 'calendar-outline'] as const,
+              ] as const
+            ).map(([v, ion]) => {
+              const active = viewMode === v;
+              return (
+                <TouchableOpacity
+                  key={v}
+                  style={[styles.viewBtn, active && styles.viewBtnActive]}
+                  onPress={() => setViewMode(v)}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name={ion} size={18} color={active ? Colors.text : Colors.textMuted} />
+                </TouchableOpacity>
+              );
+            })}
           </View>
 
           {/* Create */}
@@ -306,7 +315,14 @@ export default function FeedScreen() {
               </Svg>
             </TouchableOpacity>
             <Pill
-              label="⚠️ Needs people"
+              label="Needs people"
+              leading={
+                <Ionicons
+                  name="warning-outline"
+                  size={14}
+                  color={filterNeeds ? '#92400E' : Colors.textSub}
+                />
+              }
               selected={filterNeeds}
               onPress={() => setFilterNeeds(p => !p)}
               activeColor="#FDE68A"
@@ -563,7 +579,7 @@ export default function FeedScreen() {
       <View style={styles.feedContent}>
         {filtered.length === 0 ? (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyIcon}>📭</Text>
+            <Ionicons name="calendar-outline" size={56} color={Colors.textMuted} style={styles.emptyGlyph} />
             <Text style={styles.emptyTitle}>No events</Text>
             <Text style={styles.emptyDesc}>
               {hasFilters ? 'Try adjusting your filters' : 'Create an event to get started'}
@@ -583,6 +599,7 @@ export default function FeedScreen() {
             groups={groups}
             groupColors={groupColors}
             onSelectEvent={ev => router.push(`/event/${ev.id}`)}
+            onSelectGroup={groupId => router.push(`/group/${groupId}`)}
           />
         )}
       </View>
@@ -1002,7 +1019,7 @@ const styles = StyleSheet.create({
   notifIcon:   { width: 36, height: 36, borderRadius: 18, borderWidth: 1, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   unreadDot:   { width: 6, height: 6, borderRadius: 3, backgroundColor: Colors.notGoing },
   emptyState:  { alignItems: 'center', paddingTop: 80, paddingHorizontal: 40 },
-  emptyIcon:   { fontSize: 64, marginBottom: 16 },
+  emptyGlyph:  { marginBottom: 16 },
   emptyTitle:  { fontSize: 20, fontFamily: Fonts.bold, color: Colors.text, marginBottom: 8 },
   emptyDesc:   { fontSize: 14, fontFamily: Fonts.regular, color: Colors.textMuted, textAlign: 'center', marginBottom: 24, lineHeight: 20 },
   emptyBtn:    { paddingHorizontal: 24, paddingVertical: 12, borderRadius: Radius.lg, backgroundColor: Colors.accent },

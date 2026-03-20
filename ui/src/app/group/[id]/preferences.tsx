@@ -83,7 +83,7 @@ export default function GroupPreferencesScreen() {
             <ColorPicker
               style={{ width: '100%' }}
               value={userColorHex}
-              onComplete={({ hex }) => selectColor(hex)}
+              onCompleteJS={({ hex }) => void selectColor(hex)}
             >
               <Panel1 />
               <HueSlider />

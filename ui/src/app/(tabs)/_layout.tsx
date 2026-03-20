@@ -1,63 +1,88 @@
 import React from 'react';
 import { Tabs } from 'expo-router';
 import { View, Text, StyleSheet } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Fonts } from '../../constants/theme';
 import { useCurrentUserContext } from '../../contexts/CurrentUserContext';
 import { UserAvatar } from '../../components/UserAvatar';
 import { EventsCalendarGlyph, GroupsPeopleGlyph } from '../../components/TabScreenIcons';
 
-function TabIcon({
+/** Renders in React Navigation's label slot (full tab width), not inside the ~31px icon wrapper. */
+function TabBarLabel({
   focused,
-  label,
-  icon,
+  color,
+  children,
+}: {
+  focused: boolean;
+  color: string;
+  children: string;
+}) {
+  return (
+    <Text
+      style={[styles.tabBarLabelText, { color }, focused && styles.tabBarLabelTextFocused]}
+      numberOfLines={1}
+    >
+      {children}
+    </Text>
+  );
+}
+
+function TabBarGlyph({
+  focused,
   iconNode,
   isAvatar,
   user,
 }: {
   focused: boolean;
-  label: string;
-  icon?: string;
   iconNode?: React.ReactNode;
   isAvatar?: boolean;
   user?: { name: string; displayName?: string; thumbnail?: string | null; avatarSeed?: string | null } | null;
 }) {
   if (isAvatar && user) {
     return (
-      <View style={styles.tabItem}>
-        <View style={[styles.avatarWrap, focused && styles.iconWrapActive]}>
-          <UserAvatar
-            seed={user.displayName || user.name}
-            thumbnail={user.thumbnail}
-            backgroundColor={user.avatarSeed ? [user.avatarSeed] : undefined}
-            size={26}
-            style={styles.avatarImg}
-          />
-        </View>
-        <Text style={[styles.tabLabel, focused && styles.tabLabelActive]}>{label}</Text>
+      <View style={[styles.avatarWrap, focused && styles.iconWrapActive]}>
+        <UserAvatar
+          seed={user.displayName || user.name}
+          thumbnail={user.thumbnail}
+          backgroundColor={user.avatarSeed ? [user.avatarSeed] : undefined}
+          size={26}
+          style={styles.avatarImg}
+        />
       </View>
     );
   }
 
-  return (
-    <View style={styles.tabItem}>
+  if (isAvatar && !user) {
+    const c = focused ? Colors.text : Colors.textMuted;
+    return (
       <View style={[styles.iconWrap, focused && styles.iconWrapActive]}>
-        {iconNode ?? <Text style={styles.iconText}>{icon}</Text>}
+        <Ionicons name="person-outline" size={20} color={c} />
       </View>
-      <Text style={[styles.tabLabel, focused && styles.tabLabelActive]}>{label}</Text>
-    </View>
-  );
+    );
+  }
+
+  return <View style={[styles.iconWrap, focused && styles.iconWrapActive]}>{iconNode}</View>;
 }
 
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
   const { user: me } = useCurrentUserContext();
 
+  const tabBarLabelFn = (props: { focused: boolean; color: string; children: string }) => (
+    <TabBarLabel focused={props.focused} color={props.color}>
+      {props.children}
+    </TabBarLabel>
+  );
+
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarShowLabel: false,
+        tabBarShowLabel: true,
+        tabBarActiveTintColor: Colors.text,
+        tabBarInactiveTintColor: Colors.textMuted,
+        tabBarLabel: tabBarLabelFn,
         tabBarStyle: {
           backgroundColor: Colors.surface,
           borderTopWidth: 1,
@@ -70,10 +95,10 @@ export default function TabLayout() {
       <Tabs.Screen
         name="feed"
         options={{
+          title: 'Events',
           tabBarIcon: ({ focused }) => (
-            <TabIcon
+            <TabBarGlyph
               focused={focused}
-              label="Events"
               iconNode={<EventsCalendarGlyph size={20} color={focused ? Colors.text : Colors.textMuted} />}
             />
           ),
@@ -82,10 +107,10 @@ export default function TabLayout() {
       <Tabs.Screen
         name="groups"
         options={{
+          title: 'Groups',
           tabBarIcon: ({ focused }) => (
-            <TabIcon
+            <TabBarGlyph
               focused={focused}
-              label="Groups"
               iconNode={<GroupsPeopleGlyph size={20} color={focused ? Colors.text : Colors.textMuted} />}
             />
           ),
@@ -94,7 +119,8 @@ export default function TabLayout() {
       <Tabs.Screen
         name="profile"
         options={{
-          tabBarIcon: ({ focused }) => <TabIcon focused={focused} label="Profile" icon="👤" isAvatar={true} user={me} />,
+          title: 'Profile',
+          tabBarIcon: ({ focused }) => <TabBarGlyph focused={focused} isAvatar user={me} />,
         }}
       />
     </Tabs>
@@ -102,24 +128,32 @@ export default function TabLayout() {
 }
 
 const styles = StyleSheet.create({
-  tabItem: { alignItems: 'center', paddingTop: 8, gap: 3, flexShrink: 0 },
   iconWrap: {
-    width: 40, height: 26, borderRadius: 13,
-    alignItems: 'center', justifyContent: 'center',
+    width: 40,
+    height: 26,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   iconWrapActive: { backgroundColor: '#F0F0EE' },
-  iconText: { fontSize: 18 },
   avatarWrap: {
-    width: 26, height: 26, minWidth: 26, minHeight: 26, borderRadius: 13,
-    alignItems: 'center', justifyContent: 'center',
+    width: 26,
+    height: 26,
+    minWidth: 26,
+    minHeight: 26,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
     overflow: 'hidden',
-    flexShrink: 0,
   },
-  avatarImg: { width: 26, height: 26, minWidth: 26, minHeight: 26, borderRadius: 13, flexShrink: 0 },
-  tabLabel: {
-    fontSize: 10, fontFamily: Fonts.regular, color: Colors.textMuted,
+  avatarImg: { width: 26, height: 26, minWidth: 26, minHeight: 26, borderRadius: 13 },
+  tabBarLabelText: {
+    fontSize: 10,
+    fontFamily: Fonts.regular,
+    textAlign: 'center',
+    marginTop: 2,
   },
-  tabLabelActive: {
-    fontFamily: Fonts.bold, color: Colors.text,
+  tabBarLabelTextFocused: {
+    fontFamily: Fonts.bold,
   },
 });

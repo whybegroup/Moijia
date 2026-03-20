@@ -4,6 +4,7 @@ import {
   StyleSheet, Image, Modal, Linking, Alert, FlatList,
   useWindowDimensions,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Colors, Fonts, Radius, Shadows } from '../../constants/theme';
@@ -161,7 +162,7 @@ export default function EventDetailScreen() {
         ...c,
         createdAt: new Date(c.createdAt),
         photos: dDiff(evStart) < 0 && i < 2 && (!c.photos || c.photos.length === 0)
-          ? ['https://placehold.co/400x300/FFF0F6/B5245E/png?text=📸']
+          ? ['https://placehold.co/400x300/FFF0F6/B5245E/png?text=Photo']
           : c.photos || [],
       };
     })
@@ -333,9 +334,10 @@ export default function EventDetailScreen() {
           {hasBanners ? (
             <View style={styles.bannerStack}>
               {showHoursBanner ? (
-                <View style={[styles.bannerInner, styles.bannerAmber]}>
+                <View style={[styles.bannerInner, styles.bannerAmber, styles.bannerAmberRow]}>
+                  <Ionicons name="time-outline" size={16} color="#92400E" />
                   <Text style={styles.bannerAmberText}>
-                    ⏰ Starting in <Text style={{ fontFamily: Fonts.bold }}>{hoursLeft}h</Text>
+                    Starting in <Text style={{ fontFamily: Fonts.bold }}>{hoursLeft}h</Text>
                   </Text>
                 </View>
               ) : null}
@@ -345,23 +347,26 @@ export default function EventDetailScreen() {
                 </View>
               ) : null}
               {needsMore ? (
-                <View style={[styles.bannerInner, styles.bannerAmber]}>
+                <View style={[styles.bannerInner, styles.bannerAmber, styles.bannerAmberRow]}>
+                  <Ionicons name="warning-outline" size={16} color="#92400E" />
                   <Text style={styles.bannerAmberText}>
-                    ⚠️ <Text style={{ fontFamily: Fonts.bold }}>{minN - going.length} more needed</Text>
+                    <Text style={{ fontFamily: Fonts.bold }}>{minN - going.length} more needed</Text>
                   </Text>
                 </View>
               ) : null}
               {showLowSpots ? (
-                <View style={[styles.bannerInner, styles.bannerAmber]}>
+                <View style={[styles.bannerInner, styles.bannerAmber, styles.bannerAmberRow]}>
+                  <Ionicons name="warning-outline" size={16} color="#92400E" />
                   <Text style={styles.bannerAmberText}>
-                    ⚠️ <Text style={{ fontFamily: Fonts.bold }}>{spotsLeft}</Text> spot{spotsLeft === 1 ? '' : 's'} left
+                    <Text style={{ fontFamily: Fonts.bold }}>{spotsLeft}</Text> spot{spotsLeft === 1 ? '' : 's'} left
                   </Text>
                 </View>
               ) : null}
               {imWaitlisted ? (
-                <View style={[styles.bannerInner, styles.bannerAmber]}>
+                <View style={[styles.bannerInner, styles.bannerAmber, styles.bannerAmberRow]}>
+                  <Ionicons name="warning-outline" size={16} color="#92400E" />
                   <Text style={styles.bannerAmberText}>
-                    ⚠️ waitlisted
+                    Waitlisted
                     {myWaitlistPos != null ? (
                       <>
                         {' · '}
@@ -396,17 +401,17 @@ export default function EventDetailScreen() {
           <View style={{ paddingHorizontal: 20 }}>
             {/* Info rows */}
             <View style={{ gap: 8, marginBottom: 16 }}>
-              <InfoRow icon="📅">{fmtDateFull(evStart)} · {fmtTime(evStart)} – {fmtTime(typeof ev.end === 'string' ? new Date(ev.end) : ev.end)}</InfoRow>
-              {ev.location && <InfoRow icon="📍">{ev.location}</InfoRow>}
+              <InfoRow ionicon="calendar-outline">{fmtDateFull(evStart)} · {fmtTime(evStart)} – {fmtTime(typeof ev.end === 'string' ? new Date(ev.end) : ev.end)}</InfoRow>
+              {ev.location && <InfoRow ionicon="location-outline">{ev.location}</InfoRow>}
               {((ev.minAttendees || 0) > 0 || (ev.maxAttendees || 0) > 0) && (
-                <InfoRow icon="👥">
+                <InfoRow ionicon="people-outline">
                   {(ev.minAttendees || 0) > 0 && `Min ${ev.minAttendees}`}
                   {(ev.minAttendees || 0) > 0 && (ev.maxAttendees || 0) > 0 && ' · '}
                   {(ev.maxAttendees || 0) > 0 && `Max ${ev.maxAttendees}`}
                   {(ev.maxAttendees || 0) > 0 && ev.enableWaitlist && ' · Waitlist enabled'}
                 </InfoRow>
               )}
-              <InfoRow icon="✨">Created by {getUserSafe(ev.createdBy).displayName}</InfoRow>
+              <InfoRow ionicon="person-outline">Created by {getUserSafe(ev.createdBy).displayName}</InfoRow>
             </View>
 
             {/* Description */}
@@ -476,10 +481,19 @@ export default function EventDetailScreen() {
         {/* Comments */}
         <View style={styles.commentsBlock}>
           {comments.length === 0 && (
-            <View style={{ padding: 28, alignItems: 'center' }}>
-              <Text style={{ fontSize: 14, color: Colors.textMuted, fontFamily: Fonts.regular }}>
-                {isPast ? 'Share a photo or memory! 📸' : 'No comments yet — be the first!'}
-              </Text>
+            <View style={{ padding: 28, alignItems: 'center', gap: 8 }}>
+              {isPast ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Ionicons name="camera-outline" size={18} color={Colors.textMuted} />
+                  <Text style={{ fontSize: 14, color: Colors.textMuted, fontFamily: Fonts.regular }}>
+                    Share a photo or memory!
+                  </Text>
+                </View>
+              ) : (
+                <Text style={{ fontSize: 14, color: Colors.textMuted, fontFamily: Fonts.regular }}>
+                  No comments yet — be the first!
+                </Text>
+              )}
             </View>
           )}
           {comments.map((c, i) => {
@@ -518,7 +532,7 @@ export default function EventDetailScreen() {
               <View key={i} style={{ position: 'relative' }}>
                 <Image source={{ uri: url }} style={styles.pendingPhoto} />
                 <TouchableOpacity onPress={() => setPendingPhotos(p => p.filter((_, j) => j !== i))} style={styles.pendingPhotoRemove}>
-                  <Text style={{ fontSize: 9, color: '#fff' }}>✕</Text>
+                  <Ionicons name="close" size={11} color="#fff" />
                 </TouchableOpacity>
               </View>
             ))}
@@ -526,7 +540,7 @@ export default function EventDetailScreen() {
         )}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <TouchableOpacity onPress={() => setShowCommentPhotoModal(true)} style={styles.photoBtn}>
-            <Text style={{ fontSize: 18 }}>📷</Text>
+            <Ionicons name="camera-outline" size={20} color={Colors.textSub} />
           </TouchableOpacity>
           <TextInput
             value={input} onChangeText={setInput}
@@ -597,7 +611,7 @@ export default function EventDetailScreen() {
                 </View>
               </View>
               <TouchableOpacity onPress={() => setLightbox(null)} style={styles.lightboxBtn}>
-                <Text style={styles.lightboxBtnText}>✕</Text>
+                <Ionicons name="close" size={22} color="#fff" />
               </TouchableOpacity>
             </View>
             <Image source={{ uri: lightbox.url }} style={styles.lightboxImg} resizeMode="contain" />
@@ -609,10 +623,10 @@ export default function EventDetailScreen() {
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
-function InfoRow({ icon, children }: { icon: string; children: React.ReactNode }) {
+function InfoRow({ ionicon, children }: { ionicon: React.ComponentProps<typeof Ionicons>['name']; children: React.ReactNode }) {
   return (
     <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
-      <Text style={{ fontSize: 15, marginTop: 1 }}>{icon}</Text>
+      <Ionicons name={ionicon} size={20} color={Colors.textSub} style={{ width: 22, marginTop: 1 }} />
       <Text style={styles.infoText}>{children}</Text>
     </View>
   );
@@ -627,18 +641,22 @@ function RsvpBtn({ status, active, disabled, isWaitlist, onPress, onLongPress }:
   let bg = Colors.surface;
   let border = Colors.border;
   let label = '';
+  let leadIcon: React.ComponentProps<typeof Ionicons>['name'] | null = null;
   
   if (isWaitlistStatus) {
     bg = active ? waitlistColor : Colors.surface;
     border = active ? waitlistColor : waitlistColor;
-    label = active ? '⏳ Waitlisted' : 'Join Waitlist';
+    label = active ? 'Waitlisted' : 'Join Waitlist';
+    if (active) leadIcon = 'hourglass-outline';
   } else if (isGoing) {
     bg = active ? Colors.going : Colors.surface;
     border = active ? Colors.going : Colors.border;
-    label = active ? '✓ Going' : 'Going';
+    label = active ? 'Going' : 'Going';
+    if (active) leadIcon = 'checkmark';
     if (isWaitlist && !active) {
       label = 'Join Waitlist';
       border = waitlistColor;
+      leadIcon = null;
     }
   } else if (isMaybe) {
     bg = active ? Colors.maybe : Colors.surface;
@@ -647,7 +665,8 @@ function RsvpBtn({ status, active, disabled, isWaitlist, onPress, onLongPress }:
   } else {
     bg = active ? Colors.notGoing : Colors.surface;
     border = active ? Colors.notGoing : Colors.border;
-    label = active ? '✗ Can\'t go' : 'Can\'t go';
+    label = active ? 'Can\'t go' : 'Can\'t go';
+    if (active) leadIcon = 'close';
   }
   
   const textColor = disabled ? Colors.textMuted : active ? '#fff' : Colors.textSub;
@@ -659,7 +678,10 @@ function RsvpBtn({ status, active, disabled, isWaitlist, onPress, onLongPress }:
       activeOpacity={0.8}
       disabled={disabled}
     >
-      <Text style={[styles.rsvpBtnText, { color: textColor }]}>{label}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+        {leadIcon ? <Ionicons name={leadIcon} size={16} color={textColor} /> : null}
+        <Text style={[styles.rsvpBtnText, { color: textColor }]}>{label}</Text>
+      </View>
     </TouchableOpacity>
   );
 }
@@ -816,7 +838,8 @@ const styles = StyleSheet.create({
   bannerStack:      { paddingHorizontal: 20, paddingTop: 10, gap: 5 },
   bannerInner:      { paddingVertical: 6, paddingHorizontal: 10, borderRadius: Radius.md },
   bannerAmber:      { backgroundColor: '#FFFBEB', borderWidth: 1, borderColor: '#FDE68A' },
-  bannerAmberText:  { fontSize: 13, color: '#92400E', fontFamily: Fonts.regular },
+  bannerAmberRow:   { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  bannerAmberText:  { flex: 1, fontSize: 13, color: '#92400E', fontFamily: Fonts.regular },
   bannerGray:       { backgroundColor: Colors.bg, borderWidth: 1, borderColor: Colors.border },
   bannerGrayText:   { fontSize: 13, color: Colors.textMuted, fontFamily: Fonts.regular },
   photoGallery:     { marginBottom: 0 },
@@ -890,7 +913,6 @@ const styles = StyleSheet.create({
   lightboxName:     { fontSize: 13, fontFamily: Fonts.semiBold, color: '#fff' },
   lightboxTime:     { fontSize: 11, color: 'rgba(255,255,255,0.45)', fontFamily: Fonts.regular },
   lightboxBtn:      { paddingHorizontal: 14, paddingVertical: 7, borderRadius: Radius.lg, backgroundColor: 'rgba(255,255,255,0.14)' },
-  lightboxBtnText:  { fontSize: 13, fontFamily: Fonts.semiBold, color: '#fff' },
   lightboxImg:      { width: '100%', height: '70%' },
   sheetTitle:       { fontSize: 17, fontFamily: Fonts.bold, color: Colors.text, marginBottom: 14 },
   attendSection:    { fontSize: 11, fontFamily: Fonts.semiBold, color: Colors.textMuted, letterSpacing: 0.6, marginTop: 14, marginBottom: 6 },

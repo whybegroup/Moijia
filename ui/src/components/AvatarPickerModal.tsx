@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, ScrollView } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Colors, Fonts, Radius } from '../constants/theme';
 import { GroupAvatarPicker } from './GroupAvatarPicker';
 import { UserAvatarPicker } from './UserAvatarPicker';
@@ -57,7 +58,7 @@ export function AvatarPickerModal({
         <View style={styles.header}>
           <Text style={styles.title}>{title}</Text>
           <TouchableOpacity onPress={onClose} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }} activeOpacity={0.7}>
-            <Text style={styles.closeBtn}>✕</Text>
+            <Ionicons name="close" size={22} color={Colors.textMuted} />
           </TouchableOpacity>
         </View>
         <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 400 }}>
@@ -105,7 +106,6 @@ const styles = StyleSheet.create({
   card:    { backgroundColor: Colors.surface, borderRadius: 18, borderWidth: 1, borderColor: Colors.border, padding: 16, width: '100%', maxWidth: 360, maxHeight: '80%' },
   header:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
   title:   { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.text },
-  closeBtn:{ fontSize: 20, color: Colors.textMuted, lineHeight: 24 },
   input:   { padding: 10, paddingHorizontal: 12, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.bg, fontSize: 14, color: Colors.text, fontFamily: Fonts.regular },
   saveBtn: { marginTop: 12, paddingVertical: 10, borderRadius: Radius.lg, backgroundColor: Colors.accent, alignItems: 'center' },
   saveBtnDisabled: { backgroundColor: Colors.border },

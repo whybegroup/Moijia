@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, Image, Alert, Modal, Platform } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -292,7 +293,9 @@ export default function EditEventScreen() {
       <NavBar title="Edit Event" onBack={handleBack}
         right={
           <TouchableOpacity onPress={submit} style={[styles.headerBtn, !ok && styles.headerBtnDis]}>
-            <Text style={[styles.headerBtnText, !ok && { color: Colors.textMuted }]}>Save</Text>
+            <Text style={[styles.headerBtnText, !ok && { color: Colors.textMuted }]} numberOfLines={1}>
+              Save
+            </Text>
           </TouchableOpacity>
         }
       />
@@ -533,7 +536,7 @@ export default function EditEventScreen() {
                     <Image source={{ uri }} style={{ width: 80, height: 80, borderRadius: Radius.lg }} />
                     <TouchableOpacity onPress={() => set('coverPhotos', form.coverPhotos.filter((_, j) => j !== i))}
                       style={styles.removeThumb}>
-                      <Text style={{ fontSize: 9, color: '#fff' }}>✕</Text>
+                      <Ionicons name="close" size={11} color="#fff" />
                     </TouchableOpacity>
                   </View>
                 ))}
@@ -545,7 +548,10 @@ export default function EditEventScreen() {
               multiline numberOfLines={5} style={styles.descInput} />
             <View style={styles.descToolbar}>
               <TouchableOpacity onPress={() => setShowCoverPhotoModal(true)} style={styles.photoBtn}>
-                <Text style={{ fontSize: 12, color: Colors.textSub, fontFamily: Fonts.medium }}>📷 Add photo</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                  <Ionicons name="camera-outline" size={16} color={Colors.textSub} />
+                  <Text style={{ fontSize: 12, color: Colors.textSub, fontFamily: Fonts.medium }}>Add photo</Text>
+                </View>
               </TouchableOpacity>
               <Text style={{ fontSize: 11, color: Colors.textMuted }}>{form.description.length}/500</Text>
             </View>
@@ -600,7 +606,7 @@ export default function EditEventScreen() {
 
 const styles = StyleSheet.create({
   safe:          { flex: 1, backgroundColor: Colors.bg },
-  headerBtn:     { paddingHorizontal: 14, paddingVertical: 6, borderRadius: Radius.lg, backgroundColor: Colors.accent },
+  headerBtn:     { paddingHorizontal: 16, paddingVertical: 8, borderRadius: Radius.lg, backgroundColor: Colors.accent, flexShrink: 0 },
   headerBtnDis:  { backgroundColor: Colors.border },
   headerBtnText: { fontSize: 13, fontFamily: Fonts.semiBold, color: Colors.accentFg },
   groupChip:     { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 6, borderRadius: Radius.full, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surface },

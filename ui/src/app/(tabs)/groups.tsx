@@ -13,6 +13,7 @@ import {
   ActivityIndicator,
   type TextStyle,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -228,7 +229,13 @@ export default function GroupsScreen() {
           <Text style={styles.publicSectionLabel}>{debouncedSearch ? `Results for "${debouncedSearch}"` : 'Public groups'}</Text>
           <View style={styles.showJoinedRow}>
             <Text style={styles.showJoinedLabel}>Show joined</Text>
-            <Switch value={showJoined} onValueChange={setShowJoined} trackColor={{ false: Colors.border, true: Colors.border }} thumbColor="#E5E5E5" />
+            <Switch
+              value={showJoined}
+              onValueChange={setShowJoined}
+              trackColor={{ false: Colors.border, true: Colors.going }}
+              ios_backgroundColor={Colors.border}
+              thumbColor={Platform.OS === 'android' ? (showJoined ? '#ffffff' : '#f4f3f4') : undefined}
+            />
           </View>
         </View>
         <View style={styles.card}>
@@ -266,15 +273,21 @@ export default function GroupsScreen() {
                       disabled={!currentUserId || joinGroup.isPending || leaveGroup.isPending}
                       style={[styles.joinGroupBtn, isJoined && styles.joinGroupBtnJoined]}
                     >
-                      <Text style={[styles.joinGroupBtnText, isJoined && styles.joinGroupBtnTextJoined]}>
-                        {isJoined
-                          ? leaveGroup.isPending && leaveGroup.variables?.groupId === g.id
-                            ? 'Leaving…'
-                            : 'Joined ✓'
-                          : joinGroup.isPending && joinGroup.variables?.groupId === g.id
-                            ? 'Joining…'
-                            : 'Join'}
-                      </Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+                        {isJoined &&
+                        !(leaveGroup.isPending && leaveGroup.variables?.groupId === g.id) && (
+                          <Ionicons name="checkmark-circle" size={16} color={Colors.textSub} />
+                        )}
+                        <Text style={[styles.joinGroupBtnText, isJoined && styles.joinGroupBtnTextJoined]}>
+                          {isJoined
+                            ? leaveGroup.isPending && leaveGroup.variables?.groupId === g.id
+                              ? 'Leaving…'
+                              : 'Joined'
+                            : joinGroup.isPending && joinGroup.variables?.groupId === g.id
+                              ? 'Joining…'
+                              : 'Join'}
+                        </Text>
+                      </View>
                     </TouchableOpacity>
                   </View>
                 );
@@ -306,12 +319,9 @@ export default function GroupsScreen() {
         <Text style={[styles.sectionLabel, { marginTop: 24 }]}>My groups</Text>
         {groups.length === 0 ? (
           <View style={styles.myEmpty}>
-            <Text style={styles.emptyIcon}>👥</Text>
+            <Ionicons name="people-outline" size={48} color={Colors.textMuted} style={styles.emptyGlyph} />
             <Text style={styles.emptyTitle}>No groups yet</Text>
             <Text style={styles.emptyDesc}>Create a group or join a public group above.</Text>
-            <TouchableOpacity onPress={() => router.push('/create-group')} style={styles.emptyBtn}>
-              <Text style={styles.emptyBtnText}>Create group</Text>
-            </TouchableOpacity>
           </View>
         ) : (
           <>
@@ -657,7 +667,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   myEmpty: { alignItems: 'center', paddingTop: 24, paddingHorizontal: 24, paddingBottom: 8 },
-  emptyIcon: { fontSize: 48, marginBottom: 12 },
+  emptyGlyph: { marginBottom: 12 },
   emptyTitle: { fontSize: 18, fontFamily: Fonts.bold, color: Colors.text, marginBottom: 6 },
   emptyDesc: {
     fontSize: 14,

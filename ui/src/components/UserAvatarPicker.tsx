@@ -67,7 +67,7 @@ export function UserAvatarPicker({
         <ColorPicker
           style={{ width: '100%' }}
           value={pickerValue}
-          onComplete={onChangeBackgroundColor}
+          onCompleteJS={onChangeBackgroundColor}
         >
           <Panel1 />
           <HueSlider />

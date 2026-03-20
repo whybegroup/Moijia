@@ -9,6 +9,7 @@ import { NavBar, Toggle } from '../../components/ui';
 import { useGroup, useUsers, useGroupMembers, useGroupMemberColor, usePendingRequests, useHandleMembershipRequest, useUpdateGroup, useLeaveGroup, useSoftDeleteGroup, useDeleteGroup, useRecoverGroup, useRemoveMember, useSetMemberRole, useSetSuperAdmin } from '../../hooks/api';
 import { MembershipRequestAction } from '@boltup/client';
 import { useCurrentUserContext } from '../../contexts/CurrentUserContext';
+import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path, Rect } from 'react-native-svg';
 import { GroupAvatar } from '../../components/GroupAvatar';
 import { AvatarPickerModal } from '../../components/AvatarPickerModal';
@@ -379,7 +380,7 @@ export default function GroupDetailScreen() {
                     >
                       <View style={styles.copyIconWrap}>
                         {inviteCopied ? (
-                          <Text style={[styles.copyIconText, { color: Colors.going }]}>✓</Text>
+                          <Ionicons name="checkmark" size={18} color={Colors.going} />
                         ) : (
                           <Svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke={Colors.textMuted} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                             <Rect x="9" y="9" width="13" height="13" rx="2" />
@@ -398,7 +399,7 @@ export default function GroupDetailScreen() {
         {isPending ? (
           <View style={{ padding: 16, paddingBottom: 100 }}>
             <View style={[styles.card, { borderColor: '#FDE68A', backgroundColor: '#FFFBEB', padding: 24, alignItems: 'center' }]}>
-              <Text style={{ fontSize: 18, marginBottom: 8 }}>⏳</Text>
+              <Ionicons name="hourglass-outline" size={28} color="#92400E" style={{ marginBottom: 8 }} />
               <Text style={{ fontSize: 16, fontFamily: Fonts.semiBold, color: Colors.text, marginBottom: 8 }}>
                 Request pending
               </Text>
@@ -413,7 +414,7 @@ export default function GroupDetailScreen() {
             <Text style={styles.sectionLabel}>LEAVE</Text>
             <View style={[styles.card, { borderColor: '#FECACA' }]}>
               <TouchableOpacity onPress={() => setShowLeave(true)} style={styles.memberRow} activeOpacity={0.8}>
-                <Text style={{ fontSize: 18 }}>🚪</Text>
+                <Ionicons name="log-out-outline" size={22} color={Colors.textSub} />
                 <View style={{ flex: 1 }}>
                   <Text style={styles.leaveTitle}>Cancel Request</Text>
                   <Text style={styles.leaveDesc}>Withdraw your request to join this group</Text>
@@ -479,7 +480,7 @@ export default function GroupDetailScreen() {
                         </Text>
                       </View>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                        {isSuperAdmin && <Text style={{ fontSize: 14 }}>👑</Text>}
+                        {isSuperAdmin && <Ionicons name="star" size={16} color="#CA8A04" />}
                         {!isSuperAdmin && isAdmin && (
                           <View style={styles.adminBadge}><Text style={styles.adminBadgeText}>Admin</Text></View>
                         )}
@@ -500,16 +501,20 @@ export default function GroupDetailScreen() {
                       </View>
                       {isSuperAdmin && (
                         <TouchableOpacity onPress={() => transferSuperAdmin(memberMenu.userId)} style={[styles.menuItem, { borderBottomWidth: 1, borderBottomColor: Colors.border }]}>
-                          <Text style={{ fontSize: 16 }}>👑</Text>
+                          <Ionicons name="star" size={20} color="#CA8A04" />
                           <Text style={styles.menuItemText}>Transfer super admin</Text>
                         </TouchableOpacity>
                       )}
                       <TouchableOpacity onPress={() => toggleAdmin(memberMenu.userId)} style={[styles.menuItem, { borderBottomWidth: 1, borderBottomColor: Colors.border }]}>
-                        <Text style={{ fontSize: 16 }}>{admins.includes(memberMenu.userId) ? '👤' : '⭐'}</Text>
+                        <Ionicons
+                          name={admins.includes(memberMenu.userId) ? 'person-outline' : 'star-outline'}
+                          size={20}
+                          color={Colors.text}
+                        />
                         <Text style={styles.menuItemText}>{admins.includes(memberMenu.userId) ? 'Remove admin' : 'Make admin'}</Text>
                       </TouchableOpacity>
                       <TouchableOpacity onPress={() => removeMember(memberMenu.userId)} style={styles.menuItem}>
-                        <Text style={{ fontSize: 16 }}>🚫</Text>
+                        <Ionicons name="person-remove-outline" size={20} color={Colors.notGoing} />
                         <Text style={[styles.menuItemText, { color: Colors.notGoing }]}>Remove from group</Text>
                       </TouchableOpacity>
                     </View>
@@ -533,7 +538,7 @@ export default function GroupDetailScreen() {
                       <Text style={styles.memberName}>{displayName}</Text>
                       <Text style={styles.memberRole}>{isSuperAdmin ? 'Super Admin' : isAdmin ? 'Admin' : 'Member'}</Text>
                     </View>
-                    {isSuperAdmin && <Text style={{ fontSize: 14 }}>👑</Text>}
+                    {isSuperAdmin && <Ionicons name="star" size={16} color="#CA8A04" />}
                   </View>
                 );
               })}
@@ -548,7 +553,7 @@ export default function GroupDetailScreen() {
                   <>
                     {isSoftDeleted ? (
                       <TouchableOpacity onPress={doRecover} style={styles.memberRow} activeOpacity={0.8} disabled={recoverMutation.isPending}>
-                        <Text style={{ fontSize: 18 }}>↩</Text>
+                        <Ionicons name="arrow-undo-outline" size={22} color={Colors.going} />
                         <View style={{ flex: 1 }}>
                           <Text style={styles.leaveTitle}>Recover Group</Text>
                           <Text style={styles.leaveDesc}>Restore this deactivated group</Text>
@@ -558,7 +563,7 @@ export default function GroupDetailScreen() {
                     ) : (
                       <>
                         <TouchableOpacity onPress={() => setShowDeactivateConfirm(true)} style={[styles.memberRow, styles.rowBorder]} activeOpacity={0.8} disabled={softDeleteMutation.isPending}>
-                          <View style={styles.dangerIconWrap}><Text style={{ fontSize: 18 }}>⏸</Text></View>
+                          <View style={styles.dangerIconWrap}><Ionicons name="pause-circle-outline" size={22} color="#B45309" /></View>
                           <View style={{ flex: 1 }}>
                             <Text style={[styles.leaveTitle, { color: '#B45309' }]}>Deactivate Group</Text>
                             <Text style={styles.leaveDesc}>Temporarily deactivate the group - you can recover it later</Text>
@@ -566,7 +571,7 @@ export default function GroupDetailScreen() {
                           {softDeleteMutation.isPending && <ActivityIndicator size="small" color={Colors.text} />}
                         </TouchableOpacity>
                         <TouchableOpacity onPress={() => setShowDeleteConfirm(true)} style={styles.memberRow} activeOpacity={0.8} disabled={hardDeleteMutation.isPending}>
-                          <View style={styles.dangerIconWrap}><Text style={{ fontSize: 18 }}>🗑</Text></View>
+                          <View style={styles.dangerIconWrap}><Ionicons name="trash-outline" size={22} color={Colors.notGoing} /></View>
                           <View style={{ flex: 1 }}>
                             <Text style={styles.leaveTitle}>Delete Group</Text>
                             <Text style={styles.leaveDesc}>Permanently remove the group and all members</Text>
@@ -578,7 +583,7 @@ export default function GroupDetailScreen() {
                   </>
                 ) : (
                   <TouchableOpacity onPress={() => setShowLeave(true)} style={styles.memberRow} activeOpacity={0.8}>
-                    <Text style={{ fontSize: 18 }}>🚪</Text>
+                    <Ionicons name="log-out-outline" size={22} color={Colors.textSub} />
                     <View style={{ flex: 1 }}>
                       <Text style={styles.leaveTitle}>Leave Group</Text>
                       <Text style={styles.leaveDesc}>You'll need an invite to rejoin</Text>
