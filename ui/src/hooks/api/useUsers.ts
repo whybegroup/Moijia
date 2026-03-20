@@ -6,6 +6,9 @@ export function useUsers() {
   return useQuery({
     queryKey: queryKeys.users.all,
     queryFn: () => UsersService.getUsers(),
+    staleTime: 0,
+    refetchInterval: 3000,
+    refetchIntervalInBackground: false,
   });
 }
 

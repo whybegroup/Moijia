@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, Pressable, StyleSheet } from 'react-nativ
 import { Colors, Fonts, Radius, Shadows } from '../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName, fmtTime, fmtMonthShort, dDiff, isToday as checkToday } from '../utils/helpers';
 import type { EventDetailed, GroupScoped, User } from '@boltup/client';
-import { AvatarStack } from './ui';
+import { UserAvatarStack } from './UserAvatarStack';
 
 interface EventRowProps {
   ev: EventDetailed;
@@ -38,13 +38,12 @@ export function EventRow({ ev, group, groupColorHex, onPress, onGroupPress, isLa
   });
   
   const getUserSafe = (userId: string): User => {
-    return usersMap[userId] || { 
-      id: userId, 
-      displayName: userId, 
-      email: '', 
-      profilePhoto: null, 
-      createdAt: new Date(), 
-      updatedAt: new Date() 
+    return usersMap[userId] || {
+      id: userId,
+      name: 'Loading...',
+      displayName: 'Loading...',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
   };
 
@@ -96,11 +95,12 @@ export function EventRow({ ev, group, groupColorHex, onPress, onGroupPress, isLa
         )}
         {going.length > 0 && (
           <View style={styles.avatarRow}>
-            <AvatarStack 
-              names={going.map(r => getUserSafe(r.userId).displayName)} 
-              size={20} 
-              max={10} 
-              dotsForNames={Array.from(usersWithMemos).map(userId => getUserSafe(userId).displayName)}
+            <UserAvatarStack
+              userIds={going.map(r => r.userId)}
+              getUser={getUserSafe}
+              size={20}
+              max={10}
+              dotUserIds={Array.from(usersWithMemos)}
             />
           </View>
         )}

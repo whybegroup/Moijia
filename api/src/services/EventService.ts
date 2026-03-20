@@ -244,66 +244,103 @@ export class EventService {
   }
 
   /**
-   * Create or update an RSVP
+   * Create or update an RSVP.
+   * Capacity for "going" is enforced inside a transaction (event row lock) so concurrent
+   * requests cannot both pass the max-attendees check.
    */
   public async upsertRSVP(eventId: string, input: RSVPInput): Promise<RSVP> {
-    // Get existing RSVP to check if status is changing from "going"
-    const existingRsvp = await prisma.rSVP.findUnique({
-      where: {
-        eventId_userId: {
-          eventId,
-          userId: input.userId,
-        },
-      },
-    });
+    const { rsvp, effectiveStatus, event, inputUserId, shouldPromote } = await prisma.$transaction(
+      async (tx) => {
+        const event = await tx.event.findUnique({ where: { id: eventId } });
+        if (!event) {
+          throw { status: 404, message: 'Event not found' };
+        }
 
-    const rsvp = await prisma.rSVP.upsert({
-      where: {
-        eventId_userId: {
-          eventId,
-          userId: input.userId,
-        },
-      },
-      create: {
-        eventId,
-        userId: input.userId,
-        status: input.status,
-        memo: input.memo || '',
-      },
-      update: {
-        status: input.status,
-        memo: input.memo || '',
-      },
-    });
+        // Serialize RSVP updates per event (SQLite: writer lock; Postgres: row update locks parent)
+        await tx.event.update({
+          where: { id: eventId },
+          data: { updatedAt: new Date() },
+        });
 
-    // If someone cancelled "going", promote waitlist
-    if (existingRsvp?.status === 'going' && input.status !== 'going') {
+        const existingRsvp = await tx.rSVP.findUnique({
+          where: {
+            eventId_userId: {
+              eventId,
+              userId: input.userId,
+            },
+          },
+        });
+
+        const goingCount = await tx.rSVP.count({
+          where: { eventId, status: 'going' },
+        });
+
+        let effectiveStatus = input.status;
+
+        if (input.status === 'going') {
+          const max = event.maxAttendees;
+          if (max != null && max > 0) {
+            const wasGoing = existingRsvp?.status === 'going';
+            if (!wasGoing && goingCount >= max) {
+              if (event.enableWaitlist) {
+                effectiveStatus = 'waitlist';
+              } else {
+                throw { status: 409, message: 'Event is at full capacity' };
+              }
+            }
+          }
+        }
+
+        const rsvp = await tx.rSVP.upsert({
+          where: {
+            eventId_userId: {
+              eventId,
+              userId: input.userId,
+            },
+          },
+          create: {
+            eventId,
+            userId: input.userId,
+            status: effectiveStatus,
+            memo: input.memo || '',
+          },
+          update: {
+            status: effectiveStatus,
+            memo: input.memo || '',
+          },
+        });
+
+        const shouldPromote = existingRsvp?.status === 'going' && effectiveStatus !== 'going';
+
+        return { rsvp, effectiveStatus, event, inputUserId: input.userId, shouldPromote };
+      },
+      { timeout: 10_000 }
+    );
+
+    if (shouldPromote) {
       await this.promoteFromWaitlist(eventId);
     }
 
-    // Create in-app notification for event creator when someone RSVPs "going"
-    if (input.status === 'going') {
-      const event = await prisma.event.findUnique({
-        where: { id: eventId },
-      });
-      
+    if (effectiveStatus === 'going') {
       const user = await prisma.user.findUnique({
-        where: { id: input.userId },
+        where: { id: inputUserId },
       });
 
-      if (event && user && event.createdBy !== input.userId) {
-        await notificationService.createForUser(
-          event.createdBy,
-          'New RSVP',
-          `${user.displayName} is going to ${event.title}`,
-          {
-            type: 'rsvp',
-            icon: '✓',
-            eventId: event.id,
-            groupId: event.groupId,
-            dest: 'event',
-          }
-        ).catch(err => console.error('Failed to create RSVP notification:', err));
+      if (event && user && event.createdBy !== inputUserId) {
+        await notificationService
+          .createForUser(
+            event.createdBy,
+            'New RSVP',
+            `${user.displayName} is going to ${event.title}`,
+            {
+              type: 'rsvp',
+              icon: '✓',
+              eventId: event.id,
+              groupId: event.groupId,
+              dest: 'event',
+            }
+          )
+          .catch((err) => console.error('Failed to create RSVP notification:', err));
       }
     }
 
@@ -362,20 +399,18 @@ export class EventService {
       return;
     }
 
-    const goingCount = event.rsvps.filter(r => r.status === 'going').length;
+    const goingCount = event.rsvps.filter((r) => r.status === 'going').length;
     const availableSpots = event.maxAttendees - goingCount;
 
     if (availableSpots <= 0) {
       return;
     }
 
-    // Get waitlisted users in order of when they joined waitlist
     const waitlisted = event.rsvps
-      .filter(r => r.status === 'waitlist')
+      .filter((r) => r.status === 'waitlist')
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
       .slice(0, availableSpots);
 
-    // Promote each waitlisted user to "going"
     for (const rsvp of waitlisted) {
       await prisma.rSVP.update({
         where: {
@@ -389,24 +424,25 @@ export class EventService {
         },
       });
 
-      // Notify promoted user
       const user = await prisma.user.findUnique({
         where: { id: rsvp.userId },
       });
 
       if (user) {
-        await notificationService.createForUser(
-          rsvp.userId,
-          'Promoted from Waitlist',
-          `You've been moved from waitlist to going for ${event.title}`,
-          {
-            type: 'waitlist_promotion',
-            icon: '🎉',
-            eventId: event.id,
-            groupId: event.groupId,
-            dest: 'event',
-          }
-        ).catch(err => console.error('Failed to create promotion notification:', err));
+        void notificationService
+          .createForUser(
+            rsvp.userId,
+            'Promoted from Waitlist',
+            `You've been moved from waitlist to going for ${event.title}`,
+            {
+              type: 'waitlist_promotion',
+              icon: '🎉',
+              eventId: event.id,
+              groupId: event.groupId,
+              dest: 'event',
+            }
+          )
+          .catch((err) => console.error('Failed to create promotion notification:', err));
       }
     }
   }

@@ -565,14 +565,6 @@ export default function FeedScreen() {
             <Text style={styles.emptyDesc}>
               {hasFilters ? 'Try adjusting your filters' : 'Create an event to get started'}
             </Text>
-            {!hasFilters && (
-              <TouchableOpacity 
-                onPress={() => router.push('/create-event')} 
-                style={styles.emptyBtn}
-              >
-                <Text style={styles.emptyBtnText}>Create Event</Text>
-              </TouchableOpacity>
-            )}
           </View>
         ) : viewMode === 'list' ? (
           <ListView

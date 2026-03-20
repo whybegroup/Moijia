@@ -101,7 +101,7 @@ export default function ExploreScreen() {
             return (
               <View key={g.id} style={[styles.row, i < results.length - 1 && styles.rowBorder]}>
                 <View style={[styles.groupIcon, { backgroundColor: p.row, borderColor: p.cal }]}>
-                  <GroupAvatar group={g} size={44} />
+                  <GroupAvatar seed={g.avatarSeed} thumbnail={g.thumbnail} name={g.name} size={44} />
                 </View>
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={styles.groupName}>{g.name}</Text>

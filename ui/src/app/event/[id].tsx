@@ -8,7 +8,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Colors, Fonts, Radius, Shadows } from '../../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName, fmtTime, fmtDateFull, timeAgo, dDiff } from '../../utils/helpers';
-import { Avatar, AvatarStack, Sheet } from '../../components/ui';
+import { Avatar, Sheet } from '../../components/ui';
+import { UserAvatar } from '../../components/UserAvatar';
+import { UserAvatarStack } from '../../components/UserAvatarStack';
 import { useEvent, useGroup, useUsers, useCreateOrUpdateRSVP, useDeleteRSVP, useCreateComment, useGroupMemberColor } from '../../hooks/api';
 import { uid, getNoResponseIds } from '../../utils/api-helpers';
 import type { EventDetailed, User, GroupScoped, RSVP } from '@boltup/client';
@@ -205,7 +207,7 @@ export default function EventDetailScreen() {
   
   const canEdit = ev.createdBy === currentUserId || 
                   group.superAdminId === currentUserId || 
-                  group.adminIds.includes(currentUserId);
+                  (group.adminIds ?? []).includes(currentUserId);
   
   const maxCapacity = ev.maxAttendees || 0;
   const isAtCapacity = maxCapacity > 0 && going.length >= maxCapacity;
@@ -403,11 +405,12 @@ export default function EventDetailScreen() {
             <TouchableOpacity onPress={() => setShowAttend(true)} style={styles.attendRow}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                 {going.length > 0 && (
-                  <AvatarStack 
-                    names={going.map(r => getUserSafe(r.userId).displayName)} 
-                    size={24} 
-                    max={5} 
-                    dotsForNames={Array.from(usersWithMemos).map(userId => getUserSafe(userId).displayName)}
+                  <UserAvatarStack
+                    userIds={going.map(r => r.userId)}
+                    getUser={getUserSafe}
+                    size={24}
+                    max={5}
+                    dotUserIds={Array.from(usersWithMemos)}
                   />
                 )}
                 <Text style={styles.attendText}>{attendLabel || 'No responses yet'}</Text>
@@ -639,7 +642,7 @@ function AttendanceSheet({ ev, group, users, visible, onClose }: { ev: EventDeta
         style={styles.attendRsvpRow} 
         activeOpacity={r.memo ? 0.7 : 1}
       >
-        <Avatar name={user.displayName} size={38} onPress={r.memo ? () => setMemoPopup(r) : undefined} />
+        <UserAvatar seed={user.displayName || user.name} backgroundColor={[user.avatarSeed]} thumbnail={user.thumbnail} size={38} />
         <View style={{ flex: 1 }}>
           <Text style={[styles.attendName, faded && { color: Colors.textMuted }]}>{user.displayName}</Text>
           {r.memo ? <Text style={styles.attendMemo} numberOfLines={1}>"{r.memo}"</Text> : null}
@@ -683,7 +686,7 @@ function AttendanceSheet({ ev, group, users, visible, onClose }: { ev: EventDeta
               const user = users[uid] || { id: uid, name: 'Loading...', displayName: 'Loading...', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
               return (
                 <View key={uid} style={styles.attendRsvpRow}>
-                  <Avatar name={user.displayName} size={38} />
+                  <UserAvatar seed={user.displayName || user.name} backgroundColor={[user.avatarSeed]} thumbnail={user.thumbnail} size={38} />
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.attendName, { color: Colors.textMuted }]}>{user.displayName}</Text>
                   </View>
@@ -695,24 +698,32 @@ function AttendanceSheet({ ev, group, users, visible, onClose }: { ev: EventDeta
         <View style={{ height: 20 }} />
       </Sheet>
 
-      {memoPopup && (
-        <Modal visible transparent animationType="fade" onRequestClose={() => setMemoPopup(null)}>
-          <TouchableOpacity style={styles.memoOverlay} onPress={() => setMemoPopup(null)} activeOpacity={1}>
-            <View style={styles.memoPopup}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-                <Avatar name={users[memoPopup.userId]?.displayName || 'Unknown'} size={34} />
-                <Text style={{ fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.text }}>{users[memoPopup.userId]?.displayName || 'Unknown'}</Text>
+      {memoPopup && (() => {
+        const memoUser = users[memoPopup.userId];
+        return (
+          <Modal visible transparent animationType="fade" onRequestClose={() => setMemoPopup(null)}>
+            <TouchableOpacity style={styles.memoOverlay} onPress={() => setMemoPopup(null)} activeOpacity={1}>
+              <View style={styles.memoPopup}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                  <UserAvatar
+                    seed={memoUser ? memoUser.displayName || memoUser.name : 'Unknown'}
+                    backgroundColor={[memoUser?.avatarSeed]}
+                    thumbnail={memoUser?.thumbnail}
+                    size={34}
+                  />
+                  <Text style={{ fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.text }}>{memoUser?.displayName || 'Unknown'}</Text>
+                </View>
+                <View style={styles.memoTextBox}>
+                  <Text style={styles.memoText}>"{memoPopup.memo}"</Text>
+                </View>
+                <TouchableOpacity onPress={() => setMemoPopup(null)} style={[styles.rsvpBtn, { marginTop: 14, borderColor: Colors.border }]}>
+                  <Text style={[styles.rsvpBtnText, { color: Colors.textSub }]}>Close</Text>
+                </TouchableOpacity>
               </View>
-              <View style={styles.memoTextBox}>
-                <Text style={styles.memoText}>"{memoPopup.memo}"</Text>
-              </View>
-              <TouchableOpacity onPress={() => setMemoPopup(null)} style={[styles.rsvpBtn, { marginTop: 14, borderColor: Colors.border }]}>
-                <Text style={[styles.rsvpBtnText, { color: Colors.textSub }]}>Close</Text>
-              </TouchableOpacity>
-            </View>
-          </TouchableOpacity>
-        </Modal>
-      )}
+            </TouchableOpacity>
+          </Modal>
+        );
+      })()}
     </>
   );
 }

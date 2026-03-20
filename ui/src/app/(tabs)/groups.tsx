@@ -104,7 +104,7 @@ export default function GroupsScreen() {
                   >
                     <View style={[styles.groupIconOuter, { backgroundColor: p.cal }]}>
                       <View style={styles.groupIconInner}>
-                        <GroupAvatar group={g} size={44} />
+                        <GroupAvatar seed={g.avatarSeed} thumbnail={g.thumbnail} name={g.name} size={44} />
                       </View>
                     </View>
                     <View style={{ flex: 1, minWidth: 0 }}>
@@ -153,7 +153,7 @@ export default function GroupsScreen() {
                       >
                         <View style={[styles.groupIconOuter, { backgroundColor: p.cal, opacity: 0.7 }]}>
                           <View style={styles.groupIconInner}>
-                            <GroupAvatar group={g} size={44} />
+                            <GroupAvatar seed={g.avatarSeed} thumbnail={g.thumbnail} name={g.name} size={44} />
                           </View>
                         </View>
                         <View style={{ flex: 1, minWidth: 0 }}>
