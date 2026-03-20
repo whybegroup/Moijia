@@ -15,12 +15,12 @@ if (iosUrlScheme) {
 
 module.exports = {
   expo: {
-    name: 'Popin',
-    slug: 'popin',
+    name: 'Boltup',
+    slug: 'boltup',
     version: '1.0.0',
     orientation: 'portrait',
     icon: './assets/favicon.png',
-    scheme: 'popin',
+    scheme: 'boltup',
     userInterfaceStyle: 'light',
     splash: {
       image: './assets/favicon.png',
@@ -29,13 +29,13 @@ module.exports = {
     },
     ios: {
       supportsTablet: false,
-      bundleIdentifier: 'com.popin.app',
+      bundleIdentifier: 'com.whybe.boltup',
     },
     android: {
       adaptiveIcon: {
         backgroundColor: '#FAFAF9',
       },
-      package: 'com.popin.app',
+      package: 'com.whybe.boltup',
     },
     web: {
       bundler: 'metro',

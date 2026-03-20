@@ -1,0 +1,4 @@
+client/
+src/generated/
+prisma/*.db
+prisma/*.db-journal

@@ -1,11 +1,11 @@
-# Popin — Expo App
+# Boltup — Expo App
 
 LA Korean community event app. Built with Expo Router, React Native, TypeScript.
 
 ## Quick Start
 
 ```bash
-cd popin
+cd ui
 npm install
 npx expo start
 ```
@@ -18,7 +18,7 @@ Then press:
 ## Project Structure
 
 ```
-popin/
+ui/
 ├── app/
 │   ├── _layout.tsx          # Root layout (fonts, navigation)
 │   ├── (tabs)/

@@ -33,7 +33,7 @@ export default function GroupInviteScreen() {
   }
 
   const inviteCode = group.id.toUpperCase().slice(0, 6);
-  const inviteLink = `https://popin.app/join/${group.id}`;
+  const inviteLink = `https://boltup.app/join/${group.id}`;
 
   const copyLink = async () => {
     await Clipboard.setStringAsync(inviteLink);
@@ -43,19 +43,19 @@ export default function GroupInviteScreen() {
 
   const copyMessage = async () => {
     await Clipboard.setStringAsync(
-      `You're invited to ${group.name} on Popin!\n\nJoin here: ${inviteLink}\nOr use code: ${inviteCode}`
+      `You're invited to ${group.name} on Boltup!\n\nJoin here: ${inviteLink}\nOr use code: ${inviteCode}`
     );
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
   const shareIMessage = () => {
-    Linking.openURL(`sms:?body=${encodeURIComponent(`Join ${group.name} on Popin!\n\n${inviteLink}`)}`);
+    Linking.openURL(`sms:?body=${encodeURIComponent(`Join ${group.name} on Boltup!\n\n${inviteLink}`)}`);
   };
 
   const shareEmail = () => {
     Linking.openURL(
-      `mailto:?subject=${encodeURIComponent(`Join ${group.name} on Popin`)}&body=${encodeURIComponent(`You're invited!\n\n${inviteLink}`)}`
+      `mailto:?subject=${encodeURIComponent(`Join ${group.name} on Boltup`)}&body=${encodeURIComponent(`You're invited!\n\n${inviteLink}`)}`
     );
   };
 

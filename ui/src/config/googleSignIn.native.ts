@@ -69,7 +69,7 @@ export async function signInWithGoogleIdTokenNative(
 
   if (!idToken) {
     throw new Error(
-      'Google did not return an ID token. Use EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID from Firebase (OAuth 2.0 Client type "Web application"), and add your Android debug SHA-1 under Project settings → Your apps → Android (com.popin.app).',
+      'Google did not return an ID token. Set EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID to the Web client ID from Firebase, and add the SHA-1 of android/app/debug.keystore (this app’s debug signing key) for package com.whybe.boltup.',
     );
   }
 

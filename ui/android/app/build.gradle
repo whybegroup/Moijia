@@ -87,9 +87,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.popin.app'
+    namespace 'com.whybe.boltup'
     defaultConfig {
-        applicationId 'com.popin.app'
+        applicationId 'com.whybe.boltup'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
@@ -179,4 +179,9 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+}
+
+// Firebase Android config: download google-services.json from Firebase Console → Project settings → Your Android app → google-services.json
+if (file('google-services.json').exists()) {
+    apply plugin: 'com.google.gms.google-services'
 }
