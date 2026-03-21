@@ -1,4 +1,4 @@
-package com.whybe.boltup
+package com.whybe.moija
 import expo.modules.splashscreen.SplashScreenManager
 
 import android.os.Build

@@ -3,7 +3,7 @@ import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-nati
 import { Colors, Fonts } from '../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName } from '../utils/helpers';
 import { isSameDay, isToday } from '../utils/helpers';
-import type { EventDetailed, GroupScoped } from '@boltup/client';
+import type { EventDetailed, GroupScoped } from '@moija/client';
 import { useCurrentUserContext } from '../contexts/CurrentUserContext';
 import { EventRow } from './EventRow';
 import { useUsers } from '../hooks/api';

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { EventsService, type EventInput, type EventUpdate, type EventDetailed } from '@boltup/client';
+import { EventsService, type EventInput, type EventUpdate, type EventDetailed } from '@moija/client';
 import { queryKeys } from '../../config/queryClient';
 
 interface EventFilters {

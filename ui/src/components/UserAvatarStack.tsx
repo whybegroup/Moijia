@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Colors, Fonts } from '../constants/theme';
 import { UserAvatar } from './UserAvatar';
-import type { User } from '@boltup/client';
+import type { User } from '@moija/client';
 
 type DotUserIds = Set<string> | readonly string[];
 

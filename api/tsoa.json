@@ -7,11 +7,11 @@
     "specVersion": 3,
     "specFileBaseName": "openapi",
     "yaml": true,
-    "name": "BoltUp API",
+    "name": "Moija API",
     "version": "1.0.0",
-    "description": "REST API for BoltUp - A social event planning platform for groups",
+    "description": "REST API for Moija - A social event planning platform for groups",
     "contact": {
-      "name": "BoltUp Team"
+      "name": "Moija Team"
     },
     "host": "localhost:3000",
     "schemes": ["http"],

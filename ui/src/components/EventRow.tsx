@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, Pressable, StyleSheet } from 'react-nativ
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Fonts, Radius, Shadows } from '../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName, fmtTime, fmtMonthShort, dDiff, isToday as checkToday, getMyWaitlistPosition } from '../utils/helpers';
-import type { EventDetailed, GroupScoped, User } from '@boltup/client';
+import type { EventDetailed, GroupScoped, User } from '@moija/client';
 import { UserAvatarStack } from './UserAvatarStack';
 
 interface EventRowProps {

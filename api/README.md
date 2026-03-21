@@ -1,6 +1,6 @@
-# BoltUp API
+# Moija API
 
-REST API for BoltUp - A social event planning platform for groups.
+REST API for Moija - A social event planning platform for groups.
 
 ## EC2
 
@@ -60,10 +60,8 @@ source ~/.bashrc
 ```
 
 ```bash
-
-```bash
-git clone git@github.com:whybegroup/BoltUp.git
-cd BoltUp/api
+git clone git@github.com:whybegroup/Moija.git
+cd Moija/api
 nvm install
 nvm use
 npm install
@@ -73,7 +71,7 @@ npm start
 
 ## Architecture Overview
 
-BoltUp uses a **code-first approach** with TypeScript as the single source of truth:
+Moija uses a **code-first approach** with TypeScript as the single source of truth:
 
 1. **TypeScript Models**: Define data structures once in TypeScript interfaces
 2. **Controllers**: Define API endpoints with tsoa decorators
@@ -192,7 +190,7 @@ api/
 │   ├── schema.prisma        # Prisma database schema
 │   ├── migrations/          # Database migrations
 │   ├── seed.ts              # Database seeding script
-│   └── boltup.db            # SQLite database file
+│   └── moija.db            # SQLite database file
 │
 ├── dist/                    # Compiled JavaScript
 ├── tsoa.json                # tsoa configuration
@@ -670,7 +668,7 @@ Controls API generation:
     "outputDirectory": ".",
     "specVersion": 3,
     "yaml": true,
-    "name": "BoltUp API",
+    "name": "Moija API",
     "version": "1.0.0"
   },
   "routes": {

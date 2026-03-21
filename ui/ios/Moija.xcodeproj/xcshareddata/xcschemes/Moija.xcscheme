@@ -15,9 +15,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "13B07F861A680F5B00A75B9A"
-               BuildableName = "Boltup.app"
-               BlueprintName = "Boltup"
-               ReferencedContainer = "container:Boltup.xcodeproj">
+               BuildableName = "Moija.app"
+               BlueprintName = "Moija"
+               ReferencedContainer = "container:Moija.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -28,20 +28,10 @@
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES">
       <Testables>
-         <TestableReference
-            skipped = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "00E356ED1AD99517003FC87E"
-               BuildableName = "BoltupTests.xctest"
-               BlueprintName = "BoltupTests"
-               ReferencedContainer = "container:Boltup.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction
-      buildConfiguration = "Debug"
+      buildConfiguration = "Release"
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       launchStyle = "0"
@@ -55,9 +45,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "13B07F861A680F5B00A75B9A"
-            BuildableName = "Boltup.app"
-            BlueprintName = "Boltup"
-            ReferencedContainer = "container:Boltup.xcodeproj">
+            BuildableName = "Moija.app"
+            BlueprintName = "Moija"
+            ReferencedContainer = "container:Moija.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -72,9 +62,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "13B07F861A680F5B00A75B9A"
-            BuildableName = "Boltup.app"
-            BlueprintName = "Boltup"
-            ReferencedContainer = "container:Boltup.xcodeproj">
+            BuildableName = "Moija.app"
+            BlueprintName = "Moija"
+            ReferencedContainer = "container:Moija.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>

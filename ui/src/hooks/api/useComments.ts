@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { EventsService, CommentsService, type CommentInput } from '@boltup/client';
+import { EventsService, CommentsService, type CommentInput } from '@moija/client';
 import { queryKeys } from '../../config/queryClient';
 
 export function useEventComments(eventId: string) {

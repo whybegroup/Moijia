@@ -4,7 +4,7 @@ import { Colors, Fonts, Radius } from '../constants/theme';
 import { EventRow } from './EventRow';
 import { useUsers } from '../hooks/api';
 import { useCurrentUserContext } from '../contexts/CurrentUserContext';
-import type { EventDetailed, GroupScoped } from '@boltup/client';
+import type { EventDetailed, GroupScoped } from '@moija/client';
 
 interface ListViewProps {
   events: EventDetailed[];

@@ -1,4 +1,4 @@
-import type { EventDetailed } from '@boltup/client';
+import type { EventDetailed } from '@moija/client';
 
 export function uid(): string {
   return Math.random().toString(36).slice(2, 9);

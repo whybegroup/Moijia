@@ -7,7 +7,7 @@ import { Colors, Fonts, Radius, Shadows } from '../../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName, groupAvatarBorderRadius } from '../../utils/helpers';
 import { NavBar, Toggle } from '../../components/ui';
 import { useGroup, useUsers, useGroupMembers, useGroupMemberColor, usePendingRequests, useHandleMembershipRequest, useUpdateGroup, useLeaveGroup, useSoftDeleteGroup, useDeleteGroup, useRecoverGroup, useRemoveMember, useSetMemberRole, useSetSuperAdmin } from '../../hooks/api';
-import { MembershipRequestAction } from '@boltup/client';
+import { MembershipRequestAction } from '@moija/client';
 import { useCurrentUserContext } from '../../contexts/CurrentUserContext';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path, Rect } from 'react-native-svg';

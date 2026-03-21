@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, onAuthStateChange, signOut as firebaseSignOut, getCurrentUser } from '../config/firebase';
 import { Platform } from 'react-native';
-import { UsersService } from '@boltup/client';
+import { UsersService } from '@moija/client';
 
 interface AuthContextType {
   user: User | null;

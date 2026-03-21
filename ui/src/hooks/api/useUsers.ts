@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { UsersService, UserInput, UserUpdate } from '@boltup/client';
+import { UsersService, UserInput, UserUpdate } from '@moija/client';
 import { queryKeys } from '../../config/queryClient';
 
 export function useUsers() {

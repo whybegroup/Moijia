@@ -1,4 +1,4 @@
-import { OpenAPI } from '@boltup/client';
+import { OpenAPI } from '@moija/client';
 
 /** API server origin. `/api` is appended to match tsoa `basePath` unless already present. */
 const DEFAULT_API_ORIGIN = 'https://api.danielbyun.com';

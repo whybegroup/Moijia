@@ -15,12 +15,12 @@ if (iosUrlScheme) {
 
 module.exports = {
   expo: {
-    name: 'Boltup',
-    slug: 'boltup',
+    name: 'Moija',
+    slug: 'moija',
     version: '1.0.0',
     orientation: 'portrait',
     icon: './assets/favicon.png',
-    scheme: 'boltup',
+    scheme: 'moija',
     userInterfaceStyle: 'light',
     splash: {
       image: './assets/favicon.png',
@@ -29,13 +29,13 @@ module.exports = {
     },
     ios: {
       supportsTablet: false,
-      bundleIdentifier: 'com.whybe.boltup',
+      bundleIdentifier: 'com.whybe.moija',
     },
     android: {
       adaptiveIcon: {
         backgroundColor: '#FAFAF9',
       },
-      package: 'com.whybe.boltup',
+      package: 'com.whybe.moija',
     },
     web: {
       bundler: 'metro',

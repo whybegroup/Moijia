@@ -1,4 +1,4 @@
-# Boltup — Expo App
+# Moija — Expo App
 
 LA Korean community event app. Built with Expo Router, React Native, TypeScript.
 

@@ -7,7 +7,7 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>$(DEVELOPMENT_LANGUAGE)</string>
     <key>CFBundleDisplayName</key>
-    <string>Boltup</string>
+    <string>Moija</string>
     <key>CFBundleExecutable</key>
     <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleIdentifier</key>
@@ -27,14 +27,14 @@
       <dict>
         <key>CFBundleURLSchemes</key>
         <array>
-          <string>boltup</string>
-          <string>com.whybe.boltup</string>
+          <string>moija</string>
+          <string>com.whybe.moija</string>
         </array>
       </dict>
       <dict>
         <key>CFBundleURLSchemes</key>
         <array>
-          <string>com.googleusercontent.apps.460053558015-d7phd5f16src09841pb3rd87e5uiukte</string>
+          <string>com.googleusercontent.apps.400176777382-q1r8127fja5n3nnpf6vgc3mfq8tfhhjb</string>
         </array>
       </dict>
     </array>

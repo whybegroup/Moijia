@@ -21,14 +21,48 @@ import * as WebBrowser from 'expo-web-browser';
 // Enable web browser completion for auth flows
 WebBrowser.maybeCompleteAuthSession();
 
+/** Each Firebase registered app has its own appId; native should match GoogleService-Info.plist / google-services.json. */
+function resolveFirebaseAppId(): string | undefined {
+  switch (Platform.OS) {
+    case 'ios':
+      return (
+        process.env.EXPO_PUBLIC_FIREBASE_APP_ID_IOS ?? process.env.EXPO_PUBLIC_FIREBASE_APP_ID
+      );
+    case 'android':
+      return (
+        process.env.EXPO_PUBLIC_FIREBASE_APP_ID_ANDROID ??
+        process.env.EXPO_PUBLIC_FIREBASE_APP_ID
+      );
+    default:
+      return process.env.EXPO_PUBLIC_FIREBASE_APP_ID;
+  }
+}
+
+/** API keys are per Firebase client; match plist / google-services.json for native. */
+function resolveFirebaseApiKey(): string | undefined {
+  switch (Platform.OS) {
+    case 'ios':
+      return (
+        process.env.EXPO_PUBLIC_FIREBASE_API_KEY_IOS ?? process.env.EXPO_PUBLIC_FIREBASE_API_KEY
+      );
+    case 'android':
+      return (
+        process.env.EXPO_PUBLIC_FIREBASE_API_KEY_ANDROID ??
+        process.env.EXPO_PUBLIC_FIREBASE_API_KEY
+      );
+    default:
+      return process.env.EXPO_PUBLIC_FIREBASE_API_KEY;
+  }
+}
+
 // Firebase configuration
 const firebaseConfig = {
-  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
+  apiKey: resolveFirebaseApiKey(),
   authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
   projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
   storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
+  appId: resolveFirebaseAppId(),
 };
 
 // Initialize Firebase

@@ -1,4 +1,4 @@
-package com.whybe.boltup
+package com.whybe.moija
 
 import android.app.Application
 import android.content.res.Configuration

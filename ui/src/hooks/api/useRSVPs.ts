@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { EventsService, type RSVPInput } from '@boltup/client';
+import { EventsService, type RSVPInput } from '@moija/client';
 import { queryKeys } from '../../config/queryClient';
 
 export function useCreateOrUpdateRSVP(eventId: string) {

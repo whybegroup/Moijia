@@ -1,5 +1,5 @@
 import React, { createContext, useContext } from 'react';
-import { User } from '@boltup/client';
+import { User } from '@moija/client';
 import { useCurrentUser } from '../hooks/useCurrentUser';
 import { User as FirebaseUser } from 'firebase/auth';
 

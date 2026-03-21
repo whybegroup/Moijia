@@ -14,8 +14,8 @@ import { UserAvatar } from '../../components/UserAvatar';
 import { UserAvatarStack } from '../../components/UserAvatarStack';
 import { useEvent, useGroup, useUsers, useCreateOrUpdateRSVP, useDeleteRSVP, useCreateComment, useGroupMemberColor } from '../../hooks/api';
 import { uid, getNoResponseIds } from '../../utils/api-helpers';
-import type { EventDetailed, User, GroupScoped, RSVP } from '@boltup/client';
-import { RSVPInput } from '@boltup/client';
+import type { EventDetailed, User, GroupScoped, RSVP } from '@moija/client';
+import { RSVPInput } from '@moija/client';
 import { useCurrentUserContext } from '../../contexts/CurrentUserContext';
 
 // ── Photo Carousel ───────────────────────────────────────────────────────────

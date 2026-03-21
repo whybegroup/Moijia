@@ -1,5 +1,5 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
-import type { User } from '@boltup/client';
+import type { User } from '@moija/client';
 
 interface AuthState {
   currentUser: User | null;

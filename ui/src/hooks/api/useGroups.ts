@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient, keepPreviousData, useInfiniteQuery } from '@tanstack/react-query';
-import { GroupsService, type GroupInput, type GroupUpdate, type MembershipRequestAction } from '@boltup/client';
+import { GroupsService, type GroupInput, type GroupUpdate, type MembershipRequestAction } from '@moija/client';
 import { queryKeys } from '../../config/queryClient';
 
 const PUBLIC_GROUPS_PAGE_SIZE = 10;

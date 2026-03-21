@@ -1,5 +1,5 @@
 {
-  "name": "boltup",
+  "name": "moija-ui",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
@@ -14,7 +14,7 @@
     "web": "expo start --web"
   },
   "dependencies": {
-    "@boltup/client": "*",
+    "@moija/client": "*",
     "@dicebear/collection": "^9.4.0",
     "@dicebear/core": "^9.4.0",
     "@expo-google-fonts/dm-sans": "^0.2.3",
