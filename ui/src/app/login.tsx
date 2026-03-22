@@ -109,6 +109,12 @@ export default function LoginScreen() {
       }
       await signInWithGoogle(tokens.idToken, tokens.accessToken);
     } catch (err: any) {
+      if (err?.code === 'GOOGLE_SIGN_IN_TIMEOUT') {
+        showError(
+          'Google sign-in timed out. If a Google sheet is still open, dismiss it (swipe down on iOS, or Back on Android), then try again.',
+        );
+        return;
+      }
       const firebaseGoogle =
         err?.code === 'auth/invalid-credential'
           ? 'Google sign-in could not be verified. On Android, register the SHA-1 from android/app/debug.keystore in Firebase for com.whybe.moija, and use the Web client ID in EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID.'

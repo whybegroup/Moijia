@@ -1,5 +1,31 @@
 import { NativeModules, Platform, TurboModuleRegistry } from 'react-native';
+import { isErrorWithCode, statusCodes } from '@react-native-google-signin/google-signin';
 import { googleIosClientId } from './googleAuth';
+
+const SIGN_IN_TIMEOUT_MS = 120_000;
+
+function signInRejectedAfterTimeout(): Promise<never> {
+  return new Promise((_, reject) => {
+    setTimeout(() => {
+      const err = new Error('GOOGLE_SIGN_IN_TIMEOUT') as Error & { code: string };
+      err.code = 'GOOGLE_SIGN_IN_TIMEOUT';
+      reject(err);
+    }, SIGN_IN_TIMEOUT_MS);
+  });
+}
+
+/** Treat as user abandoning sign-in (SDK sometimes omits proper cancel code). */
+function isLikelySignInDismissal(err: unknown): boolean {
+  if (!isErrorWithCode(err)) return false;
+  const c = String(err.code);
+  if (c === statusCodes.SIGN_IN_CANCELLED || c === '-5') return true;
+  const msg = 'message' in err && typeof (err as { message: unknown }).message === 'string'
+    ? (err as { message: string }).message
+    : '';
+  return /canceled|cancelled|user canceled|user cancelled|dismiss|the user canceled|access_denied/i.test(
+    msg,
+  );
+}
 
 function isGoogleSignInLinked(): boolean {
   return (
@@ -52,7 +78,16 @@ export async function signInWithGoogleIdTokenNative(
   const gs = getGoogleSignin();
   configure(gs, webClientId);
   await gs.hasPlayServices({ showPlayServicesUpdateDialog: true });
-  const res = await gs.signIn();
+
+  let res: Awaited<ReturnType<typeof gs.signIn>>;
+  try {
+    res = await Promise.race([gs.signIn(), signInRejectedAfterTimeout()]);
+  } catch (e) {
+    if (isErrorWithCode(e) && e.code === 'GOOGLE_SIGN_IN_TIMEOUT') throw e;
+    if (isLikelySignInDismissal(e)) return null;
+    throw e;
+  }
+
   if (res.type === 'cancelled') return null;
   if (res.type !== 'success') return null;
 
