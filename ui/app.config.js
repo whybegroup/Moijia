@@ -36,6 +36,8 @@ module.exports = {
         backgroundColor: '#FAFAF9',
       },
       package: 'com.whybe.moija',
+      /** Lets bottom sheets / modals shrink above the keyboard instead of covering inputs */
+      softwareKeyboardLayoutMode: 'resize',
     },
     web: {
       bundler: 'metro',
