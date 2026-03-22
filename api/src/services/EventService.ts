@@ -64,16 +64,23 @@ export class EventService {
     const where: any = {};
 
     if (params.groupId) {
-      if (!(await this.userCanAccessGroup(params.groupId, params.userId))) {
-        return [];
+      const isMember = await this.userCanAccessGroup(params.groupId, params.userId);
+      if (isMember) {
+        where.groupId = params.groupId;
+      } else {
+        where.groupId = params.groupId;
+        where.createdBy = params.userId;
       }
-      where.groupId = params.groupId;
     } else {
       const memberGroupIds = await prisma.groupMember.findMany({
         where: { userId: params.userId, status: 'active' },
         select: { groupId: true },
       }).then((rows) => rows.map((r) => r.groupId));
-      where.groupId = { in: memberGroupIds };
+      if (memberGroupIds.length === 0) {
+        where.createdBy = params.userId;
+      } else {
+        where.OR = [{ groupId: { in: memberGroupIds } }, { createdBy: params.userId }];
+      }
     }
 
     if (params?.startAfter || params?.startBefore) {
@@ -113,6 +120,54 @@ export class EventService {
     return m?.status === 'active';
   }
 
+  /** Active membership role, or null if not an active member. */
+  private async getActiveMemberRole(
+    groupId: string,
+    userId: string,
+  ): Promise<'member' | 'admin' | 'superadmin' | null> {
+    const m = await prisma.groupMember.findUnique({
+      where: { groupId_userId: { groupId, userId } },
+      select: { status: true, role: true },
+    });
+    if (!m || m.status !== 'active') return null;
+    return m.role as 'member' | 'admin' | 'superadmin';
+  }
+
+  private isAdminOrSuperadminRole(role: string): boolean {
+    return role === 'admin' || role === 'superadmin';
+  }
+
+  /** Read access: active group member, or the user created this event (e.g. after leaving the group). */
+  private async userCanReadEvent(event: { groupId: string; createdBy: string }, userId: string): Promise<boolean> {
+    if (event.createdBy === userId) return true;
+    return this.userCanAccessGroup(event.groupId, userId);
+  }
+
+  /** Any active member may create events in the group. */
+  private async assertCanCreateEvent(groupId: string, actorId: string): Promise<void> {
+    const role = await this.getActiveMemberRole(groupId, actorId);
+    if (!role) {
+      throw Object.assign(new Error('Must be an active group member to create events'), { status: 403 });
+    }
+  }
+
+  /**
+   * Creator may always edit/delete their event (even if no longer a member).
+   * Admins and superadmins may edit/delete other members' events while they remain active in the group.
+   */
+  private async assertCanMutateEvent(
+    event: { groupId: string; createdBy: string },
+    actorId: string,
+  ): Promise<void> {
+    if (event.createdBy === actorId) return;
+    const role = await this.getActiveMemberRole(event.groupId, actorId);
+    if (role && this.isAdminOrSuperadminRole(role)) return;
+    throw Object.assign(
+      new Error('Only the event creator or group admins can update or delete this event'),
+      { status: 403 },
+    );
+  }
+
   /**
    * Get event by ID with all details. Returns null if not found or user cannot access.
    */
@@ -134,7 +189,7 @@ export class EventService {
     });
 
     if (!event) return null;
-    if (userId && !(await this.userCanAccessGroup(event.groupId, userId))) {
+    if (userId && !(await this.userCanReadEvent(event, userId))) {
       return null;
     }
     return this.mapEventDetailed(event);
@@ -145,6 +200,8 @@ export class EventService {
    */
   public async create(input: EventInput): Promise<Event> {
     const { coverPhotos = [], createdBy, ...eventData } = input;
+
+    await this.assertCanCreateEvent(eventData.groupId, createdBy);
 
     const event = await prisma.event.create({
       data: {
@@ -201,6 +258,15 @@ export class EventService {
   public async update(id: string, input: EventUpdate): Promise<Event> {
     const { coverPhotos, updatedBy, ...eventData } = input;
 
+    const existing = await prisma.event.findUnique({
+      where: { id },
+      select: { groupId: true, createdBy: true },
+    });
+    if (!existing) {
+      throw Object.assign(new Error('Event not found'), { status: 404 });
+    }
+    await this.assertCanMutateEvent(existing, updatedBy);
+
     // If cover photos are provided, update them
     if (coverPhotos) {
       await prisma.$transaction(async (tx) => {
@@ -237,7 +303,15 @@ export class EventService {
   /**
    * Delete an event
    */
-  public async delete(id: string): Promise<void> {
+  public async delete(id: string, actorUserId: string): Promise<void> {
+    const existing = await prisma.event.findUnique({
+      where: { id },
+      select: { groupId: true, createdBy: true },
+    });
+    if (!existing) {
+      throw Object.assign(new Error('Event not found'), { status: 404 });
+    }
+    await this.assertCanMutateEvent(existing, actorUserId);
     await prisma.event.delete({
       where: { id },
     });

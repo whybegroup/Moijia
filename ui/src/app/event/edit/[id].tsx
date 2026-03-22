@@ -6,7 +6,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Colors, Fonts, Radius } from '../../../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName } from '../../../utils/helpers';
-import { useEvent, useGroups, useUpdateEvent, useAllGroupMemberColors, useDeleteEvent } from '../../../hooks/api';
+import { useEvent, useGroup, useUpdateEvent, useAllGroupMemberColors, useDeleteEvent } from '../../../hooks/api';
 import { NavBar, Field, Toggle } from '../../../components/ui';
 import { useCurrentUserContext } from '../../../contexts/CurrentUserContext';
 
@@ -18,10 +18,13 @@ export default function EditEventScreen() {
   const eventId = Array.isArray(id) ? id[0] : id;
 
   const { data: existingEvent, isLoading: eventLoading } = useEvent(eventId || '', currentUserId ?? '');
-  const { data: groups = [], isLoading: groupsLoading } = useGroups(currentUserId ?? '');
+  const { data: eventGroup, isLoading: eventGroupLoading } = useGroup(
+    existingEvent?.groupId || '',
+    currentUserId ?? '',
+  );
   const { data: groupColors = {} } = useAllGroupMemberColors(currentUserId);
-  const updateEventMutation = useUpdateEvent(eventId || '');
-  const deleteEventMutation = useDeleteEvent();
+  const updateEventMutation = useUpdateEvent(eventId || '', currentUserId ?? '');
+  const deleteEventMutation = useDeleteEvent(currentUserId ?? '');
 
   // Format date and times from existing event
   const formatDate = (date: Date | string) => {
@@ -87,7 +90,21 @@ export default function EditEventScreen() {
     }
   }, [existingEvent]);
 
-  const loading = eventLoading || groupsLoading;
+  const needGroupForPermission =
+    !!existingEvent && !!currentUserId && existingEvent.createdBy !== currentUserId;
+  const loading = eventLoading || (needGroupForPermission && eventGroupLoading);
+
+  React.useEffect(() => {
+    if (!eventId || !existingEvent || !currentUserId) return;
+    if (loading) return;
+    if (existingEvent.createdBy === currentUserId) return;
+    const isElevated =
+      eventGroup?.superAdminId === currentUserId ||
+      (eventGroup?.adminIds ?? []).includes(currentUserId);
+    if (!isElevated) {
+      router.replace(`/event/${eventId}`);
+    }
+  }, [eventId, existingEvent, currentUserId, eventGroup, loading, router]);
 
   if (!eventId || loading || !existingEvent) {
     return null;
@@ -260,20 +277,10 @@ export default function EditEventScreen() {
       />
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
 
-        <Field label="Group" required>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-            {groups.filter((g) => g.membershipStatus === 'admin').map((g) => {
-              const userColorHex = groupColors[g.id] || getDefaultGroupThemeFromName(g.name);
-              const p = getGroupColor(userColorHex);
-              const sel = form.groupId === g.id;
-              return (
-                <TouchableOpacity key={g.id} onPress={() => set('groupId', g.id)}
-                  style={[styles.groupChip, sel && { borderColor: p.dot, backgroundColor: p.row }]}>
-                  <Text style={[styles.chipText, sel && { color: p.text, fontFamily: Fonts.semiBold }]}>{g.name}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
+        <Field label="Group">
+          <Text style={styles.groupReadonly}>
+            {eventGroup?.name ?? 'Group'}
+          </Text>
         </Field>
 
         <Field label="Event Title" required>
@@ -684,6 +691,7 @@ const styles = StyleSheet.create({
   headerBtnText: { fontSize: 13, fontFamily: Fonts.semiBold, color: Colors.accentFg },
   groupChip:     { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 6, borderRadius: Radius.full, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surface },
   chipText:      { fontSize: 13, color: Colors.textSub, fontFamily: Fonts.regular },
+  groupReadonly: { fontSize: 14, color: Colors.text, fontFamily: Fonts.semiBold, paddingVertical: 4 },
   input:         { padding: 10, paddingHorizontal: 14, borderRadius: Radius.lg, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.bg, fontSize: 14, color: Colors.text, fontFamily: Fonts.regular },
   inputError:    { borderColor: '#EF4444' },
   errorText:     { fontSize: 12, color: '#EF4444', fontFamily: Fonts.regular, marginBottom: 4 },

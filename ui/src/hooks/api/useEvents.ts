@@ -45,33 +45,42 @@ export function useEvent(id: string, userId: string) {
   });
 }
 
-export function useCreateEvent() {
+export function useCreateEvent(userId: string) {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
-    mutationFn: (data: EventInput) => EventsService.createEvent(data),
+    mutationFn: (data: EventInput) => {
+      if (!userId) throw new Error('Not signed in');
+      return EventsService.createEvent(userId, data);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['events'] });
     },
   });
 }
 
-export function useUpdateEvent(id: string) {
+export function useUpdateEvent(id: string, userId: string) {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
-    mutationFn: (data: EventUpdate) => EventsService.updateEvent(id, data),
+    mutationFn: (data: EventUpdate) => {
+      if (!userId) throw new Error('Not signed in');
+      return EventsService.updateEvent(id, userId, data);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['events'] });
     },
   });
 }
 
-export function useDeleteEvent() {
+export function useDeleteEvent(userId: string) {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
-    mutationFn: (id: string) => EventsService.deleteEvent(id),
+    mutationFn: (eventId: string) => {
+      if (!userId) throw new Error('Not signed in');
+      return EventsService.deleteEvent(eventId, userId);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['events'] });
     },

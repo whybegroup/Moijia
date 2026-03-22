@@ -80,7 +80,18 @@ export class EventController extends Controller {
    */
   @Post()
   @SuccessResponse('201', 'Created')
-  public async createEvent(@Body() body: EventInput): Promise<Event> {
+  public async createEvent(
+    @Query() userId: string,
+    @Body() body: EventInput
+  ): Promise<Event> {
+    if (!userId) {
+      this.setStatus(400);
+      throw new Error('userId is required');
+    }
+    if (body.createdBy !== userId) {
+      this.setStatus(403);
+      throw new Error('createdBy must match authenticated user');
+    }
     this.setStatus(201);
     return this.eventService.create(body);
   }
@@ -92,8 +103,17 @@ export class EventController extends Controller {
   @Put('{id}')
   public async updateEvent(
     @Path() id: string,
+    @Query() userId: string,
     @Body() body: EventUpdate
   ): Promise<Event> {
+    if (!userId) {
+      this.setStatus(400);
+      throw new Error('userId is required');
+    }
+    if (body.updatedBy !== userId) {
+      this.setStatus(403);
+      throw new Error('updatedBy must match authenticated user');
+    }
     return this.eventService.update(id, body);
   }
 
@@ -103,8 +123,12 @@ export class EventController extends Controller {
    */
   @Delete('{id}')
   @SuccessResponse('204', 'No Content')
-  public async deleteEvent(@Path() id: string): Promise<void> {
-    await this.eventService.delete(id);
+  public async deleteEvent(@Path() id: string, @Query() userId: string): Promise<void> {
+    if (!userId) {
+      this.setStatus(400);
+      throw new Error('userId is required');
+    }
+    await this.eventService.delete(id, userId);
     this.setStatus(204);
   }
 

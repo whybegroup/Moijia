@@ -48,13 +48,10 @@ function RootLayoutNav() {
     }, 100);
 
     return () => clearTimeout(timeout);
-  }, [user, loading, segments]);
+  }, [user, loading, segments, router]);
 
-  // Show nothing while auth is loading to prevent flash
-  if (loading) {
-    return null;
-  }
-
+  // Always mount Stack — returning null here unmounts the navigator and can trigger
+  // "Rendered fewer hooks than expected" in expo-router / React Navigation during sign-out.
   return (
     <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
       <Stack.Screen name="login" options={{ headerShown: false }} />

@@ -1,10 +1,10 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, Platform, TextInput, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Colors, Fonts, Radius } from '../../constants/theme';
-import { getGroupColor, getDefaultGroupThemeFromName, avatarColor, groupAvatarBorderRadius } from '../../utils/helpers';
-import { useGroups, useEvents, useAllGroupMemberColors, useUpdateUser } from '../../hooks/api';
+import { getGroupColor, getDefaultGroupThemeFromName, groupAvatarBorderRadius } from '../../utils/helpers';
+import { useGroups, useAllGroupMemberColors, useUpdateUser } from '../../hooks/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useCurrentUserContext } from '../../contexts/CurrentUserContext';
 import { UserAvatar } from '../../components/UserAvatar';
@@ -20,14 +20,26 @@ export default function ProfileScreen() {
   const { data: groups = [] } = useGroups(userId ?? '');
   const { data: groupColors = {} } = useAllGroupMemberColors(userId || '');
 
+  const [draftDisplayName, setDraftDisplayName] = useState('');
+  const [editingDisplayName, setEditingDisplayName] = useState(false);
+  const [showAvatarPicker, setShowAvatarPicker] = useState(false);
+  const [draftAvatarSeed, setDraftAvatarSeed] = useState('');
+  const [draftThumbnail, setDraftThumbnail] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (showAvatarPicker) {
+      setDraftAvatarSeed(user?.avatarSeed ?? '');
+      setDraftThumbnail(user?.thumbnail ?? null);
+    }
+  }, [showAvatarPicker, user?.avatarSeed, user?.thumbnail]);
+
   const handleSignOut = async () => {
     console.log('[Profile] Sign out button clicked');
-    
-    // Use native confirm on web, Alert.alert on mobile
+
     if (Platform.OS === 'web') {
       const confirmed = window.confirm('Are you sure you want to sign out?');
       console.log('[Profile] Confirmation result:', confirmed);
-      
+
       if (confirmed) {
         console.log('[Profile] Sign out confirmed');
         try {
@@ -68,19 +80,6 @@ export default function ProfileScreen() {
       );
     }
   };
-
-  const [draftDisplayName, setDraftDisplayName] = useState('');
-  const [editingDisplayName, setEditingDisplayName] = useState(false);
-  const [showAvatarPicker, setShowAvatarPicker] = useState(false);
-  const [draftAvatarSeed, setDraftAvatarSeed] = useState('');
-  const [draftThumbnail, setDraftThumbnail] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (showAvatarPicker) {
-      setDraftAvatarSeed(user?.avatarSeed ?? '');
-      setDraftThumbnail(user?.thumbnail ?? null);
-    }
-  }, [showAvatarPicker, user?.avatarSeed, user?.thumbnail]);
 
   if (!user) {
     return null;

@@ -17,7 +17,7 @@ export default function CreateEventScreen() {
   const today  = new Date().toISOString().slice(0, 10);
   const { data: groups = [], isLoading: loading } = useGroups(currentUserId ?? '');
   const { data: groupColors = {} } = useAllGroupMemberColors(currentUserId || '');
-  const createEventMutation = useCreateEvent();
+  const createEventMutation = useCreateEvent(currentUserId ?? '');
 
   const [form, setForm] = useState({
     title: '', subtitle: '', groupId: '',
@@ -33,12 +33,14 @@ export default function CreateEventScreen() {
     endTime: '',
   });
 
-  const adminGroups = groups.filter((g) => g.membershipStatus === 'admin');
+  const eventEligibleGroups = groups.filter(
+    (g) => g.membershipStatus === 'member' || g.membershipStatus === 'admin',
+  );
   useEffect(() => {
-    if (adminGroups.length > 0 && !form.groupId) {
-      setForm((p) => ({ ...p, groupId: adminGroups[0].id }));
+    if (eventEligibleGroups.length > 0 && !form.groupId) {
+      setForm((p) => ({ ...p, groupId: eventEligibleGroups[0].id }));
     }
-  }, [adminGroups, form.groupId]);
+  }, [eventEligibleGroups, form.groupId]);
 
   const set = (k: string, v: any) => setForm((p) => ({ ...p, [k]: v }));
   const ok  = !!form.title.trim() && !!form.startDate && !!form.endDate && !!form.groupId;
@@ -332,7 +334,7 @@ export default function CreateEventScreen() {
 
         <Field label="Group" required>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-            {adminGroups.map((g) => {
+            {eventEligibleGroups.map((g) => {
               const userColorHex = groupColors[g.id] || getDefaultGroupThemeFromName(g.name);
               const p = getGroupColor(userColorHex);
               const sel = form.groupId === g.id;

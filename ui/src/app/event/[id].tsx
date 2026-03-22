@@ -132,7 +132,7 @@ export default function EventDetailScreen() {
   const createOrUpdateRSVPMutation = useCreateOrUpdateRSVP(eventId || '');
   const deleteRSVPMutation = useDeleteRSVP(eventId || '');
   const createCommentMutation = useCreateComment(eventId || '');
-  const deleteEventMutation = useDeleteEvent();
+  const deleteEventMutation = useDeleteEvent(currentUserId ?? '');
 
   const [showAttend,  setShowAttend]  = useState(false);
   const [memoFor,     setMemoFor]     = useState<RSVPInput.status | null>(null);
