@@ -28,6 +28,7 @@ model User {
   groupMemberships GroupMember[]
   rsvps            RSVP[]
   comments         Comment[]
+  eventWatches     EventWatch[]
 
   @@map("users")
 }
@@ -105,6 +106,7 @@ model Event {
   coverPhotos EventPhoto[]
   rsvps       RSVP[]
   comments    Comment[]
+  watches     EventWatch[]
 
   @@map("events")
 }
@@ -141,6 +143,22 @@ model RSVP {
 
   @@unique([eventId, userId])
   @@map("rsvps")
+}
+
+// Explicit watch/follow for event notifications (overrides default: host + going + maybe)
+model EventWatch {
+  id        String   @id @default(uuid())
+  eventId   String
+  userId    String
+  watching  Boolean
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, userId])
+  @@map("event_watches")
 }
 
 // ============================================

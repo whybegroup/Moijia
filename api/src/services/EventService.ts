@@ -10,6 +10,7 @@ import {
   CommentInput,
   CommentUpdateInput,
   CommentDeleteInput,
+  EventWatchInput,
 } from '../models';
 import { NotificationService } from './NotificationService';
 import {
@@ -204,7 +205,160 @@ export class EventService {
     if (userId && !(await this.userCanReadEvent(event, userId))) {
       return null;
     }
-    return this.mapEventDetailed(event);
+    const detailed = this.mapEventDetailed(event);
+    if (userId) {
+      return this.enrichWithViewerWatch(detailed, id, userId);
+    }
+    return detailed;
+  }
+
+  /**
+   * Whether this user should receive default event notifications for this event.
+   * Default on for host + Going/Maybe; explicit EventWatch row overrides.
+   */
+  private async shouldReceiveEventNotifications(eventId: string, recipientUserId: string): Promise<boolean> {
+    const event = await prisma.event.findUnique({
+      where: { id: eventId },
+      include: {
+        rsvps: {
+          where: { userId: recipientUserId },
+        },
+      },
+    });
+    if (!event) return false;
+    const rsvp = event.rsvps[0];
+    const defaultWatch =
+      event.createdBy === recipientUserId ||
+      rsvp?.status === 'going' ||
+      rsvp?.status === 'maybe';
+
+    const row = await prisma.eventWatch.findUnique({
+      where: {
+        eventId_userId: {
+          eventId,
+          userId: recipientUserId,
+        },
+      },
+    });
+    if (row !== null) return row.watching;
+    return defaultWatch;
+  }
+
+  /** All user IDs that should receive default event notifications for this event. */
+  private async getUserIdsWatchingEvent(eventId: string): Promise<string[]> {
+    const event = await prisma.event.findUnique({
+      where: { id: eventId },
+      include: { rsvps: true },
+    });
+    if (!event) return [];
+
+    const watchRows = await prisma.eventWatch.findMany({
+      where: { eventId },
+    });
+    const rowByUser = new Map(watchRows.map((r) => [r.userId, r.watching]));
+
+    const candidateIds = new Set<string>();
+    candidateIds.add(event.createdBy);
+    for (const r of event.rsvps) {
+      candidateIds.add(r.userId);
+    }
+    for (const r of watchRows) {
+      candidateIds.add(r.userId);
+    }
+
+    const watching: string[] = [];
+    for (const uid of candidateIds) {
+      const rsvp = event.rsvps.find((x) => x.userId === uid);
+      const defaultWatch =
+        event.createdBy === uid ||
+        rsvp?.status === 'going' ||
+        rsvp?.status === 'maybe';
+
+      const explicit = rowByUser.get(uid);
+      const effective = explicit !== undefined ? explicit : defaultWatch;
+      if (effective) watching.push(uid);
+    }
+    return watching;
+  }
+
+  private async enrichWithViewerWatch(
+    detailed: EventDetailed,
+    eventId: string,
+    viewerUserId: string
+  ): Promise<EventDetailed> {
+    const event = await prisma.event.findUnique({ where: { id: eventId } });
+    if (!event) return detailed;
+    const rsvp = detailed.rsvps.find((r) => r.userId === viewerUserId);
+    const defaultWatch =
+      event.createdBy === viewerUserId ||
+      rsvp?.status === 'going' ||
+      rsvp?.status === 'maybe';
+
+    const row = await prisma.eventWatch.findUnique({
+      where: {
+        eventId_userId: {
+          eventId,
+          userId: viewerUserId,
+        },
+      },
+    });
+    const effective = row !== null ? row.watching : defaultWatch;
+
+    return {
+      ...detailed,
+      viewerWatching: effective,
+      viewerWatchDefault: defaultWatch,
+    };
+  }
+
+  /**
+   * Set whether this user watches the event for default notifications.
+   * Any user who can open the event may set their own preference.
+   */
+  public async setEventWatch(
+    eventId: string,
+    userId: string,
+    input: EventWatchInput
+  ): Promise<{ watching: boolean; defaultWatching: boolean }> {
+    const event = await prisma.event.findUnique({
+      where: { id: eventId },
+      include: { rsvps: true },
+    });
+    if (!event) {
+      throw Object.assign(new Error('Event not found'), { status: 404 });
+    }
+    if (!(await this.userCanReadEvent(event, userId))) {
+      throw Object.assign(new Error('Access denied'), { status: 403 });
+    }
+
+    const rsvp = event.rsvps.find((r) => r.userId === userId);
+    const defaultWatch =
+      event.createdBy === userId || rsvp?.status === 'going' || rsvp?.status === 'maybe';
+
+    const want = input.watching;
+
+    if (want === defaultWatch) {
+      await prisma.eventWatch.deleteMany({ where: { eventId, userId } });
+    } else {
+      await prisma.eventWatch.upsert({
+        where: {
+          eventId_userId: {
+            eventId,
+            userId,
+          },
+        },
+        create: {
+          eventId,
+          userId,
+          watching: want,
+        },
+        update: {
+          watching: want,
+        },
+      });
+    }
+
+    return { watching: want, defaultWatching: defaultWatch };
   }
 
   /**
@@ -412,21 +566,21 @@ export class EventService {
         where: { id: inputUserId },
       });
 
-      if (event && user && event.createdBy !== inputUserId) {
-        await notificationService
-          .createForUser(
-            event.createdBy,
-            'New RSVP',
-            `${user.displayName} is going to ${event.title}`,
-            {
+      if (event && user) {
+        const watcherIds = await this.getUserIdsWatchingEvent(eventId);
+        const body = `${user.displayName} is going to ${event.title}`;
+        for (const uid of watcherIds) {
+          if (uid === inputUserId) continue;
+          await notificationService
+            .createForUser(uid, 'New RSVP', body, {
               type: 'rsvp',
               icon: '✓',
               eventId: event.id,
               groupId: event.groupId,
               dest: 'event',
-            }
-          )
-          .catch((err) => console.error('Failed to create RSVP notification:', err));
+            })
+            .catch((err) => console.error('Failed to create RSVP notification:', err));
+        }
       }
     }
 
@@ -514,6 +668,7 @@ export class EventService {
         where: { id: rsvp.userId },
       });
 
+      // Always notify the promoted attendee (host-only rules do not apply here).
       if (user) {
         void notificationService
           .createForUser(
@@ -642,21 +797,20 @@ export class EventService {
         }
       }
 
-      // Event host: "New Comment" unless they already got a mention for this comment
-      if (event.createdBy !== input.userId && !mentionRecipients.has(event.createdBy)) {
+      // Everyone watching the event gets "New Comment" except the commenter and anyone already notified via @mention
+      const watcherIds = await this.getUserIdsWatchingEvent(eventId);
+      const commentBody = `${user.displayName} ${commentSnippet} on ${event.title}`;
+      for (const uid of watcherIds) {
+        if (uid === input.userId) continue;
+        if (mentionRecipients.has(uid)) continue;
         await notificationService
-          .createForUser(
-            event.createdBy,
-            'New Comment',
-            `${user.displayName} ${commentSnippet} on ${event.title}`,
-            {
-              type: 'comment',
-              icon: '💬',
-              eventId: event.id,
-              groupId: event.groupId,
-              dest: 'event',
-            }
-          )
+          .createForUser(uid, 'New Comment', commentBody, {
+            type: 'comment',
+            icon: '💬',
+            eventId: event.id,
+            groupId: event.groupId,
+            dest: 'event',
+          })
           .catch((err) => console.error('Failed to create comment notification:', err));
       }
     }

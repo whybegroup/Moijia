@@ -28,6 +28,7 @@ import {
   useUpdateComment,
   useGroupMemberColor,
   useDeleteEvent,
+  useSetEventWatch,
 } from '../../hooks/api';
 import { uid, getNoResponseIds } from '../../utils/api-helpers';
 import type { CommentInput, EventDetailed, User, GroupScoped, RSVP } from '@moija/client';
@@ -217,6 +218,7 @@ export default function EventDetailScreen() {
   const updateCommentMutation = useUpdateComment(eventId || '');
   const deleteCommentMutation = useDeleteComment(eventId || '');
   const deleteEventMutation = useDeleteEvent(currentUserId ?? '');
+  const setWatchMutation = useSetEventWatch(eventId || '', currentUserId ?? undefined);
 
   /** Group roster for @mentions (server validates the same set). */
   const mentionMemberRows: MentionMemberRow[] = useMemo(() => {
@@ -335,6 +337,28 @@ export default function EventDetailScreen() {
                   (group.adminIds ?? []).includes(currentUserId);
   const canModerateComments =
     group.superAdminId === currentUserId || (group.adminIds ?? []).includes(currentUserId ?? '');
+
+  const evWithWatch = ev as EventDetailed & {
+    viewerWatching?: boolean;
+    viewerWatchDefault?: boolean;
+  };
+  const watchDefaultForViewer =
+    evWithWatch.viewerWatchDefault !== undefined
+      ? evWithWatch.viewerWatchDefault
+      : ev.createdBy === currentUserId ||
+        myRsvp?.status === 'going' ||
+        myRsvp?.status === 'maybe';
+  const effectiveWatching =
+    evWithWatch.viewerWatching !== undefined ? evWithWatch.viewerWatching : watchDefaultForViewer;
+
+  const toggleEventWatch = async () => {
+    if (!currentUserId) return;
+    try {
+      await setWatchMutation.mutateAsync({ watching: !effectiveWatching });
+    } catch (e: any) {
+      Alert.alert('Error', e?.body?.message || e?.message || 'Could not update notifications for this event');
+    }
+  };
   
   const maxCapacity = ev.maxAttendees || 0;
   const isAtCapacity = maxCapacity > 0 && going.length >= maxCapacity;
@@ -519,6 +543,25 @@ export default function EventDetailScreen() {
           <Text style={styles.navBackText}>← Back</Text>
         </TouchableOpacity>
         <View style={{ flex: 1 }} />
+        {currentUserId ? (
+          <TouchableOpacity
+            onPress={toggleEventWatch}
+            disabled={setWatchMutation.isPending}
+            style={styles.navIconBtn}
+            accessibilityRole="button"
+            accessibilityLabel={
+              effectiveWatching
+                ? 'Watching this event — tap to stop default notifications'
+                : 'Not watching — tap to get default event notifications'
+            }
+          >
+            <Ionicons
+              name={effectiveWatching ? 'eye' : 'eye-off-outline'}
+              size={22}
+              color={effectiveWatching ? Colors.accent : Colors.textSub}
+            />
+          </TouchableOpacity>
+        ) : null}
         {canEdit && (
           <>
             <TouchableOpacity

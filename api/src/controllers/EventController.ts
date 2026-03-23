@@ -22,6 +22,7 @@ import {
   CommentInput,
   CommentUpdateInput,
   CommentDeleteInput,
+  EventWatchInput,
 } from '../models';
 import { EventService } from '../services/EventService';
 
@@ -53,6 +54,22 @@ export class EventController extends Controller {
       startBefore: startBefore ? new Date(startBefore) : undefined,
       limit,
     });
+  }
+
+  /**
+   * Watch / unwatch this event for default notifications (per-user).
+   */
+  @Put('{id}/watch')
+  public async setEventWatch(
+    @Path() id: string,
+    @Query() userId: string,
+    @Body() body: EventWatchInput
+  ): Promise<{ watching: boolean; defaultWatching: boolean }> {
+    if (!userId) {
+      this.setStatus(400);
+      throw new Error('userId is required');
+    }
+    return this.eventService.setEventWatch(id, userId, body);
   }
 
   /**
