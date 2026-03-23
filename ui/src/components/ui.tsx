@@ -1,7 +1,7 @@
 import React from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, StyleProp, ViewStyle,
-  ScrollView, Modal, TextInput,
+  ScrollView, Modal, TextInput, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Radius, Shadows, Fonts } from '../constants/theme';
@@ -163,14 +163,24 @@ export function Sheet({ visible, onClose, children }: SheetProps) {
   const insets = useSafeAreaInsets();
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <TouchableOpacity style={styles.sheetOverlay} onPress={onClose} activeOpacity={1}>
-        <TouchableOpacity activeOpacity={1} style={[styles.sheetContainer, { paddingBottom: insets.bottom + 16 }]}>
-          <View style={styles.sheetHandle} />
-          <ScrollView showsVerticalScrollIndicator={false}>
-            {children}
-          </ScrollView>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={0}
+      >
+        <TouchableOpacity style={styles.sheetOverlay} onPress={onClose} activeOpacity={1}>
+          <TouchableOpacity activeOpacity={1} style={[styles.sheetContainer, { paddingBottom: insets.bottom + 16 }]}>
+            <View style={styles.sheetHandle} />
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="interactive"
+            >
+              {children}
+            </ScrollView>
+          </TouchableOpacity>
         </TouchableOpacity>
-      </TouchableOpacity>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

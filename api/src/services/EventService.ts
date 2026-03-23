@@ -8,13 +8,26 @@ import {
   RSVPInput,
   Comment,
   CommentInput,
+  CommentUpdateInput,
+  CommentDeleteInput,
+  EventWatchInput,
 } from '../models';
 import { NotificationService } from './NotificationService';
+import {
+  extractMentionTokens,
+  resolveMentionRecipientIds,
+  resolveCanonicalMemberUserId,
+  type MemberRow,
+} from '../utils/commentMentions';
 import { S3UploadService } from './S3UploadService';
 
 const prisma = new PrismaClient();
 const notificationService = new NotificationService();
 const s3Uploads = new S3UploadService();
+
+const COMMENT_MENTION_NOTIFICATION_TITLE = 'You were mentioned';
+/** Shown when a group admin removes someone else's comment (soft-delete). */
+export const COMMENT_DELETED_BY_ADMIN_TEXT = 'This message was deleted by admin';
 
 export class EventService {
   /**
@@ -194,7 +207,160 @@ export class EventService {
     if (userId && !(await this.userCanReadEvent(event, userId))) {
       return null;
     }
-    return this.mapEventDetailed(event);
+    const detailed = this.mapEventDetailed(event);
+    if (userId) {
+      return this.enrichWithViewerWatch(detailed, id, userId);
+    }
+    return detailed;
+  }
+
+  /**
+   * Whether this user should receive default event notifications for this event.
+   * Default on for host + Going/Maybe; explicit EventWatch row overrides.
+   */
+  private async shouldReceiveEventNotifications(eventId: string, recipientUserId: string): Promise<boolean> {
+    const event = await prisma.event.findUnique({
+      where: { id: eventId },
+      include: {
+        rsvps: {
+          where: { userId: recipientUserId },
+        },
+      },
+    });
+    if (!event) return false;
+    const rsvp = event.rsvps[0];
+    const defaultWatch =
+      event.createdBy === recipientUserId ||
+      rsvp?.status === 'going' ||
+      rsvp?.status === 'maybe';
+
+    const row = await prisma.eventWatch.findUnique({
+      where: {
+        eventId_userId: {
+          eventId,
+          userId: recipientUserId,
+        },
+      },
+    });
+    if (row !== null) return row.watching;
+    return defaultWatch;
+  }
+
+  /** All user IDs that should receive default event notifications for this event. */
+  private async getUserIdsWatchingEvent(eventId: string): Promise<string[]> {
+    const event = await prisma.event.findUnique({
+      where: { id: eventId },
+      include: { rsvps: true },
+    });
+    if (!event) return [];
+
+    const watchRows = await prisma.eventWatch.findMany({
+      where: { eventId },
+    });
+    const rowByUser = new Map(watchRows.map((r) => [r.userId, r.watching]));
+
+    const candidateIds = new Set<string>();
+    candidateIds.add(event.createdBy);
+    for (const r of event.rsvps) {
+      candidateIds.add(r.userId);
+    }
+    for (const r of watchRows) {
+      candidateIds.add(r.userId);
+    }
+
+    const watching: string[] = [];
+    for (const uid of candidateIds) {
+      const rsvp = event.rsvps.find((x) => x.userId === uid);
+      const defaultWatch =
+        event.createdBy === uid ||
+        rsvp?.status === 'going' ||
+        rsvp?.status === 'maybe';
+
+      const explicit = rowByUser.get(uid);
+      const effective = explicit !== undefined ? explicit : defaultWatch;
+      if (effective) watching.push(uid);
+    }
+    return watching;
+  }
+
+  private async enrichWithViewerWatch(
+    detailed: EventDetailed,
+    eventId: string,
+    viewerUserId: string
+  ): Promise<EventDetailed> {
+    const event = await prisma.event.findUnique({ where: { id: eventId } });
+    if (!event) return detailed;
+    const rsvp = detailed.rsvps.find((r) => r.userId === viewerUserId);
+    const defaultWatch =
+      event.createdBy === viewerUserId ||
+      rsvp?.status === 'going' ||
+      rsvp?.status === 'maybe';
+
+    const row = await prisma.eventWatch.findUnique({
+      where: {
+        eventId_userId: {
+          eventId,
+          userId: viewerUserId,
+        },
+      },
+    });
+    const effective = row !== null ? row.watching : defaultWatch;
+
+    return {
+      ...detailed,
+      viewerWatching: effective,
+      viewerWatchDefault: defaultWatch,
+    };
+  }
+
+  /**
+   * Set whether this user watches the event for default notifications.
+   * Any user who can open the event may set their own preference.
+   */
+  public async setEventWatch(
+    eventId: string,
+    userId: string,
+    input: EventWatchInput
+  ): Promise<{ watching: boolean; defaultWatching: boolean }> {
+    const event = await prisma.event.findUnique({
+      where: { id: eventId },
+      include: { rsvps: true },
+    });
+    if (!event) {
+      throw Object.assign(new Error('Event not found'), { status: 404 });
+    }
+    if (!(await this.userCanReadEvent(event, userId))) {
+      throw Object.assign(new Error('Access denied'), { status: 403 });
+    }
+
+    const rsvp = event.rsvps.find((r) => r.userId === userId);
+    const defaultWatch =
+      event.createdBy === userId || rsvp?.status === 'going' || rsvp?.status === 'maybe';
+
+    const want = input.watching;
+
+    if (want === defaultWatch) {
+      await prisma.eventWatch.deleteMany({ where: { eventId, userId } });
+    } else {
+      await prisma.eventWatch.upsert({
+        where: {
+          eventId_userId: {
+            eventId,
+            userId,
+          },
+        },
+        create: {
+          eventId,
+          userId,
+          watching: want,
+        },
+        update: {
+          watching: want,
+        },
+      });
+    }
+
+    return { watching: want, defaultWatching: defaultWatch };
   }
 
   /**
@@ -422,21 +588,21 @@ export class EventService {
         where: { id: inputUserId },
       });
 
-      if (event && user && event.createdBy !== inputUserId) {
-        await notificationService
-          .createForUser(
-            event.createdBy,
-            'New RSVP',
-            `${user.displayName} is going to ${event.title}`,
-            {
+      if (event && user) {
+        const watcherIds = await this.getUserIdsWatchingEvent(eventId);
+        const body = `${user.displayName} is going to ${event.title}`;
+        for (const uid of watcherIds) {
+          if (uid === inputUserId) continue;
+          await notificationService
+            .createForUser(uid, 'New RSVP', body, {
               type: 'rsvp',
               icon: '✓',
               eventId: event.id,
               groupId: event.groupId,
               dest: 'event',
-            }
-          )
-          .catch((err) => console.error('Failed to create RSVP notification:', err));
+            })
+            .catch((err) => console.error('Failed to create RSVP notification:', err));
+        }
       }
     }
 
@@ -524,6 +690,7 @@ export class EventService {
         where: { id: rsvp.userId },
       });
 
+      // Always notify the promoted attendee (host-only rules do not apply here).
       if (user) {
         void notificationService
           .createForUser(
@@ -564,7 +731,7 @@ export class EventService {
    * Create a comment
    */
   public async createComment(eventId: string, input: CommentInput): Promise<Comment> {
-    const { photos = [], text, ...commentData } = input;
+    const { photos = [], text, mentionedUserIds, ...commentData } = input;
 
     const data: any = {
       ...commentData,
@@ -585,15 +752,8 @@ export class EventService {
       },
     });
 
-    // Send notification to event creator and other commenters
     const event = await prisma.event.findUnique({
       where: { id: eventId },
-      include: {
-        comments: {
-          select: { userId: true },
-          distinct: ['userId'],
-        },
-      },
     });
 
     const user = await prisma.user.findUnique({
@@ -601,21 +761,79 @@ export class EventService {
     });
 
     if (event && user) {
-      // Create in-app notification for event creator
-      if (event.createdBy !== input.userId) {
-        const commentText = text || (photos.length > 0 ? 'shared a photo' : 'commented');
-        await notificationService.createForUser(
-          event.createdBy,
-          'New Comment',
-          `${user.displayName} ${commentText} on ${event.title}`,
-          {
+      const commentSnippet = text || (photos.length > 0 ? 'shared a photo' : 'commented');
+      const mentionTokens = extractMentionTokens(text);
+      let mentionRecipients = new Set<string>();
+
+      if (mentionTokens.length > 0 || (mentionedUserIds && mentionedUserIds.length > 0)) {
+        // Anyone in the group can be @mentioned; resolve only against this group's roster
+        const groupMembers = await prisma.groupMember.findMany({
+          where: {
+            groupId: event.groupId,
+            status: { in: ['active', 'pending'] },
+          },
+          include: { user: true },
+        });
+
+        const rowByUserId = new Map<string, MemberRow>();
+        for (const m of groupMembers as any[]) {
+          rowByUserId.set(m.userId, {
+            userId: m.userId,
+            displayName: m.user.displayName,
+            name: m.user.name,
+          });
+        }
+
+        const memberRows = [...rowByUserId.values()];
+        const allowedGroupUserIds = new Set(rowByUserId.keys());
+
+        // 1) Explicit client ids first (canonical match — avoids UUID case/hyphen mismatches
+        //    that would drop valid mentioned users who are not the event host).
+        mentionRecipients = new Set<string>();
+        for (const raw of mentionedUserIds ?? []) {
+          const canon = resolveCanonicalMemberUserId(raw, allowedGroupUserIds);
+          if (canon && canon !== input.userId) {
+            mentionRecipients.add(canon);
+          }
+        }
+        // 2) Merge @tokens from comment text
+        const fromText = resolveMentionRecipientIds(mentionTokens, memberRows, input.userId);
+        for (const uid of fromText) {
+          mentionRecipients.add(uid);
+        }
+
+        const snippet =
+          commentSnippet.length > 160 ? `${commentSnippet.slice(0, 157)}…` : commentSnippet;
+        const mentionBody = `${user.displayName} mentioned you in a comment on "${event.title}": ${snippet}`;
+
+        for (const uid of mentionRecipients) {
+          await notificationService
+            .createForUser(uid, COMMENT_MENTION_NOTIFICATION_TITLE, mentionBody, {
+              type: 'mention',
+              icon: '@',
+              eventId: event.id,
+              groupId: event.groupId,
+              dest: 'event',
+            })
+            .catch((err) => console.error('Failed to create mention notification:', err));
+        }
+      }
+
+      // Everyone watching the event gets "New Comment" except the commenter and anyone already notified via @mention
+      const watcherIds = await this.getUserIdsWatchingEvent(eventId);
+      const commentBody = `${user.displayName} ${commentSnippet} on ${event.title}`;
+      for (const uid of watcherIds) {
+        if (uid === input.userId) continue;
+        if (mentionRecipients.has(uid)) continue;
+        await notificationService
+          .createForUser(uid, 'New Comment', commentBody, {
             type: 'comment',
             icon: '💬',
             eventId: event.id,
             groupId: event.groupId,
             dest: 'event',
-          }
-        ).catch(err => console.error('Failed to create comment notification:', err));
+          })
+          .catch((err) => console.error('Failed to create comment notification:', err));
       }
     }
 
@@ -623,12 +841,96 @@ export class EventService {
   }
 
   /**
-   * Delete a comment
+   * Edit a comment. Only the comment author can edit.
    */
-  public async deleteComment(id: string): Promise<void> {
-    await prisma.comment.delete({
+  public async updateComment(id: string, input: CommentUpdateInput): Promise<Comment> {
+    const comment = await prisma.comment.findUnique({
       where: { id },
+      include: { photos: true },
     });
+    if (!comment) {
+      throw { status: 404, message: 'Comment not found' };
+    }
+    if (comment.userId !== input.actorId) {
+      throw { status: 403, message: 'Only the author can edit this comment' };
+    }
+
+    if (comment.text === COMMENT_DELETED_BY_ADMIN_TEXT) {
+      throw { status: 400, message: 'This comment cannot be edited' };
+    }
+
+    const nextText = (input.text || '').trim();
+    if (!nextText) {
+      throw { status: 400, message: 'Comment text cannot be empty' };
+    }
+    const updated = await prisma.comment.update({
+      where: { id },
+      data: { text: nextText },
+      include: { photos: true },
+    });
+    return this.mapCommentWithPhotos(updated);
+  }
+
+  /**
+   * Delete a comment.
+   * - Author deletes own comment → removed from thread entirely
+   * - Admin/superadmin deletes another user's comment → soft-delete placeholder only
+   * - Author or admin may fully remove an admin-placeholder row
+   */
+  public async deleteComment(id: string, input: CommentDeleteInput): Promise<void> {
+    const comment = await prisma.comment.findUnique({
+      where: { id },
+      include: { event: true },
+    });
+    if (!comment) {
+      throw { status: 404, message: 'Comment not found' };
+    }
+
+    const actorId = input?.actorId?.trim();
+    if (!actorId) {
+      throw { status: 400, message: 'actorId is required' };
+    }
+
+    const isAuthor = comment.userId === actorId;
+
+    const gmActor = await prisma.groupMember.findUnique({
+      where: {
+        groupId_userId: {
+          groupId: comment.event.groupId,
+          userId: actorId,
+        },
+      },
+    });
+    const isAdmin =
+      !!gmActor &&
+      gmActor.status === 'active' &&
+      (gmActor.role === 'admin' || gmActor.role === 'superadmin');
+
+    const isPlaceholder = comment.text === COMMENT_DELETED_BY_ADMIN_TEXT;
+
+    if (isPlaceholder) {
+      if (!isAuthor && !isAdmin) {
+        throw { status: 403, message: 'Not allowed to delete this comment' };
+      }
+      await prisma.comment.delete({ where: { id } });
+      return;
+    }
+
+    if (isAuthor) {
+      await prisma.comment.delete({ where: { id } });
+      return;
+    }
+
+    if (isAdmin && !isAuthor) {
+      await prisma.commentPhoto.deleteMany({ where: { commentId: id } });
+      await prisma.comment.update({
+        where: { id },
+        data: { text: COMMENT_DELETED_BY_ADMIN_TEXT },
+      });
+      return;
+    }
+
+    throw { status: 403, message: 'Not allowed to delete this comment' };
   }
 
   /**

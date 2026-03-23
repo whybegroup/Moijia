@@ -14,6 +14,7 @@ const TYPE_TO_ICON: Record<string, IonName> = {
   waitlist_promotion: 'arrow-up-circle-outline',
   comment: 'chatbubble-outline',
   comment_added: 'chatbubble-outline',
+  mention: 'at-outline',
   group_approval: 'person-add-outline',
   general: 'notifications-outline',
 };

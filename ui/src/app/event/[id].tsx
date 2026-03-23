@@ -3,19 +3,36 @@ import {
   View, Text, ScrollView, TouchableOpacity, TextInput,
   StyleSheet, Image, Modal, Linking, Alert, FlatList,
   useWindowDimensions,
+  type StyleProp,
+  type TextStyle,
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Swipeable } from 'react-native-gesture-handler';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Colors, Fonts, Radius, Shadows } from '../../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName, fmtTime, fmtDateFull, timeAgo, dDiff, getMyWaitlistPosition } from '../../utils/helpers';
+import { computeMentionUserIdsForPost, type MentionMemberRow } from '../../utils/mentionUtils';
 import { Avatar, Sheet } from '../../components/ui';
+import { CommentMentionInput } from '../../components/CommentMentionInput';
 import { UserAvatar } from '../../components/UserAvatar';
 import { UserAvatarStack } from '../../components/UserAvatarStack';
-import { useEvent, useGroup, useUsers, useCreateOrUpdateRSVP, useDeleteRSVP, useCreateComment, useGroupMemberColor, useDeleteEvent } from '../../hooks/api';
+import {
+  useEvent,
+  useGroup,
+  useUsers,
+  useCreateOrUpdateRSVP,
+  useDeleteRSVP,
+  useCreateComment,
+  useDeleteComment,
+  useUpdateComment,
+  useGroupMemberColor,
+  useDeleteEvent,
+  useSetEventWatch,
+} from '../../hooks/api';
 import { uid, getNoResponseIds } from '../../utils/api-helpers';
-import type { EventDetailed, User, GroupScoped, RSVP, CommentInput } from '@moija/client';
+import type { CommentInput, EventDetailed, GroupScoped, RSVP, User } from '@moija/client';
 import { RSVPInput } from '@moija/client';
 import { useCurrentUserContext } from '../../contexts/CurrentUserContext';
 import { ResolvableImage } from '../../components/ResolvableImage';
@@ -28,7 +45,15 @@ import {
 } from '../../services/pickAndUploadImage';
 import { useResolvedImageUrls } from '../../hooks/useResolvedImageUrls';
 
-type PendingCommentPhoto = { id: string; uri: string; pendingUpload: PickedImageAsset | File };
+type PendingCommentPhoto = {
+  id: string;
+  uri: string;
+  /** Local file/asset to upload, or an https URL to attach without uploading */
+  pendingUpload: PickedImageAsset | File | string;
+};
+
+/** Must match API soft-delete text when an admin removes someone else's comment */
+const COMMENT_DELETED_BY_ADMIN_MSG = 'This message was deleted by admin';
 
 // ── Photo Carousel ───────────────────────────────────────────────────────────
 function PhotoCarousel({
@@ -148,6 +173,69 @@ function DescText({ text }: { text: string }) {
   );
 }
 
+/** Highlight @mentions in comment bodies */
+function CommentMentionText({ text, style }: { text: string; style?: StyleProp<TextStyle> }) {
+  const MENTION_RE = /(?:^|[^a-zA-Z0-9_])@([a-zA-Z0-9_]+)/g;
+  const URL_RE = /https?:\/\/[^\s]+/g;
+
+  const renderLine = (line: string, lineKey: number) => {
+    type Raw = { start: number; end: number; kind: 'url' | 'mention' };
+    const raw: Raw[] = [];
+    let m: RegExpExecArray | null;
+    URL_RE.lastIndex = 0;
+    while ((m = URL_RE.exec(line)) !== null) {
+      raw.push({ start: m.index, end: m.index + m[0].length, kind: 'url' });
+    }
+    MENTION_RE.lastIndex = 0;
+    while ((m = MENTION_RE.exec(line)) !== null) {
+      raw.push({ start: m.index, end: m.index + m[0].length, kind: 'mention' });
+    }
+    raw.sort((a, b) => a.start - b.start || b.end - a.end);
+    const merged: Raw[] = [];
+    for (const r of raw) {
+      if (merged.some((x) => !(r.end <= x.start || r.start >= x.end))) continue;
+      merged.push(r);
+    }
+    merged.sort((a, b) => a.start - b.start);
+
+    const parts: React.ReactNode[] = [];
+    let pos = 0;
+    for (const r of merged) {
+      if (r.start > pos) parts.push(<Text key={`p${pos}`}>{line.slice(pos, r.start)}</Text>);
+      const slice = line.slice(r.start, r.end);
+      if (r.kind === 'url') {
+        parts.push(
+          <Text key={`u${r.start}`} style={styles.link} onPress={() => Linking.openURL(slice)}>
+            {slice}
+          </Text>
+        );
+      } else {
+        const at = slice.lastIndexOf('@');
+        parts.push(
+          <Text key={`m${r.start}`}>
+            {slice.slice(0, at)}
+            <Text style={styles.mentionInComment}>{slice.slice(at)}</Text>
+          </Text>
+        );
+      }
+      pos = r.end;
+    }
+    if (pos < line.length) parts.push(<Text key={`e${pos}`}>{line.slice(pos)}</Text>);
+    return (
+      <Text key={lineKey}>
+        {parts}
+        {'\n'}
+      </Text>
+    );
+  };
+
+  return (
+    <Text style={style}>
+      {text.split('\n').map((line, i) => renderLine(line, i))}
+    </Text>
+  );
+}
+
 export default function EventDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router  = useRouter();
@@ -162,7 +250,31 @@ export default function EventDetailScreen() {
   const createOrUpdateRSVPMutation = useCreateOrUpdateRSVP(eventId || '');
   const deleteRSVPMutation = useDeleteRSVP(eventId || '');
   const createCommentMutation = useCreateComment(eventId || '');
+  const updateCommentMutation = useUpdateComment(eventId || '');
+  const deleteCommentMutation = useDeleteComment(eventId || '');
   const deleteEventMutation = useDeleteEvent(currentUserId ?? '');
+  const setWatchMutation = useSetEventWatch(eventId || '', currentUserId ?? undefined);
+
+  /** Group roster for @mentions (server validates the same set). */
+  const mentionMemberRows: MentionMemberRow[] = useMemo(() => {
+    const g = group as GroupScoped | undefined;
+    const ids = g?.memberIds;
+    if (!ids?.length) return [];
+    const byId = new Map(allUsers.map((u) => [u.id, u]));
+    return ids.map((uid) => {
+      const u = byId.get(uid);
+      return {
+        userId: uid,
+        displayName: u?.displayName || u?.name || 'Member',
+        name: u?.name || '',
+      };
+    });
+  }, [group, allUsers]);
+
+  const mentionMembersForInput = useMemo(
+    () => mentionMemberRows.map((m) => ({ id: m.userId, displayName: m.displayName, name: m.name })),
+    [mentionMemberRows]
+  );
 
   const allSourceUrls = useMemo(() => {
     const s = new Set<string>();
@@ -181,12 +293,23 @@ export default function EventDetailScreen() {
   const [memoFor,     setMemoFor]     = useState<RSVPInput.status | null>(null);
   const [input,       setInput]       = useState('');
   const [pendingPhotos, setPendingPhotos] = useState<PendingCommentPhoto[]>([]);
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+  const [showCommentPhotoModal, setShowCommentPhotoModal] = useState(false);
+  const [commentPhotoUrl, setCommentPhotoUrl] = useState('');
   const [pendingPreviewLightbox, setPendingPreviewLightbox] = useState<string | null>(null);
   const commentPhotoFileInputRef = useRef<{ click: () => void } | null>(null);
   const [lightbox,    setLightbox]    = useState<{ url: string; name: string; ts: Date } | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [commentPostBusy, setCommentPostBusy] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
+  const commentSwipeRefs = useRef<Map<string, React.ElementRef<typeof Swipeable>>>(new Map());
+
+  const closeCommentSwipe = (commentId: string) => {
+    const s = commentSwipeRefs.current.get(commentId);
+    if (s) {
+      requestAnimationFrame(() => s.close());
+    }
+  };
 
   const removePendingPhoto = useCallback((p: PendingCommentPhoto) => {
     if (p.uri.startsWith('blob:')) {
@@ -317,6 +440,30 @@ export default function EventDetailScreen() {
   const canEdit = ev.createdBy === currentUserId || 
                   group.superAdminId === currentUserId || 
                   (group.adminIds ?? []).includes(currentUserId);
+  const canModerateComments =
+    group.superAdminId === currentUserId || (group.adminIds ?? []).includes(currentUserId ?? '');
+
+  const evWithWatch = ev as EventDetailed & {
+    viewerWatching?: boolean;
+    viewerWatchDefault?: boolean;
+  };
+  const watchDefaultForViewer =
+    evWithWatch.viewerWatchDefault !== undefined
+      ? evWithWatch.viewerWatchDefault
+      : ev.createdBy === currentUserId ||
+        myRsvp?.status === 'going' ||
+        myRsvp?.status === 'maybe';
+  const effectiveWatching =
+    evWithWatch.viewerWatching !== undefined ? evWithWatch.viewerWatching : watchDefaultForViewer;
+
+  const toggleEventWatch = async () => {
+    if (!currentUserId) return;
+    try {
+      await setWatchMutation.mutateAsync({ watching: !effectiveWatching });
+    } catch (e: any) {
+      Alert.alert('Error', e?.body?.message || e?.message || 'Could not update notifications for this event');
+    }
+  };
   
   const maxCapacity = ev.maxAttendees || 0;
   const isAtCapacity = maxCapacity > 0 && going.length >= maxCapacity;
@@ -364,14 +511,88 @@ export default function EventDetailScreen() {
     }
   };
 
+  const handleAddCommentPhoto = () => {
+    const url = commentPhotoUrl.trim();
+    if (!url) return;
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      Alert.alert('Invalid URL', 'Please enter a valid image URL (e.g. https://example.com/image.jpg)');
+      return;
+    }
+    setPendingPhotos((p) => [...p, { id: uid(), uri: url, pendingUpload: url }]);
+    setCommentPhotoUrl('');
+    setShowCommentPhotoModal(false);
+  };
+
+  const beginEditComment = (commentId: string, text?: string | null) => {
+    const next = (text || '').trim();
+    if (!next || next === COMMENT_DELETED_BY_ADMIN_MSG) {
+      return;
+    }
+    closeCommentSwipe(commentId);
+    setEditingCommentId(commentId);
+    setInput(next);
+    setPendingPhotos([]);
+    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
+  };
+
+  const handleDeleteComment = (commentId: string) => {
+    if (!currentUserId) return;
+    closeCommentSwipe(commentId);
+    Alert.alert('Delete comment', 'Are you sure you want to delete this comment?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await deleteCommentMutation.mutateAsync({
+              commentId,
+              input: { actorId: currentUserId },
+            });
+            if (editingCommentId === commentId) {
+              setEditingCommentId(null);
+              setInput('');
+            }
+          } catch (error: any) {
+            Alert.alert('Error', error?.body?.message || error?.message || 'Failed to delete comment');
+          }
+        },
+      },
+    ]);
+  };
+
   const postComment = async () => {
     if (!input.trim() && !pendingPhotos.length) return;
-    if (!currentUserId) return;
+    if (!currentUserId) {
+      Alert.alert('Sign in', 'You must be signed in to comment.');
+      return;
+    }
     setCommentPostBusy(true);
     try {
+      if (editingCommentId) {
+        const nextText = input.trim();
+        if (!nextText) {
+          Alert.alert('Error', 'Comment text cannot be empty');
+          return;
+        }
+        const cid = editingCommentId;
+        await updateCommentMutation.mutateAsync({
+          commentId: cid,
+          input: { actorId: currentUserId, text: nextText },
+        });
+        closeCommentSwipe(cid);
+        setEditingCommentId(null);
+        setInput('');
+        setPendingPhotos([]);
+        return;
+      }
+
       const photoUrls = await Promise.all(
         pendingPhotos.map(async (p) => {
           const src = p.pendingUpload;
+          if (typeof src === 'string' && (src.startsWith('http://') || src.startsWith('https://'))) {
+            return src;
+          }
           if (typeof File !== 'undefined' && src instanceof File) {
             return uploadWebImageFile(currentUserId, src);
           }
@@ -385,16 +606,33 @@ export default function EventDetailScreen() {
         photos: photoUrls,
       };
       if (input.trim()) {
-        newComment.text = input.trim();
+        const trimmed = input.trim();
+        newComment.text = trimmed;
+        const mids = computeMentionUserIdsForPost(trimmed, mentionMemberRows, currentUserId);
+        if (mids.length > 0) {
+          newComment.mentionedUserIds = mids;
+        }
       }
 
-      await createCommentMutation.mutateAsync(newComment);
+      try {
+        await createCommentMutation.mutateAsync(newComment);
+      } catch (firstErr: any) {
+        const st = firstErr?.status ?? firstErr?.response?.status;
+        const is400 = st === 400;
+        if (is400 && Array.isArray(newComment.mentionedUserIds)) {
+          const { mentionedUserIds: _m, ...rest } = newComment;
+          await createCommentMutation.mutateAsync(rest as CommentInput);
+        } else {
+          throw firstErr;
+        }
+      }
 
       for (const p of pendingPhotos) {
         if (p.uri.startsWith('blob:')) URL.revokeObjectURL(p.uri);
       }
       setInput('');
       setPendingPhotos([]);
+      setEditingCommentId(null);
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
     } catch (error: unknown) {
       const err = error as { body?: { message?: string }; message?: string };
@@ -425,6 +663,25 @@ export default function EventDetailScreen() {
           <Text style={styles.navBackText}>← Back</Text>
         </TouchableOpacity>
         <View style={{ flex: 1 }} />
+        {currentUserId ? (
+          <TouchableOpacity
+            onPress={toggleEventWatch}
+            disabled={setWatchMutation.isPending}
+            style={styles.navIconBtn}
+            accessibilityRole="button"
+            accessibilityLabel={
+              effectiveWatching
+                ? 'Watching this event — tap to stop default notifications'
+                : 'Not watching — tap to get default event notifications'
+            }
+          >
+            <Ionicons
+              name={effectiveWatching ? 'eye' : 'eye-off-outline'}
+              size={22}
+              color={effectiveWatching ? Colors.accent : Colors.textSub}
+            />
+          </TouchableOpacity>
+        ) : null}
         {canEdit && (
           <>
             <TouchableOpacity
@@ -649,28 +906,71 @@ export default function EventDetailScreen() {
           )}
           {comments.map((c, i) => {
             const commentTs = typeof c.createdAt === 'string' ? new Date(c.createdAt) : c.createdAt;
+            const isMine = c.userId === currentUserId;
+            const isAdminRemovedOnly = c.text === COMMENT_DELETED_BY_ADMIN_MSG;
+            const canDelete = isMine || canModerateComments;
+            const canEditOwn = isMine && !!c.text && !isAdminRemovedOnly;
+            const hasActions = canDelete || canEditOwn;
             return (
-            <View key={c.id} style={[styles.commentRow, i < comments.length - 1 && styles.commentBorder]}>
-              <Avatar name={getUserSafe(c.userId).displayName} size={34} />
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, marginBottom: 3 }}>
-                  <Text style={[styles.commentName, c.userId === currentUserId && { color: Colors.going }]}>{getUserSafe(c.userId).displayName}</Text>
-                  <Text style={styles.commentTime}>{timeAgo(commentTs)}</Text>
+            <Swipeable
+              key={c.id}
+              ref={(ref) => {
+                if (ref) commentSwipeRefs.current.set(c.id, ref);
+                else commentSwipeRefs.current.delete(c.id);
+              }}
+              enabled={hasActions}
+              overshootRight={false}
+              renderRightActions={() => (
+                <View style={styles.commentActions}>
+                  {canEditOwn ? (
+                    <TouchableOpacity
+                      style={[styles.commentActionBtn, styles.commentActionEdit]}
+                      onPress={() => beginEditComment(c.id, c.text)}
+                    >
+                      <Ionicons name="pencil-outline" size={16} color="#fff" />
+                      <Text style={styles.commentActionText}>Edit</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                  {canDelete ? (
+                    <TouchableOpacity
+                      style={[styles.commentActionBtn, styles.commentActionDelete]}
+                      onPress={() => handleDeleteComment(c.id)}
+                    >
+                      <Ionicons name="trash-outline" size={16} color="#fff" />
+                      <Text style={styles.commentActionText}>Delete</Text>
+                    </TouchableOpacity>
+                  ) : null}
                 </View>
-                {!!c.text && <Text style={styles.commentText}>{c.text}</Text>}
-                {c.photos.length > 0 && (
-                  <View style={{ marginTop: c.text ? 8 : 0 }}>
-                    <CommentPhotoGallery
-                      photos={c.photos}
-                      urlMap={resolvedImageMap}
-                      onPhotoPress={(url) =>
-                        setLightbox({ url, name: getUserSafe(c.userId).displayName, ts: commentTs })
-                      }
-                    />
+              )}
+            >
+              {isAdminRemovedOnly ? (
+                <View style={[styles.commentAdminRemovedRow, i < comments.length - 1 && styles.commentBorder]}>
+                  <Text style={styles.commentAdminRemovedOnly}>{COMMENT_DELETED_BY_ADMIN_MSG}</Text>
+                </View>
+              ) : (
+                <View style={[styles.commentRow, i < comments.length - 1 && styles.commentBorder]}>
+                  <Avatar name={getUserSafe(c.userId).displayName} size={34} />
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, marginBottom: 3 }}>
+                      <Text style={[styles.commentName, c.userId === currentUserId && { color: Colors.going }]}>{getUserSafe(c.userId).displayName}</Text>
+                      <Text style={styles.commentTime}>{timeAgo(commentTs)}</Text>
+                    </View>
+                    {!!c.text && <CommentMentionText text={c.text} style={styles.commentText} />}
+                    {c.photos.length > 0 && (
+                      <View style={{ marginTop: c.text ? 8 : 0 }}>
+                        <CommentPhotoGallery
+                          photos={c.photos}
+                          urlMap={resolvedImageMap}
+                          onPhotoPress={(url) =>
+                            setLightbox({ url, name: getUserSafe(c.userId).displayName, ts: commentTs })
+                          }
+                        />
+                      </View>
+                    )}
                   </View>
-                )}
-              </View>
-            </View>
+                </View>
+              )}
+            </Swipeable>
             );
           })}
         </View>
@@ -680,6 +980,20 @@ export default function EventDetailScreen() {
 
       {/* Comment input */}
       <View style={styles.inputBar}>
+        {editingCommentId ? (
+          <View style={styles.editingBar}>
+            <Text style={styles.editingBarText}>Editing comment</Text>
+            <TouchableOpacity
+              onPress={() => {
+                if (editingCommentId) closeCommentSwipe(editingCommentId);
+                setEditingCommentId(null);
+                setInput('');
+              }}
+            >
+              <Text style={styles.editingBarCancel}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
         {pendingPhotos.length > 0 && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }} contentContainerStyle={{ gap: 6 }}>
             {pendingPhotos.map((p) => (
@@ -710,12 +1024,20 @@ export default function EventDetailScreen() {
               onChange={onCommentWebPhotoChange}
             />
           )}
-          <TouchableOpacity onPress={onCommentPhotoButtonPress} style={styles.photoBtn}>
+          <TouchableOpacity
+            onPress={onCommentPhotoButtonPress}
+            onLongPress={() => setShowCommentPhotoModal(true)}
+            delayLongPress={350}
+            style={styles.photoBtn}
+          >
             <Ionicons name="camera-outline" size={20} color={Colors.textSub} />
           </TouchableOpacity>
-          <TextInput
-            value={input} onChangeText={setInput}
-            placeholder={isPast ? 'Add a memory or photo…' : 'Add a comment…'}
+          <CommentMentionInput
+            value={input}
+            onChangeText={setInput}
+            members={mentionMembersForInput}
+            currentUserId={currentUserId}
+            placeholder={isPast ? 'Add a memory or photo… (@ to mention)' : 'Add a comment… (@ to mention)'}
             placeholderTextColor={Colors.textMuted}
             style={[styles.commentInput, { flex: 1, minWidth: 120 }]}
             onSubmitEditing={postComment}
@@ -729,7 +1051,7 @@ export default function EventDetailScreen() {
                 styles.postBtnDisabled,
             ]}
           >
-            <Text style={styles.postBtnText}>Post</Text>
+            <Text style={styles.postBtnText}>{editingCommentId ? 'Save' : 'Post'}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -795,6 +1117,49 @@ export default function EventDetailScreen() {
           </View>
         </Modal>
       )}
+
+      <Modal
+        visible={showCommentPhotoModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          setShowCommentPhotoModal(false);
+          setCommentPhotoUrl('');
+        }}
+      >
+        <View style={styles.deleteOverlay}>
+          <View style={styles.deleteBox}>
+            <Text style={styles.deleteTitle}>Image from URL</Text>
+            <Text style={styles.deleteMessage}>
+              Paste a direct link to an image (https). Long-press the camera button to open this again.
+            </Text>
+            <TextInput
+              value={commentPhotoUrl}
+              onChangeText={setCommentPhotoUrl}
+              placeholder="https://…"
+              placeholderTextColor={Colors.textMuted}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+              style={[styles.commentInput, { marginTop: 12 }]}
+            />
+            <View style={styles.deleteActions}>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowCommentPhotoModal(false);
+                  setCommentPhotoUrl('');
+                }}
+                style={styles.deleteCancelBtn}
+              >
+                <Text style={styles.deleteCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={handleAddCommentPhoto} style={styles.deleteConfirmBtn}>
+                <Text style={styles.deleteConfirmText}>Add</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <Modal visible={showDeleteConfirm} transparent animationType="fade" onRequestClose={() => setShowDeleteConfirm(false)}>
         <View style={styles.deleteOverlay}>
@@ -1071,6 +1436,7 @@ const styles = StyleSheet.create({
   descBox:          { backgroundColor: Colors.bg, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border, padding: 12, marginBottom: 16 },
   descText:         { fontSize: 14, color: Colors.text, fontFamily: Fonts.regular, lineHeight: 22 },
   link:             { color: Colors.going, textDecorationLine: 'underline' },
+  mentionInComment: { color: Colors.accent, fontFamily: Fonts.semiBold },
   rsvpBtn:          { flex: 1, paddingVertical: 10, borderRadius: Radius.lg, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
   rsvpBtnText:      { fontSize: 14, fontFamily: Fonts.semiBold },
   holdHint:         { fontSize: 11, color: Colors.textMuted, textAlign: 'center', marginBottom: 14, marginTop: 4 },
@@ -1083,11 +1449,32 @@ const styles = StyleSheet.create({
   galleryThumb:     { width: '31.5%', aspectRatio: 1, borderRadius: Radius.md, overflow: 'hidden', backgroundColor: Colors.border },
   commentsBlock:    { backgroundColor: Colors.surface, marginTop: 8 },
   commentRow:       { flexDirection: 'row', gap: 12, padding: 14, paddingHorizontal: 20 },
+  commentAdminRemovedRow: {
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  commentAdminRemovedOnly: {
+    fontSize: 14,
+    fontFamily: Fonts.regular,
+    fontStyle: 'italic',
+    color: Colors.textMuted,
+    textAlign: 'center',
+  },
   commentBorder:    { borderBottomWidth: 1, borderBottomColor: Colors.border },
+  commentActions:   { flexDirection: 'row', alignItems: 'stretch', marginRight: 12, marginVertical: 8, gap: 8 },
+  commentActionBtn: { minWidth: 84, borderRadius: Radius.lg, alignItems: 'center', justifyContent: 'center', gap: 4, paddingHorizontal: 10 },
+  commentActionEdit:{ backgroundColor: '#64748B' },
+  commentActionDelete:{ backgroundColor: '#DC2626' },
+  commentActionText:{ color: '#fff', fontSize: 12, fontFamily: Fonts.semiBold },
   commentName:      { fontSize: 13, fontFamily: Fonts.semiBold, color: Colors.text },
   commentTime:      { fontSize: 11, color: Colors.textMuted, fontFamily: Fonts.regular },
   commentText:      { fontSize: 14, color: Colors.text, fontFamily: Fonts.regular, lineHeight: 20 },
   inputBar:         { backgroundColor: Colors.surface, borderTopWidth: 1, borderTopColor: Colors.border, padding: 10, paddingHorizontal: 16 },
+  editingBar:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, padding: 8, borderRadius: Radius.md, backgroundColor: '#FEF3C7', borderWidth: 1, borderColor: '#FCD34D' },
+  editingBarText:   { fontSize: 12, color: '#92400E', fontFamily: Fonts.semiBold },
+  editingBarCancel: { fontSize: 12, color: '#92400E', fontFamily: Fonts.bold, textDecorationLine: 'underline' },
   photoBtn:         { width: 36, height: 36, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.bg, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   commentInput:     { flex: 1, padding: 9, paddingHorizontal: 14, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.bg, fontSize: 14, color: Colors.text, fontFamily: Fonts.regular },
   postBtn:          { paddingHorizontal: 18, paddingVertical: 9, borderRadius: Radius.lg, backgroundColor: Colors.accent },

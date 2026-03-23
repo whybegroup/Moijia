@@ -67,6 +67,8 @@ PODS:
     - SDWebImageAVIFCoder (~> 0.11.0)
     - SDWebImageSVGCoder (~> 1.7.0)
     - SDWebImageWebPCoder (~> 0.14.6)
+  - ExpoImagePicker (55.0.13):
+    - ExpoModulesCore
   - ExpoKeepAwake (55.0.4):
     - ExpoModulesCore
   - ExpoLinking (55.0.8):
@@ -2352,6 +2354,7 @@ DEPENDENCIES:
   - ExpoGlassEffect (from `../../node_modules/expo-glass-effect/ios`)
   - ExpoHaptics (from `../../node_modules/expo-haptics/ios`)
   - ExpoImage (from `../../node_modules/expo-image/ios`)
+  - ExpoImagePicker (from `../../node_modules/expo-image-picker/ios`)
   - ExpoKeepAwake (from `../../node_modules/expo-keep-awake/ios`)
   - ExpoLinking (from `../../node_modules/expo-linking/ios`)
   - "ExpoLogBox (from `../../node_modules/@expo/log-box`)"
@@ -2491,6 +2494,8 @@ EXTERNAL SOURCES:
     :path: "../../node_modules/expo-haptics/ios"
   ExpoImage:
     :path: "../../node_modules/expo-image/ios"
+  ExpoImagePicker:
+    :path: "../../node_modules/expo-image-picker/ios"
   ExpoKeepAwake:
     :path: "../../node_modules/expo-keep-awake/ios"
   ExpoLinking:
@@ -2692,6 +2697,7 @@ SPEC CHECKSUMS:
   ExpoGlassEffect: 42361543f2c0c383df0cb779e3cd2496b47a585e
   ExpoHaptics: bc44f72943e785c2fdb912738a3665142569472d
   ExpoImage: 53ab717157f29bb5139f9f75b259f93f784b6847
+  ExpoImagePicker: 4463c7e793d904553fb832f7568e306fd7544bc9
   ExpoKeepAwake: 7f3b28c361c37389b18841bb52a58003b39fcb33
   ExpoLinking: 65631933a0bedad33a592bfd2ab9fce0f14e5737
   ExpoLogBox: 89b634d5a8a64c4a6a7caad8f9985a28463c7002
@@ -2706,7 +2712,7 @@ SPEC CHECKSUMS:
   GoogleUtilities: 00c88b9a86066ef77f0da2fab05f65d7768ed8e1
   GTMAppAuth: 217a876b249c3c585a54fd6f73e6b58c4f5c4238
   GTMSessionFetcher: 5aea5ba6bd522a239e236100971f10cb71b96ab6
-  hermes-engine: def2255c54d47a88e69955e410e17116cb1e03f0
+  hermes-engine: 1f7e43d7d640a1c656cf4619dd701b90467527b7
   libavif: 5f8e715bea24debec477006f21ef9e95432e254d
   libdav1d: 23581a4d8ec811ff171ed5e2e05cd27bad64c39f
   libwebp: 02b23773aedb6ff1fd38cec7a77b81414c6842a8
@@ -2719,7 +2725,7 @@ SPEC CHECKSUMS:
   React: f4edc7518ccb0b54a6f580d89dd91471844b4990
   React-callinvoker: 79ef4e3f1c021571f6d2dafbe45ca432b2f3a146
   React-Core: c19ad4660fd48bc8abc060d979f8ee37f1fc4a5a
-  React-Core-prebuilt: 5b095ca6c9d32fd66050f8e7be3679c0d959c1b0
+  React-Core-prebuilt: 7d71d88e1abb6b5e85794b8498c39c4e12e13d94
   React-CoreModules: f94ec3ee2bac588d033ad15a2377af746284f8c8
   React-cxxreact: de66364f2d5fb77d3da3cfa927b2fd960892c711
   React-debug: 4f6739c820d7da9c20f48caa985573b6a847e5f5
@@ -2781,7 +2787,7 @@ SPEC CHECKSUMS:
   ReactAppDependencyProvider: d69159b417e8c9d82b8fe4d0a27def4c3e8f767f
   ReactCodegen: 4b7c14cdd5ba185e9c796b2a21daee55f76313ee
   ReactCommon: 8868269b67561136a7970be188b40738135af077
-  ReactNativeDependencies: 2c18e5e486b216d2a19a61c3d243a11a4fbea8c4
+  ReactNativeDependencies: a44aec17db3d7671378d59bb9cb7499fd11202d6
   RNCAsyncStorage: 3a4f5e2777dae1688b781a487923a08569e27fe4
   RNDateTimePicker: 9c0a849bbe1c256f0854fea255734b715f5ea876
   RNGestureHandler: 5494787ce29288a8941fa825663f2b1fa0a5aaf1

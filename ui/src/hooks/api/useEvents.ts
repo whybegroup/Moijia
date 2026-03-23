@@ -1,5 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { EventsService, type EventInput, type EventUpdate, type EventDetailed } from '@moija/client';
+import {
+  EventsService,
+  type EventInput,
+  type EventUpdate,
+  type EventDetailed,
+  type EventWatchInput,
+} from '@moija/client';
 import { queryKeys } from '../../config/queryClient';
 
 interface EventFilters {
@@ -42,6 +48,23 @@ export function useEvent(id: string, userId: string) {
     refetchOnMount: true,
     refetchOnReconnect: true,
     refetchIntervalInBackground: false,
+  });
+}
+
+export function useSetEventWatch(eventId: string, userId: string | undefined) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (body: EventWatchInput) => {
+      if (!userId) throw new Error('Not signed in');
+      return EventsService.setEventWatch(eventId, userId, body);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['events'] });
+      if (userId) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.events.detail(eventId, userId) });
+      }
+    },
   });
 }
 

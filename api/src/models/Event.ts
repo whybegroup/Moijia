@@ -48,6 +48,18 @@ export interface EventDetailed extends Event {
   rsvps: RSVP[];
   /** Array of comments on this event */
   comments: Comment[];
+  /**
+   * When loaded with a viewer `userId`: whether they are watching for default event notifications.
+   * Default on for host + Going/Maybe; others off until they opt in (or override).
+   */
+  viewerWatching?: boolean;
+  /** Default watch if the user has no explicit watch row (host | going | maybe). */
+  viewerWatchDefault?: boolean;
+}
+
+/** Body for PUT /events/:id/watch */
+export interface EventWatchInput {
+  watching: boolean;
 }
 
 /**
@@ -141,4 +153,17 @@ export interface CommentInput {
   userId: string;
   text?: string;
   photos?: string[];
+  /** Client-resolved mention targets; server validates they are in the event's group */
+  mentionedUserIds?: string[];
+}
+
+/** Input for editing a comment */
+export interface CommentUpdateInput {
+  actorId: string;
+  text: string;
+}
+
+/** Input for deleting a comment */
+export interface CommentDeleteInput {
+  actorId: string;
 }
