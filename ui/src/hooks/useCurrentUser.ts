@@ -51,7 +51,6 @@ export const useCurrentUser = () => {
 
       // If user doesn't exist and we haven't tried creating them yet
       if (!dbUser && !creationAttempted.current.has(userId)) {
-        console.log('Creating new user in database:', firebaseUser?.email);
         creationAttempted.current.add(userId);
         setIsCreating(true);
         
@@ -65,15 +64,8 @@ export const useCurrentUser = () => {
             name: displayName,
             displayName: displayName,
           });
-          
-          console.log('User created successfully');
-        } catch (error: any) {
-          console.error('Error creating user:', error);
-          
-          // If it's a duplicate error, the user might have been created by another process
-          if (error?.message?.includes('Unique constraint') || error?.message?.includes('duplicate')) {
-            console.log('Duplicate detected, user may already exist');
-          }
+        } catch {
+          // Duplicate or API error — user may exist from another tab
         } finally {
           setIsCreating(false);
         }

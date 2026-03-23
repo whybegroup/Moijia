@@ -15,11 +15,11 @@
     "web": "expo start --web"
   },
   "dependencies": {
-    "@moija/client": "*",
     "@dicebear/collection": "^9.4.0",
     "@dicebear/core": "^9.4.0",
     "@expo-google-fonts/dm-sans": "^0.2.3",
     "@firebase/auth": "1.10.8",
+    "@moija/client": "*",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-community/datetimepicker": "^8.6.0",
     "@react-native-google-signin/google-signin": "^16.1.2",
@@ -35,6 +35,7 @@
     "expo-file-system": "~55.0.11",
     "expo-font": "~55.0.4",
     "expo-haptics": "~55.0.9",
+    "expo-image-picker": "~55.0.13",
     "expo-linking": "~55.0.8",
     "expo-router": "~55.0.7",
     "expo-splash-screen": "~55.0.12",

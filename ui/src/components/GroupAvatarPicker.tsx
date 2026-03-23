@@ -1,23 +1,28 @@
-import React from 'react';
-import { View, Text, TextInput, TouchableOpacity, ScrollView } from 'react-native';
+import React, { type MutableRefObject } from 'react';
+import { View, Text, TextInput, TouchableOpacity, ScrollView, useWindowDimensions } from 'react-native';
 import { Colors, Fonts, Radius } from '../constants/theme';
 import { GroupAvatar } from './GroupAvatar';
 import { getGroupColor, getDefaultGroupThemeFromName, groupAvatarBorderRadius, avatarColor } from '../utils/helpers';
 import { IconsAvatar, InitialsAvatar } from './Avatar';
 import { ICON_OPTIONS, BOTTT_PRESETS } from '../utils/avatar';
+import type { PendingAvatarFile } from '../services/pickAndUploadImage';
+import { AvatarThumbnailField } from './AvatarThumbnailField';
 
 interface GroupAvatarPickerProps {
   defaultSeed: string;
   value: string;
   onChangeText: (text: string) => void;
-  /** When provided, shows URL input. Avatar uses thumbnail if valid URL, otherwise seed. */
+  /** When provided, shows URL + S3 upload. Avatar uses thumbnail if valid URL, otherwise seed. */
   thumbnail?: string | null;
   onThumbnailChange?: (text: string | null) => void;
+  uploadUserId?: string;
   disabled?: boolean;
   loading?: boolean;
   inputStyle?: object;
   buttonStyle?: object;
   buttonTextStyle?: object;
+  deferFileUpload?: boolean;
+  pendingAvatarFileRef?: MutableRefObject<PendingAvatarFile | null>;
 }
 
 export function GroupAvatarPicker({
@@ -26,28 +31,27 @@ export function GroupAvatarPicker({
   onChangeText,
   thumbnail,
   onThumbnailChange,
+  uploadUserId = '',
   inputStyle,
+  deferFileUpload = false,
+  pendingAvatarFileRef,
 }: GroupAvatarPickerProps) {
+  const { width: winW } = useWindowDimensions();
+  /** Large preview: scales with modal width, capped for very wide screens. */
+  const previewSize = Math.min(240, Math.max(140, Math.round(winW * 0.42)));
+
   const baseInputStyle = [{ padding: 10, paddingHorizontal: 12, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.bg, fontSize: 14, color: Colors.text, fontFamily: Fonts.regular, flex: 1 }, inputStyle];
 
   return (
-    <View>
+    <View style={{ flexGrow: 1 }}>
       {onThumbnailChange != null ? (
-        <View style={{ marginBottom: 12 }}>
-          <Text style={{ fontSize: 12, fontFamily: Fonts.semiBold, color: Colors.textMuted, marginBottom: 6 }}>Add from URL</Text>
-          <TextInput
-            value={thumbnail ?? ''}
-            onChangeText={(t) => onThumbnailChange(t.trim() || null)}
-            placeholder="https://example.com/image.jpg"
-            placeholderTextColor={Colors.textMuted}
-            style={[baseInputStyle, { flex: 1 }]}
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          <Text style={{ fontSize: 11, color: Colors.textMuted, fontFamily: Fonts.regular, marginTop: 4 }}>
-            Use this image when a valid URL is provided; otherwise it uses the seed below.
-          </Text>
-        </View>
+        <AvatarThumbnailField
+          userId={uploadUserId}
+          thumbnail={thumbnail ?? null}
+          onThumbnailChange={onThumbnailChange}
+          deferFileUpload={deferFileUpload}
+          pendingAvatarFileRef={pendingAvatarFileRef}
+        />
       ) : null}
       <View style={{ marginBottom: 12 }}>
         <Text style={{ fontSize: 12, fontFamily: Fonts.semiBold, color: Colors.textMuted, marginBottom: 6 }}>
@@ -92,12 +96,21 @@ export function GroupAvatarPicker({
           />
         </View>
       </View>
-      <View style={{ marginTop: 8, alignItems: 'center' }}>
+      <View
+        style={{
+          marginTop: 20,
+          paddingVertical: 24,
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexGrow: 1,
+          minHeight: previewSize + 48,
+        }}
+      >
         <View
           style={{
-            width: 56,
-            height: 56,
-            borderRadius: groupAvatarBorderRadius(56),
+            width: previewSize,
+            height: previewSize,
+            borderRadius: groupAvatarBorderRadius(previewSize),
             borderWidth: 1,
             backgroundColor: getGroupColor(getDefaultGroupThemeFromName('Group')).row,
             borderColor: getGroupColor(getDefaultGroupThemeFromName('Group')).cal,
@@ -106,7 +119,12 @@ export function GroupAvatarPicker({
             overflow: 'hidden',
           }}
         >
-          <GroupAvatar seed={value.trim() === '' ? 'auto' : value.trim()} thumbnail={thumbnail} size={56} style={{ width: 56, height: 56 }} />
+          <GroupAvatar
+            seed={value.trim() === '' ? 'auto' : value.trim()}
+            thumbnail={thumbnail}
+            size={previewSize}
+            style={{ width: previewSize, height: previewSize }}
+          />
         </View>
       </View>
     </View>

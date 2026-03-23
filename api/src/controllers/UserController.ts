@@ -57,6 +57,15 @@ export class UserController extends Controller {
   }
 
   /**
+   * Sync user from auth provider (upsert)
+   * @summary Ensures the user row exists and refreshes name fields from the client
+   */
+  @Post('sync')
+  public async syncUser(@Body() body: UserInput): Promise<User> {
+    return this.userService.upsertFromAuth(body);
+  }
+
+  /**
    * Update a user
    * @summary Updates an existing user's information
    */

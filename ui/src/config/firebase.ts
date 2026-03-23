@@ -77,27 +77,19 @@ if (getApps().length === 0) {
 const initAuth = () => {
   if (Platform.OS === 'web') {
     try {
-      // Check if auth is already initialized
       const existingAuth = getAuth(app);
       if (existingAuth) {
-        console.log('Auth already initialized, using existing instance');
         return existingAuth;
       }
-    } catch (e) {
+    } catch {
       // Auth not initialized yet, continue
     }
-    
+
     try {
-      // Use initializeAuth to explicitly set persistence to IndexedDB
-      const newAuth = initializeAuth(app, {
+      return initializeAuth(app, {
         persistence: [indexedDBLocalPersistence, browserLocalPersistence],
       });
-      console.log('Auth initialized with IndexedDB persistence');
-      console.log('Current user on init:', newAuth.currentUser?.email || 'none');
-      return newAuth;
-    } catch (error: any) {
-      console.error('Error initializing auth:', error);
-      // If already initialized, just get the existing instance
+    } catch {
       return getAuth(app);
     }
   }
@@ -116,10 +108,6 @@ const initAuth = () => {
 
 const auth = initAuth();
 
-// Verify auth is working
-console.log('Auth instance ready:', !!auth);
-console.log('Auth app name:', auth.app.name);
-
 // Google Auth Provider
 const googleProvider = new GoogleAuthProvider();
 
@@ -131,32 +119,18 @@ export { auth, googleProvider, User };
 
 // Auth helper functions
 export const signInWithGoogle = async (idToken?: string, accessToken?: string) => {
-  try {
-    console.log('[Firebase] signInWithGoogle called, platform:', Platform.OS);
-    
-    // For web, use popup (most reliable in modern browsers)
-    if (Platform.OS === 'web') {
-      console.log('[Firebase] Starting popup sign-in...');
-      const result = await signInWithPopup(auth, googleProvider);
-      console.log('[Firebase] Sign-in successful:', result.user.email);
-      return result.user;
-    }
-    
-    // For mobile, caller must obtain an ID token (e.g. @react-native-google-signin/google-signin).
-    if (!idToken) {
-      throw new Error('Missing id token for mobile sign-in');
-    }
-    const credential = GoogleAuthProvider.credential(idToken, accessToken ?? undefined);
-    const result = await signInWithCredential(auth, credential);
+  if (Platform.OS === 'web') {
+    const result = await signInWithPopup(auth, googleProvider);
     return result.user;
-  } catch (error: any) {
-    console.error('[Firebase] Error signing in with Google:', error);
-    console.error('[Firebase] Error code:', error.code);
-    console.error('[Firebase] Error message:', error.message);
-    throw error;
   }
-};
 
+  if (!idToken) {
+    throw new Error('Missing id token for mobile sign-in');
+  }
+  const credential = GoogleAuthProvider.credential(idToken, accessToken ?? undefined);
+  const result = await signInWithCredential(auth, credential);
+  return result.user;
+};
 
 export const signInWithEmail = async (email: string, password: string) => {
   const result = await signInWithEmailAndPassword(auth, email.trim(), password);
@@ -169,32 +143,13 @@ export const signUpWithEmail = async (email: string, password: string) => {
 };
 
 export const signOut = async () => {
-  try {
-    await firebaseSignOut(auth);
-  } catch (error) {
-    console.error('Error signing out:', error);
-    throw error;
-  }
+  await firebaseSignOut(auth);
 };
 
-export const getCurrentUser = () => {
-  const user = auth.currentUser;
-  console.log('[Firebase] getCurrentUser:', {
-    hasUser: !!user,
-    email: user?.email,
-    uid: user?.uid,
-  });
-  return user;
-};
+export const getCurrentUser = () => auth.currentUser;
 
 export const onAuthStateChange = (callback: (user: User | null) => void) => {
-  console.log('[Firebase] Setting up onAuthStateChanged listener');
   return onAuthStateChanged(auth, (user) => {
-    console.log('[Firebase] onAuthStateChanged fired:', {
-      hasUser: !!user,
-      email: user?.email,
-      uid: user?.uid,
-    });
     callback(user);
   });
 };

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, Platform, TextInput, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -10,6 +10,7 @@ import { useCurrentUserContext } from '../../contexts/CurrentUserContext';
 import { UserAvatar } from '../../components/UserAvatar';
 import { AvatarPickerModal } from '../../components/AvatarPickerModal';
 import { GroupAvatar } from '../../components/GroupAvatar';
+import { deleteManagedUploadFireAndForget } from '../../services/managedUploadDelete';
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -25,6 +26,7 @@ export default function ProfileScreen() {
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const [draftAvatarSeed, setDraftAvatarSeed] = useState('');
   const [draftThumbnail, setDraftThumbnail] = useState<string | null>(null);
+  const thumbnailAtPickerOpenRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (showAvatarPicker) {
@@ -33,45 +35,36 @@ export default function ProfileScreen() {
     }
   }, [showAvatarPicker, user?.avatarSeed, user?.thumbnail]);
 
-  const handleSignOut = async () => {
-    console.log('[Profile] Sign out button clicked');
+  const dismissAvatarPicker = useCallback(() => {
+    setShowAvatarPicker(false);
+    setDraftAvatarSeed(user?.avatarSeed ?? '');
+    setDraftThumbnail(user?.thumbnail ?? null);
+  }, [user?.avatarSeed, user?.thumbnail]);
 
+  const handleSignOut = async () => {
     if (Platform.OS === 'web') {
       const confirmed = window.confirm('Are you sure you want to sign out?');
-      console.log('[Profile] Confirmation result:', confirmed);
 
       if (confirmed) {
-        console.log('[Profile] Sign out confirmed');
         try {
           await signOut();
-          console.log('[Profile] Sign out completed');
-        } catch (error) {
-          console.error('[Profile] Sign out error:', error);
+        } catch {
           window.alert('Failed to sign out');
         }
-      } else {
-        console.log('[Profile] Sign out cancelled');
       }
     } else {
       Alert.alert(
         'Sign Out',
         'Are you sure you want to sign out?',
         [
-          {
-            text: 'Cancel',
-            style: 'cancel',
-            onPress: () => console.log('[Profile] Sign out cancelled'),
-          },
+          { text: 'Cancel', style: 'cancel' },
           {
             text: 'Sign Out',
             style: 'destructive',
             onPress: async () => {
-              console.log('[Profile] Sign out confirmed');
               try {
                 await signOut();
-                console.log('[Profile] Sign out completed');
-              } catch (error) {
-                console.error('[Profile] Sign out error:', error);
+              } catch {
                 Alert.alert('Error', 'Failed to sign out');
               }
             },
@@ -96,7 +89,10 @@ export default function ProfileScreen() {
         {/* User card */}
         <View style={styles.userCard}>
           <TouchableOpacity
-            onPress={() => setShowAvatarPicker(true)}
+            onPress={() => {
+              thumbnailAtPickerOpenRef.current = user.thumbnail ?? null;
+              setShowAvatarPicker(true);
+            }}
             style={styles.bigAvatar}
             activeOpacity={0.8}
           >
@@ -136,8 +132,7 @@ export default function ProfileScreen() {
                     try {
                       await updateUser.mutateAsync({ displayName: next });
                       setEditingDisplayName(false);
-                    } catch (e) {
-                      console.error('[Profile] Failed updating display name', e);
+                    } catch {
                       if (Platform.OS === 'web') window.alert('Failed to update display name');
                       else Alert.alert('Error', 'Failed to update display name');
                     }
@@ -218,11 +213,13 @@ export default function ProfileScreen() {
       <AvatarPickerModal
         variant="user"
         visible={showAvatarPicker}
-        onClose={() => setShowAvatarPicker(false)}
+        onRequestClose={dismissAvatarPicker}
+        onAfterSave={() => setShowAvatarPicker(false)}
         seed={draftAvatarSeed}
         onSeedChange={setDraftAvatarSeed}
         thumbnail={draftThumbnail}
         onThumbnailChange={setDraftThumbnail}
+        userId={userId ?? ''}
         userName={user.displayName || user.name}
         onSave={async (seed, thumbnail) => {
           try {
@@ -230,6 +227,11 @@ export default function ProfileScreen() {
               avatarSeed: seed.trim() === 'auto' || seed.trim() === '' ? null : seed.trim(),
               thumbnail: thumbnail ?? null,
             });
+            const prior = thumbnailAtPickerOpenRef.current?.trim() ?? '';
+            const saved = (thumbnail ?? '').trim();
+            if (prior && /^https?:\/\//i.test(prior) && prior !== saved && userId) {
+              deleteManagedUploadFireAndForget(userId, prior);
+            }
           } catch (e) {
             if (Platform.OS === 'web') window.alert('Failed to update avatar');
             else Alert.alert('Error', 'Failed to update avatar');

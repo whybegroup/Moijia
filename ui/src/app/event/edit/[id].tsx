@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, Image, Alert, Modal, Platform } from 'react-native';
+import React, { useState, useRef } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, Alert, Modal, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -9,6 +9,8 @@ import { getGroupColor, getDefaultGroupThemeFromName } from '../../../utils/help
 import { useEvent, useGroup, useUpdateEvent, useAllGroupMemberColors, useDeleteEvent } from '../../../hooks/api';
 import { NavBar, Field, Toggle } from '../../../components/ui';
 import { useCurrentUserContext } from '../../../contexts/CurrentUserContext';
+import { PhotoUrlOrUploadModal } from '../../../components/PhotoUrlOrUploadModal';
+import { ResolvableImage } from '../../../components/ResolvableImage';
 
 export default function EditEventScreen() {
   const router = useRouter();
@@ -65,29 +67,32 @@ export default function EditEventScreen() {
   const [showEndDatePicker, setShowEndDatePicker] = useState(false);
   const [showEndTimePicker, setShowEndTimePicker] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  /** Only hydrate form when switching events; refetches after mutations must not wipe unsaved edits. */
+  const hydratedEventIdRef = useRef<string | null>(null);
 
   // Update form when event loads
   React.useEffect(() => {
-    if (existingEvent) {
-      setForm({
-        title: existingEvent.title || '',
-        subtitle: existingEvent.subtitle || '',
-        groupId: existingEvent.groupId || '',
-        startDate: formatDate(existingEvent.start),
-        startTime: formatTime(existingEvent.start),
-        startAllDay: existingEvent.isAllDay || false,
-        endDate: formatDate(existingEvent.end),
-        endTime: formatTime(existingEvent.end),
-        endAllDay: existingEvent.isAllDay || false,
-        location: existingEvent.location || '',
-        minAttendees: existingEvent.minAttendees ? String(existingEvent.minAttendees) : '',
-        maxAttendees: existingEvent.maxAttendees ? String(existingEvent.maxAttendees) : '',
-        allowMaybe: existingEvent.allowMaybe || false,
-        enableWaitlist: existingEvent.enableWaitlist || false,
-        description: existingEvent.description || '',
-        coverPhotos: existingEvent.coverPhotos || [],
-      });
-    }
+    if (!existingEvent) return;
+    if (hydratedEventIdRef.current === existingEvent.id) return;
+    hydratedEventIdRef.current = existingEvent.id;
+    setForm({
+      title: existingEvent.title || '',
+      subtitle: existingEvent.subtitle || '',
+      groupId: existingEvent.groupId || '',
+      startDate: formatDate(existingEvent.start),
+      startTime: formatTime(existingEvent.start),
+      startAllDay: existingEvent.isAllDay || false,
+      endDate: formatDate(existingEvent.end),
+      endTime: formatTime(existingEvent.end),
+      endAllDay: existingEvent.isAllDay || false,
+      location: existingEvent.location || '',
+      minAttendees: existingEvent.minAttendees ? String(existingEvent.minAttendees) : '',
+      maxAttendees: existingEvent.maxAttendees ? String(existingEvent.maxAttendees) : '',
+      allowMaybe: existingEvent.allowMaybe || false,
+      enableWaitlist: existingEvent.enableWaitlist || false,
+      description: existingEvent.description || '',
+      coverPhotos: existingEvent.coverPhotos || [],
+    });
   }, [existingEvent]);
 
   const needGroupForPermission =
@@ -112,6 +117,40 @@ export default function EditEventScreen() {
 
   const set = (k: string, v: any) => setForm(p => ({ ...p, [k]: v }));
   const ok  = !!form.title.trim() && !!form.startDate && !!form.endDate;
+
+  const persistCoverPhotos = async (next: string[]) => {
+    if (!currentUserId || !eventId) return;
+    await updateEventMutation.mutateAsync({
+      updatedBy: currentUserId,
+      coverPhotos: next,
+    });
+  };
+
+  const removeCoverPhotoAt = async (index: number) => {
+    if (!currentUserId) return;
+    const prev = form.coverPhotos;
+    const next = prev.filter((_, j) => j !== index);
+    set('coverPhotos', next);
+    try {
+      await persistCoverPhotos(next);
+    } catch {
+      set('coverPhotos', prev);
+      Alert.alert('Error', 'Failed to remove photo');
+    }
+  };
+
+  const addCoverPhoto = async (url: string) => {
+    if (!currentUserId) return;
+    const prev = form.coverPhotos;
+    const next = [...prev, url];
+    set('coverPhotos', next);
+    try {
+      await persistCoverPhotos(next);
+    } catch {
+      set('coverPhotos', prev);
+      Alert.alert('Error', 'Failed to add photo');
+    }
+  };
 
   const submit = async () => {
     if (!ok) return;
@@ -148,8 +187,7 @@ export default function EditEventScreen() {
       });
       
       router.push(`/event/${eventId}`);
-    } catch (error) {
-      console.error('Failed to update event:', error);
+    } catch {
       Alert.alert('Error', 'Failed to update event');
     }
   };
@@ -159,26 +197,12 @@ export default function EditEventScreen() {
     try {
       await deleteEventMutation.mutateAsync(eventId || '');
       router.push('/(tabs)/feed');
-    } catch (error) {
-      console.error('Failed to delete event:', error);
+    } catch {
       Alert.alert('Error', 'Failed to delete event');
     }
   };
 
   const [showCoverPhotoModal, setShowCoverPhotoModal] = useState(false);
-  const [coverPhotoUrl, setCoverPhotoUrl] = useState('');
-
-  const handleAddCoverPhoto = () => {
-    const url = coverPhotoUrl.trim();
-    if (!url) return;
-    if (!url.startsWith('http://') && !url.startsWith('https://')) {
-      Alert.alert('Invalid URL', 'Please enter a valid image URL (e.g. https://example.com/image.jpg)');
-      return;
-    }
-    set('coverPhotos', [...form.coverPhotos, url]);
-    setCoverPhotoUrl('');
-    setShowCoverPhotoModal(false);
-  };
 
   const getTimeDate = (timeStr: string) => {
     const [hours, minutes] = timeStr.split(':').map(Number);
@@ -592,8 +616,12 @@ export default function EditEventScreen() {
                 contentContainerStyle={{ gap: 4, padding: 10 }}>
                 {form.coverPhotos.map((uri, i) => (
                   <View key={i} style={{ position: 'relative' }}>
-                    <Image source={{ uri }} style={{ width: 80, height: 80, borderRadius: Radius.lg }} />
-                    <TouchableOpacity onPress={() => set('coverPhotos', form.coverPhotos.filter((_, j) => j !== i))}
+                    <ResolvableImage
+                      storedUrl={uri}
+                      style={{ width: 80, height: 80, borderRadius: Radius.lg }}
+                      resizeMode="cover"
+                    />
+                    <TouchableOpacity onPress={() => void removeCoverPhotoAt(i)}
                       style={styles.removeThumb}>
                       <Ionicons name="close" size={11} color="#fff" />
                     </TouchableOpacity>
@@ -615,34 +643,13 @@ export default function EditEventScreen() {
               <Text style={{ fontSize: 11, color: Colors.textMuted }}>{form.description.length}/500</Text>
             </View>
 
-        {showCoverPhotoModal && (
-          <Modal visible transparent animationType="fade" onRequestClose={() => setShowCoverPhotoModal(false)}>
-            <View style={styles.urlModalOverlay}>
-              <TouchableOpacity style={StyleSheet.absoluteFill} onPress={() => setShowCoverPhotoModal(false)} activeOpacity={1} />
-              <View style={styles.urlModalCard}>
-                <Text style={styles.urlModalTitle}>Add image from URL</Text>
-                <TextInput
-                  value={coverPhotoUrl}
-                  onChangeText={setCoverPhotoUrl}
-                  placeholder="https://example.com/image.jpg"
-                  placeholderTextColor={Colors.textMuted}
-                  style={styles.photoUrlInput}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  autoFocus
-                />
-                <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-                  <TouchableOpacity onPress={() => setShowCoverPhotoModal(false)} style={styles.secondaryBtn} activeOpacity={0.8}>
-                    <Text style={styles.secondaryBtnText}>Cancel</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={handleAddCoverPhoto} style={[styles.secondaryBtn, { borderColor: Colors.accent, backgroundColor: Colors.accent }]} activeOpacity={0.8}>
-                    <Text style={[styles.secondaryBtnText, { color: Colors.accentFg }]}>Add</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-          </Modal>
-        )}
+        <PhotoUrlOrUploadModal
+          visible={showCoverPhotoModal}
+          onClose={() => setShowCoverPhotoModal(false)}
+          userId={currentUserId ?? ''}
+          title="Add cover photo"
+          onAdd={(url) => void addCoverPhoto(url)}
+        />
           </View>
         </Field>
 
@@ -702,13 +709,7 @@ const styles = StyleSheet.create({
   descBox:       { backgroundColor: Colors.surface, borderRadius: Radius.xl, borderWidth: 1.5, borderColor: Colors.border, overflow: 'hidden' },
   descInput:     { padding: 12, paddingHorizontal: 14, fontSize: 14, color: Colors.text, fontFamily: Fonts.regular, minHeight: 100, textAlignVertical: 'top' },
   descToolbar:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 8, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: Colors.border },
-  photoUrlInput: { paddingHorizontal: 10, paddingVertical: 10, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.bg, fontSize: 14, color: Colors.text, fontFamily: Fonts.regular },
   photoBtn:      { paddingHorizontal: 10, paddingVertical: 5, borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.bg },
-  urlModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.32)', alignItems: 'center', justifyContent: 'center', padding: 24 },
-  urlModalCard:    { backgroundColor: Colors.surface, borderRadius: 18, borderWidth: 1, borderColor: Colors.border, padding: 16, width: '100%', maxWidth: 360 },
-  urlModalTitle:   { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.text, marginBottom: 12 },
-  secondaryBtn:    { paddingHorizontal: 12, paddingVertical: 8, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surface },
-  secondaryBtnText:{ fontSize: 12, fontFamily: Fonts.semiBold, color: Colors.text },
   removeThumb:   { position: 'absolute', top: -5, right: -5, width: 18, height: 18, borderRadius: 9, backgroundColor: Colors.text, borderWidth: 2, borderColor: Colors.surface, alignItems: 'center', justifyContent: 'center' },
   submitBtn:     { padding: 13, borderRadius: Radius.lg, backgroundColor: Colors.accent, alignItems: 'center', marginTop: 8 },
   submitBtnText: { fontSize: 15, fontFamily: Fonts.bold, color: Colors.accentFg },

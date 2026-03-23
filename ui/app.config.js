@@ -8,7 +8,18 @@ function iosGoogleUrlScheme() {
 
 const iosUrlScheme = iosGoogleUrlScheme();
 
-const plugins = ['expo-router', 'expo-font', 'expo-web-browser'];
+const plugins = [
+  'expo-router',
+  'expo-font',
+  'expo-web-browser',
+  [
+    'expo-image-picker',
+    {
+      photosPermission: 'Moija needs access to your photos to upload images to events.',
+      cameraPermission: 'Moija can use the camera to add photos to events.',
+    },
+  ],
+];
 if (iosUrlScheme) {
   plugins.push(['@react-native-google-signin/google-signin', { iosUrlScheme }]);
 }

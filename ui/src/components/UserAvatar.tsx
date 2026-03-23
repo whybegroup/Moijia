@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Image, View, StyleProp, ViewStyle } from 'react-native';
 import { avatarColor } from '../utils/helpers';
 import { InitialsAvatar } from './Avatar';
+import { ResolvableImage } from './ResolvableImage';
+import { isDirectRenderableImageUrl } from '../services/resolveImageViewUrls';
 
 interface UserAvatarProps {
   /** Seed for generated avatar (DiceBear bottts). Fallback: user.avatarSeed ?? user.name ?? DEFAULT_AVATAR_SEED */
@@ -25,15 +27,26 @@ export function UserAvatar({ seed, backgroundColor, thumbnail, size = 36, style 
     style,
   ];
 
-  const useImage = thumbnail && isUrl(thumbnail);
+  const thumbTrim = thumbnail?.trim() ?? '';
+  useEffect(() => {
+    setThumbnailError(false);
+  }, [thumbTrim]);
+
+  const useImage = thumbTrim && isUrl(thumbTrim);
+  const imgStyle = { width: size, height: size, borderRadius: radius };
   if (useImage && !thumbnailError) {
     return (
       <View style={containerStyle}>
-        <Image
-          source={{ uri: thumbnail!.trim() }}
-          style={{ width: size, height: size, borderRadius: radius }}
-          onError={() => setThumbnailError(true)}
-        />
+        {isDirectRenderableImageUrl(thumbTrim) ? (
+          <Image source={{ uri: thumbTrim }} style={imgStyle} onError={() => setThumbnailError(true)} />
+        ) : (
+          <ResolvableImage
+            storedUrl={thumbTrim}
+            style={imgStyle}
+            resizeMode="cover"
+            onError={() => setThumbnailError(true)}
+          />
+        )}
       </View>
     );
   }

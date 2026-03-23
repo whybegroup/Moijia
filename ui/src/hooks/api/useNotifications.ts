@@ -5,12 +5,7 @@ import { queryKeys } from '../../config/queryClient';
 export function useNotifications(userId?: string) {
   return useQuery({
     queryKey: userId ? queryKeys.notifications.user(userId) : queryKeys.notifications.all,
-    queryFn: async () => {
-      console.log('[Notifications] Fetching notifications at', new Date().toLocaleTimeString());
-      const result = await NotificationsService.getNotifications(userId);
-      console.log('[Notifications] Received', result.length, 'notifications');
-      return result;
-    },
+    queryFn: () => NotificationsService.getNotifications(userId),
     staleTime: 0, // Always consider data stale
     gcTime: 0, // Don't cache
     refetchInterval: 3000, // Poll every 3 seconds

@@ -29,20 +29,16 @@ function RootLayoutNav() {
 
   useEffect(() => {
     if (loading) {
-      console.log('[Layout] Auth loading...');
       return;
     }
 
     const inAuthGroup = segments[0] === 'login';
-    console.log('[Layout] Navigation check - User:', user?.email, 'In login:', inAuthGroup, 'Segments:', segments);
 
     // Small delay to ensure navigation is ready
     const timeout = setTimeout(() => {
       if (!user && !inAuthGroup) {
-        console.log('[Layout] No user, redirecting to login...');
         router.replace('/login');
       } else if (user && inAuthGroup) {
-        console.log('[Layout] User logged in, redirecting to app...');
         router.replace('/(tabs)/feed');
       }
     }, 100);

@@ -19,9 +19,11 @@ import {
   resolveCanonicalMemberUserId,
   type MemberRow,
 } from '../utils/commentMentions';
+import { S3UploadService } from './S3UploadService';
 
 const prisma = new PrismaClient();
 const notificationService = new NotificationService();
+const s3Uploads = new S3UploadService();
 
 const COMMENT_MENTION_NOTIFICATION_TITLE = 'You were mentioned';
 /** Shown when a group admin removes someone else's comment (soft-delete). */
@@ -413,7 +415,7 @@ export class EventService {
         groupId: event.groupId,
         dest: 'event',
       }
-    ).catch(err => console.error('Failed to create notifications:', err));
+    ).catch(() => undefined);
 
     return this.mapEventWithPhotos(event);
   }
@@ -426,28 +428,35 @@ export class EventService {
 
     const existing = await prisma.event.findUnique({
       where: { id },
-      select: { groupId: true, createdBy: true },
+      select: {
+        groupId: true,
+        createdBy: true,
+        coverPhotos: { select: { photoUrl: true } },
+      },
     });
     if (!existing) {
       throw Object.assign(new Error('Event not found'), { status: 404 });
     }
     await this.assertCanMutateEvent(existing, updatedBy);
 
-    // If cover photos are provided, update them
-    if (coverPhotos) {
+    if (coverPhotos !== undefined) {
+      const previousUrls = existing.coverPhotos.map((p) => p.photoUrl);
+      const nextSet = new Set(coverPhotos);
+      const removedUrls = previousUrls.filter((u) => !nextSet.has(u));
+
       await prisma.$transaction(async (tx) => {
-        // Delete existing photos
         await tx.eventPhoto.deleteMany({
           where: { eventId: id },
         });
 
-        // Create new photos
         if (coverPhotos.length > 0) {
           await tx.eventPhoto.createMany({
             data: coverPhotos.map((photoUrl) => ({ eventId: id, photoUrl })),
           });
         }
       });
+
+      await Promise.all(removedUrls.map((u) => s3Uploads.deleteManagedUploadBestEffort(u)));
     }
 
     // Update event data
@@ -472,15 +481,28 @@ export class EventService {
   public async delete(id: string, actorUserId: string): Promise<void> {
     const existing = await prisma.event.findUnique({
       where: { id },
-      select: { groupId: true, createdBy: true },
+      select: {
+        groupId: true,
+        createdBy: true,
+        coverPhotos: { select: { photoUrl: true } },
+        comments: {
+          select: {
+            photos: { select: { photoUrl: true } },
+          },
+        },
+      },
     });
     if (!existing) {
       throw Object.assign(new Error('Event not found'), { status: 404 });
     }
     await this.assertCanMutateEvent(existing, actorUserId);
+    const coverUrls = existing.coverPhotos.map((p) => p.photoUrl);
+    const commentPhotoUrls = existing.comments.flatMap((c) => c.photos.map((p) => p.photoUrl));
+    const urlsToPurge = [...new Set([...coverUrls, ...commentPhotoUrls])];
     await prisma.event.delete({
       where: { id },
     });
+    await Promise.all(urlsToPurge.map((u) => s3Uploads.deleteManagedUploadBestEffort(u)));
   }
 
   /**
@@ -683,7 +705,7 @@ export class EventService {
               dest: 'event',
             }
           )
-          .catch((err) => console.error('Failed to create promotion notification:', err));
+          .catch(err => console.error('Failed to create promotion notification:', err));
       }
     }
   }

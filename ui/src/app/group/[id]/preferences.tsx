@@ -38,8 +38,8 @@ export default function GroupPreferencesScreen() {
   const selectColor = async (colorHex: string) => {
     try {
       await updateMemberColor.mutateAsync(colorHex);
-    } catch (error) {
-      console.error('Failed to update color:', error);
+    } catch {
+      /* color update failed — UI unchanged */
     }
   };
 

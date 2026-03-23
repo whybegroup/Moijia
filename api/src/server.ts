@@ -1,10 +1,13 @@
+import path from 'path';
+import { config as loadEnv } from 'dotenv';
 import express, { Application, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { RegisterRoutes } from './generated/routes';
 import { apiReference } from '@scalar/express-api-reference';
 import * as fs from 'fs';
 import * as yaml from 'js-yaml';
-import * as path from 'path';
+
+loadEnv({ path: path.resolve(__dirname, '../.env') });
 
 const app: Application = express();
 const PORT = process.env.PORT || 3000;

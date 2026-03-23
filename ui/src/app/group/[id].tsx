@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Modal, TextInput, Alert, ActivityIndicator, Platform } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -14,6 +14,7 @@ import Svg, { Path, Rect } from 'react-native-svg';
 import { GroupAvatar } from '../../components/GroupAvatar';
 import { AvatarPickerModal } from '../../components/AvatarPickerModal';
 import { UserAvatar } from '../../components/UserAvatar';
+import { deleteManagedUploadFireAndForget } from '../../services/managedUploadDelete';
 
 export default function GroupDetailScreen() {
   const { id }   = useLocalSearchParams<{ id: string }>();
@@ -68,6 +69,7 @@ export default function GroupDetailScreen() {
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const [avatarSeedDraft, setAvatarSeedDraft] = useState('');
   const [avatarThumbnailDraft, setAvatarThumbnailDraft] = useState<string | null>(null);
+  const thumbnailAtPickerOpenRef = useRef<string | null>(null);
   useEffect(() => {
     if (showAvatarPicker && group) {
       setAvatarSeedDraft(group.avatarSeed ?? '');
@@ -96,6 +98,12 @@ export default function GroupDetailScreen() {
     return null;
   }
 
+  const dismissAvatarPicker = () => {
+    setShowAvatarPicker(false);
+    setAvatarSeedDraft(group.avatarSeed ?? '');
+    setAvatarThumbnailDraft(group.thumbnail ?? null);
+  };
+
   const superAdminId = group.superAdminId ?? '';
   const admins = group.adminIds ?? [];
   const isAdmin = group.membershipStatus === 'admin';
@@ -118,7 +126,6 @@ export default function GroupDetailScreen() {
       handleBack();
     } catch (e: any) {
       const msg = e?.body?.error ?? e?.response?.data?.error ?? e?.message ?? 'Failed to leave group';
-      console.error('Leave group error:', e?.status, e?.body, e);
       if (Platform.OS === 'web') window.alert(msg);
       else Alert.alert('Error', msg);
     }
@@ -164,8 +171,8 @@ export default function GroupDetailScreen() {
         userId,
         action: MembershipRequestAction.action.APPROVE,
       });
-    } catch (error) {
-      console.error('Failed to approve request:', error);
+    } catch {
+      /* handled by mutation UI if needed */
     }
   };
 
@@ -175,8 +182,8 @@ export default function GroupDetailScreen() {
         userId,
         action: MembershipRequestAction.action.REJECT,
       });
-    } catch (error) {
-      console.error('Failed to decline request:', error);
+    } catch {
+      /* handled by mutation UI if needed */
     }
   };
 
@@ -235,7 +242,11 @@ export default function GroupDetailScreen() {
         <View style={[styles.headerBlock, { borderBottomColor: Colors.border }]}>
           <View style={{ flexDirection: 'row', gap: 16, marginBottom: 16 }}>
             <TouchableOpacity
-              onPress={() => isAdmin && setShowAvatarPicker(true)}
+              onPress={() => {
+                if (!isAdmin) return;
+                thumbnailAtPickerOpenRef.current = group.thumbnail ?? null;
+                setShowAvatarPicker(true);
+              }}
               style={[
                 styles.groupThumb,
                 {
@@ -278,8 +289,7 @@ export default function GroupDetailScreen() {
                         try {
                           await updateGroup.mutateAsync({ name: next, updatedBy: currentUserId });
                           setEditingName(false);
-                        } catch (e) {
-                          console.error('Failed to update group name', e);
+                        } catch {
                           if (Platform.OS === 'web') window.alert('Failed to update group name');
                           else Alert.alert('Error', 'Failed to update group name');
                         }
@@ -323,8 +333,7 @@ export default function GroupDetailScreen() {
                       try {
                         await updateGroup.mutateAsync({ desc: draftDesc.trim(), updatedBy: currentUserId });
                         setEditingDesc(false);
-                      } catch (e) {
-                        console.error('Failed to update group description', e);
+                      } catch {
                         if (Platform.OS === 'web') window.alert('Failed to update group description');
                         else Alert.alert('Error', 'Failed to update group description');
                       }
@@ -357,8 +366,7 @@ export default function GroupDetailScreen() {
                         if (updateGroup.isPending) return;
                         try {
                           await updateGroup.mutateAsync({ isPublic: !v, updatedBy: currentUserId ?? '' });
-                        } catch (e) {
-                          console.error('Failed to update visibility', e);
+                        } catch {
                           if (Platform.OS === 'web') window.alert('Failed to update visibility');
                           else Alert.alert('Error', 'Failed to update visibility');
                         }
@@ -599,11 +607,13 @@ export default function GroupDetailScreen() {
       <AvatarPickerModal
         variant="group"
         visible={showAvatarPicker}
-        onClose={() => setShowAvatarPicker(false)}
+        onRequestClose={dismissAvatarPicker}
+        onAfterSave={() => setShowAvatarPicker(false)}
         seed={avatarSeedDraft}
         onSeedChange={setAvatarSeedDraft}
         thumbnail={avatarThumbnailDraft}
         onThumbnailChange={setAvatarThumbnailDraft}
+        userId={currentUserId ?? ''}
         onSave={async (avatarSeed, thumbnail) => {
           try {
             await updateGroup.mutateAsync({
@@ -611,8 +621,12 @@ export default function GroupDetailScreen() {
               thumbnail: thumbnail ?? null,
               updatedBy: currentUserId ?? '',
             });
+            const prior = thumbnailAtPickerOpenRef.current?.trim() ?? '';
+            const saved = (thumbnail ?? '').trim();
+            if (prior && /^https?:\/\//i.test(prior) && prior !== saved && currentUserId) {
+              deleteManagedUploadFireAndForget(currentUserId, prior);
+            }
           } catch (e) {
-            console.error('Failed to update avatar', e);
             if (Platform.OS === 'web') window.alert('Failed to update avatar');
             else Alert.alert('Error', 'Failed to update avatar');
             throw e;

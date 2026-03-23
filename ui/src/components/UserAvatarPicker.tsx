@@ -1,11 +1,10 @@
-import React from 'react';
-import { View, Text, TextInput, TouchableOpacity, ScrollView } from 'react-native';
-import { Colors, Fonts, Radius } from '../constants/theme';
+import React, { type MutableRefObject } from 'react';
+import { View, Text, useWindowDimensions } from 'react-native';
+import { Colors, Fonts } from '../constants/theme';
 import { UserAvatar } from './UserAvatar';
-import { getGroupColor, getDefaultGroupThemeFromName, groupAvatarBorderRadius, avatarColor } from '../utils/helpers';
-import { IconsAvatar, InitialsAvatar } from './Avatar';
-import { ICON_OPTIONS, BOTTT_PRESETS } from '../utils/avatar';
 import ColorPicker, { ColorFormatsObject, HueSlider, OpacitySlider, Panel1 } from 'reanimated-color-picker';
+import type { PendingAvatarFile } from '../services/pickAndUploadImage';
+import { AvatarThumbnailField } from './AvatarThumbnailField';
 
 const DEFAULT_COLOR_PICKER_HEX = '#6366f1';
 
@@ -18,16 +17,19 @@ function toValidHex(s: string): string {
 interface UserAvatarPickerProps {
   value: string;
   onChangeBackgroundColor: (colors: ColorFormatsObject) => void;
-  /** When provided, shows URL input. Avatar uses thumbnail if valid URL, otherwise seed. */
+  /** When provided, shows URL + S3 upload. Avatar uses thumbnail if valid URL, otherwise seed. */
   thumbnail?: string | null;
   onThumbnailChange?: (text: string | null) => void;
+  /** Firebase uid for presigned uploads */
+  uploadUserId?: string;
   /** For user variant: when provided, shows "Use initial" option to clear to letter avatar. */
   userName?: string;
   disabled?: boolean;
   loading?: boolean;
-  inputStyle?: object;
   buttonStyle?: object;
   buttonTextStyle?: object;
+  deferFileUpload?: boolean;
+  pendingAvatarFileRef?: MutableRefObject<PendingAvatarFile | null>;
 }
 
 export function UserAvatarPicker({
@@ -35,30 +37,25 @@ export function UserAvatarPicker({
   onChangeBackgroundColor,
   thumbnail,
   onThumbnailChange,
+  uploadUserId = '',
   userName,
-  inputStyle,
+  deferFileUpload = false,
+  pendingAvatarFileRef,
 }: UserAvatarPickerProps) {
-  const baseInputStyle = [{ padding: 10, paddingHorizontal: 12, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.bg, fontSize: 14, color: Colors.text, fontFamily: Fonts.regular, flex: 1 }, inputStyle];
+  const { width: winW } = useWindowDimensions();
+  const previewSize = Math.min(240, Math.max(140, Math.round(winW * 0.42)));
   const pickerValue = toValidHex(value);
 
   return (
-    <View>
+    <View style={{ flexGrow: 1 }}>
       {onThumbnailChange != null ? (
-        <View style={{ marginBottom: 12 }}>
-          <Text style={{ fontSize: 12, fontFamily: Fonts.semiBold, color: Colors.textMuted, marginBottom: 6 }}>Add from URL</Text>
-          <TextInput
-            value={thumbnail ?? ''}
-            onChangeText={(t) => onThumbnailChange(t.trim() || null)}
-            placeholder="https://example.com/image.jpg"
-            placeholderTextColor={Colors.textMuted}
-            style={[baseInputStyle, { flex: 1 }]}
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          <Text style={{ fontSize: 11, color: Colors.textMuted, fontFamily: Fonts.regular, marginTop: 4 }}>
-            Use this image when a valid URL is provided; otherwise it uses the seed below.
-          </Text>
-        </View>
+        <AvatarThumbnailField
+          userId={uploadUserId}
+          thumbnail={thumbnail ?? null}
+          onThumbnailChange={onThumbnailChange}
+          deferFileUpload={deferFileUpload}
+          pendingAvatarFileRef={pendingAvatarFileRef}
+        />
       ) : null}
       <View style={{ marginBottom: 12 }}>
         <Text style={{ fontSize: 12, fontFamily: Fonts.semiBold, color: Colors.textMuted, marginBottom: 6 }}>
@@ -74,8 +71,23 @@ export function UserAvatarPicker({
           <OpacitySlider />
         </ColorPicker>
       </View>
-      <View style={{ marginTop: 8, alignItems: 'center' }}>
-        <UserAvatar seed={userName} backgroundColor={[pickerValue]} thumbnail={thumbnail} size={56} style={{ width: 56, height: 56 }} />
+      <View
+        style={{
+          marginTop: 20,
+          paddingVertical: 24,
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexGrow: 1,
+          minHeight: previewSize + 48,
+        }}
+      >
+        <UserAvatar
+          seed={userName}
+          backgroundColor={[pickerValue]}
+          thumbnail={thumbnail}
+          size={previewSize}
+          style={{ width: previewSize, height: previewSize }}
+        />
       </View>
     </View>
   );

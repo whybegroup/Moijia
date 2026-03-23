@@ -52,7 +52,6 @@ export default function FeedScreen() {
   // Manual polling for notifications every 5 seconds
   useEffect(() => {
     const interval = setInterval(() => {
-      console.log('[Feed] Invalidating notifications at', new Date().toLocaleTimeString());
       queryClient.invalidateQueries({ queryKey: queryKeys.notifications.user(currentUserId) });
     }, 5000);
     

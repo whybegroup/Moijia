@@ -30,6 +30,28 @@ export class UserService {
   }
 
   /**
+   * Create or update user from auth (idempotent; avoids GET 404 on first sign-in)
+   */
+  public async upsertFromAuth(input: UserInput): Promise<User> {
+    return prisma.user.upsert({
+      where: { id: input.id },
+      create: {
+        id: input.id,
+        name: input.name,
+        displayName: input.displayName,
+        avatarSeed: input.avatarSeed ?? null,
+        thumbnail: input.thumbnail ?? null,
+      },
+      update: {
+        name: input.name,
+        displayName: input.displayName,
+        ...(input.avatarSeed !== undefined ? { avatarSeed: input.avatarSeed } : {}),
+        ...(input.thumbnail !== undefined ? { thumbnail: input.thumbnail } : {}),
+      },
+    });
+  }
+
+  /**
    * Update a user
    */
   public async update(id: string, input: UserUpdate): Promise<User> {
