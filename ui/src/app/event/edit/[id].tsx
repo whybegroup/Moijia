@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, Alert, Modal, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -67,29 +67,32 @@ export default function EditEventScreen() {
   const [showEndDatePicker, setShowEndDatePicker] = useState(false);
   const [showEndTimePicker, setShowEndTimePicker] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  /** Only hydrate form when switching events; refetches after mutations must not wipe unsaved edits. */
+  const hydratedEventIdRef = useRef<string | null>(null);
 
   // Update form when event loads
   React.useEffect(() => {
-    if (existingEvent) {
-      setForm({
-        title: existingEvent.title || '',
-        subtitle: existingEvent.subtitle || '',
-        groupId: existingEvent.groupId || '',
-        startDate: formatDate(existingEvent.start),
-        startTime: formatTime(existingEvent.start),
-        startAllDay: existingEvent.isAllDay || false,
-        endDate: formatDate(existingEvent.end),
-        endTime: formatTime(existingEvent.end),
-        endAllDay: existingEvent.isAllDay || false,
-        location: existingEvent.location || '',
-        minAttendees: existingEvent.minAttendees ? String(existingEvent.minAttendees) : '',
-        maxAttendees: existingEvent.maxAttendees ? String(existingEvent.maxAttendees) : '',
-        allowMaybe: existingEvent.allowMaybe || false,
-        enableWaitlist: existingEvent.enableWaitlist || false,
-        description: existingEvent.description || '',
-        coverPhotos: existingEvent.coverPhotos || [],
-      });
-    }
+    if (!existingEvent) return;
+    if (hydratedEventIdRef.current === existingEvent.id) return;
+    hydratedEventIdRef.current = existingEvent.id;
+    setForm({
+      title: existingEvent.title || '',
+      subtitle: existingEvent.subtitle || '',
+      groupId: existingEvent.groupId || '',
+      startDate: formatDate(existingEvent.start),
+      startTime: formatTime(existingEvent.start),
+      startAllDay: existingEvent.isAllDay || false,
+      endDate: formatDate(existingEvent.end),
+      endTime: formatTime(existingEvent.end),
+      endAllDay: existingEvent.isAllDay || false,
+      location: existingEvent.location || '',
+      minAttendees: existingEvent.minAttendees ? String(existingEvent.minAttendees) : '',
+      maxAttendees: existingEvent.maxAttendees ? String(existingEvent.maxAttendees) : '',
+      allowMaybe: existingEvent.allowMaybe || false,
+      enableWaitlist: existingEvent.enableWaitlist || false,
+      description: existingEvent.description || '',
+      coverPhotos: existingEvent.coverPhotos || [],
+    });
   }, [existingEvent]);
 
   const needGroupForPermission =
@@ -114,6 +117,40 @@ export default function EditEventScreen() {
 
   const set = (k: string, v: any) => setForm(p => ({ ...p, [k]: v }));
   const ok  = !!form.title.trim() && !!form.startDate && !!form.endDate;
+
+  const persistCoverPhotos = async (next: string[]) => {
+    if (!currentUserId || !eventId) return;
+    await updateEventMutation.mutateAsync({
+      updatedBy: currentUserId,
+      coverPhotos: next,
+    });
+  };
+
+  const removeCoverPhotoAt = async (index: number) => {
+    if (!currentUserId) return;
+    const prev = form.coverPhotos;
+    const next = prev.filter((_, j) => j !== index);
+    set('coverPhotos', next);
+    try {
+      await persistCoverPhotos(next);
+    } catch {
+      set('coverPhotos', prev);
+      Alert.alert('Error', 'Failed to remove photo');
+    }
+  };
+
+  const addCoverPhoto = async (url: string) => {
+    if (!currentUserId) return;
+    const prev = form.coverPhotos;
+    const next = [...prev, url];
+    set('coverPhotos', next);
+    try {
+      await persistCoverPhotos(next);
+    } catch {
+      set('coverPhotos', prev);
+      Alert.alert('Error', 'Failed to add photo');
+    }
+  };
 
   const submit = async () => {
     if (!ok) return;
@@ -584,7 +621,7 @@ export default function EditEventScreen() {
                       style={{ width: 80, height: 80, borderRadius: Radius.lg }}
                       resizeMode="cover"
                     />
-                    <TouchableOpacity onPress={() => set('coverPhotos', form.coverPhotos.filter((_, j) => j !== i))}
+                    <TouchableOpacity onPress={() => void removeCoverPhotoAt(i)}
                       style={styles.removeThumb}>
                       <Ionicons name="close" size={11} color="#fff" />
                     </TouchableOpacity>
@@ -611,7 +648,7 @@ export default function EditEventScreen() {
           onClose={() => setShowCoverPhotoModal(false)}
           userId={currentUserId ?? ''}
           title="Add cover photo"
-          onAdd={(url) => set('coverPhotos', [...form.coverPhotos, url])}
+          onAdd={(url) => void addCoverPhoto(url)}
         />
           </View>
         </Field>

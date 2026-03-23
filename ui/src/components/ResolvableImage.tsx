@@ -17,9 +17,10 @@ type Props = {
   resizeMode?: ImageResizeMode;
   /** Batch map from useResolvedImageUrls; omit to resolve this URL alone. */
   urlMap?: Map<string, string>;
+  onError?: () => void;
 };
 
-export function ResolvableImage({ storedUrl, style, resizeMode = 'cover', urlMap }: Props) {
+export function ResolvableImage({ storedUrl, style, resizeMode = 'cover', urlMap, onError }: Props) {
   const [singleUri, setSingleUri] = useState<string | null>(() =>
     isDirectRenderableImageUrl(storedUrl) ? storedUrl : null,
   );
@@ -40,7 +41,7 @@ export function ResolvableImage({ storedUrl, style, resizeMode = 'cover', urlMap
   }, [storedUrl, urlMap]);
 
   if (isDirectRenderableImageUrl(storedUrl)) {
-    return <Image source={{ uri: storedUrl }} style={style} resizeMode={resizeMode} />;
+    return <Image source={{ uri: storedUrl }} style={style} resizeMode={resizeMode} onError={onError} />;
   }
 
   if (urlMap) {
@@ -52,7 +53,7 @@ export function ResolvableImage({ storedUrl, style, resizeMode = 'cover', urlMap
         </View>
       );
     }
-    return <Image source={{ uri }} style={style} resizeMode={resizeMode} />;
+    return <Image source={{ uri }} style={style} resizeMode={resizeMode} onError={onError} />;
   }
 
   if (!singleUri) {
@@ -62,7 +63,7 @@ export function ResolvableImage({ storedUrl, style, resizeMode = 'cover', urlMap
       </View>
     );
   }
-  return <Image source={{ uri: singleUri }} style={style} resizeMode={resizeMode} />;
+  return <Image source={{ uri: singleUri }} style={style} resizeMode={resizeMode} onError={onError} />;
 }
 
 const styles = StyleSheet.create({

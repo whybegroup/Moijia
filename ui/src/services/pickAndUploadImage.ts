@@ -75,6 +75,18 @@ export async function pickAndUploadImageFromLibrary(userId: string): Promise<str
   return uploadPickedImageAsset(userId, asset);
 }
 
+/** Pending local file chosen in avatar UI; upload on Save / Create. */
+export type PendingAvatarFile =
+  | { kind: 'native'; asset: PickedImageAsset }
+  | { kind: 'web'; file: File; objectUrl: string };
+
+export async function uploadPendingAvatarFile(userId: string, pending: PendingAvatarFile): Promise<string> {
+  if (pending.kind === 'web') {
+    return uploadWebImageFile(userId, pending.file);
+  }
+  return uploadPickedImageAsset(userId, pending.asset);
+}
+
 export async function uploadWebImageFile(userId: string, file: File): Promise<string> {
   if (!userId) throw new Error('You must be signed in to upload photos.');
   const contentType = file.type?.startsWith('image/') ? file.type : 'image/jpeg';

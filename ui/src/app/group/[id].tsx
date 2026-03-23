@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Modal, TextInput, Alert, ActivityIndicator, Platform } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -14,6 +14,7 @@ import Svg, { Path, Rect } from 'react-native-svg';
 import { GroupAvatar } from '../../components/GroupAvatar';
 import { AvatarPickerModal } from '../../components/AvatarPickerModal';
 import { UserAvatar } from '../../components/UserAvatar';
+import { deleteManagedUploadFireAndForget } from '../../services/managedUploadDelete';
 
 export default function GroupDetailScreen() {
   const { id }   = useLocalSearchParams<{ id: string }>();
@@ -68,6 +69,7 @@ export default function GroupDetailScreen() {
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const [avatarSeedDraft, setAvatarSeedDraft] = useState('');
   const [avatarThumbnailDraft, setAvatarThumbnailDraft] = useState<string | null>(null);
+  const thumbnailAtPickerOpenRef = useRef<string | null>(null);
   useEffect(() => {
     if (showAvatarPicker && group) {
       setAvatarSeedDraft(group.avatarSeed ?? '');
@@ -95,6 +97,12 @@ export default function GroupDetailScreen() {
   if (!group) {
     return null;
   }
+
+  const dismissAvatarPicker = () => {
+    setShowAvatarPicker(false);
+    setAvatarSeedDraft(group.avatarSeed ?? '');
+    setAvatarThumbnailDraft(group.thumbnail ?? null);
+  };
 
   const superAdminId = group.superAdminId ?? '';
   const admins = group.adminIds ?? [];
@@ -234,7 +242,11 @@ export default function GroupDetailScreen() {
         <View style={[styles.headerBlock, { borderBottomColor: Colors.border }]}>
           <View style={{ flexDirection: 'row', gap: 16, marginBottom: 16 }}>
             <TouchableOpacity
-              onPress={() => isAdmin && setShowAvatarPicker(true)}
+              onPress={() => {
+                if (!isAdmin) return;
+                thumbnailAtPickerOpenRef.current = group.thumbnail ?? null;
+                setShowAvatarPicker(true);
+              }}
               style={[
                 styles.groupThumb,
                 {
@@ -595,11 +607,13 @@ export default function GroupDetailScreen() {
       <AvatarPickerModal
         variant="group"
         visible={showAvatarPicker}
-        onClose={() => setShowAvatarPicker(false)}
+        onRequestClose={dismissAvatarPicker}
+        onAfterSave={() => setShowAvatarPicker(false)}
         seed={avatarSeedDraft}
         onSeedChange={setAvatarSeedDraft}
         thumbnail={avatarThumbnailDraft}
         onThumbnailChange={setAvatarThumbnailDraft}
+        userId={currentUserId ?? ''}
         onSave={async (avatarSeed, thumbnail) => {
           try {
             await updateGroup.mutateAsync({
@@ -607,6 +621,11 @@ export default function GroupDetailScreen() {
               thumbnail: thumbnail ?? null,
               updatedBy: currentUserId ?? '',
             });
+            const prior = thumbnailAtPickerOpenRef.current?.trim() ?? '';
+            const saved = (thumbnail ?? '').trim();
+            if (prior && /^https?:\/\//i.test(prior) && prior !== saved && currentUserId) {
+              deleteManagedUploadFireAndForget(currentUserId, prior);
+            }
           } catch (e) {
             if (Platform.OS === 'web') window.alert('Failed to update avatar');
             else Alert.alert('Error', 'Failed to update avatar');

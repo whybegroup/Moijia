@@ -1,9 +1,11 @@
 import { PrismaClient } from '@prisma/client';
 import { Group, GroupScoped, GroupInput, GroupUpdate, GroupRole, MembershipRequestAction, User } from '../models';
 import { NotificationService } from './NotificationService';
+import { S3UploadService } from './S3UploadService';
 
 const prisma = new PrismaClient();
 const notificationService = new NotificationService();
+const s3Uploads = new S3UploadService();
 
 export class GroupService {
   /**
@@ -427,12 +429,45 @@ export class GroupService {
 
   /**
    * Hard-delete a group (removes group and all related data). Superadmin only.
+   * Best-effort removal of group thumbnail and all event / comment photos from S3.
    */
   public async hardDelete(id: string, userId: string): Promise<void> {
     await this.requireSuperadmin(id, userId);
+    const snapshot = await prisma.group.findUnique({
+      where: { id },
+      select: {
+        thumbnail: true,
+        events: {
+          select: {
+            coverPhotos: { select: { photoUrl: true } },
+            comments: {
+              select: {
+                photos: { select: { photoUrl: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!snapshot) {
+      throw Object.assign(new Error('Group not found'), { status: 404 });
+    }
+
+    const urls: string[] = [];
+    const t = snapshot.thumbnail?.trim();
+    if (t) urls.push(t);
+    for (const ev of snapshot.events) {
+      for (const p of ev.coverPhotos) urls.push(p.photoUrl);
+      for (const c of ev.comments) {
+        for (const p of c.photos) urls.push(p.photoUrl);
+      }
+    }
+    const urlsToPurge = [...new Set(urls)];
+
     await prisma.group.delete({
       where: { id },
     });
+    await Promise.all(urlsToPurge.map((u) => s3Uploads.deleteManagedUploadBestEffort(u)));
   }
 
   /**

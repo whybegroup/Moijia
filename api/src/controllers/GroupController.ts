@@ -166,6 +166,10 @@ export class GroupController extends Controller {
       await this.groupService.hardDelete(id, userId);
       this.setStatus(204);
     } catch (e: any) {
+      if (e?.status === 404) {
+        this.setStatus(404);
+        throw new Error('Group not found');
+      }
       if (e?.message?.includes('superadmin')) {
         this.setStatus(403);
         throw new Error('Must be superadmin to delete group');

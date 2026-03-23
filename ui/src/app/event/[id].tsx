@@ -1,8 +1,9 @@
-import React, { useState, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useRef, useMemo, useCallback, type ChangeEvent } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput,
   StyleSheet, Image, Modal, Linking, Alert, FlatList,
   useWindowDimensions,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -14,14 +15,20 @@ import { UserAvatar } from '../../components/UserAvatar';
 import { UserAvatarStack } from '../../components/UserAvatarStack';
 import { useEvent, useGroup, useUsers, useCreateOrUpdateRSVP, useDeleteRSVP, useCreateComment, useGroupMemberColor, useDeleteEvent } from '../../hooks/api';
 import { uid, getNoResponseIds } from '../../utils/api-helpers';
-import type { EventDetailed, User, GroupScoped, RSVP } from '@moija/client';
-import { ApiError, RSVPInput, UploadsService } from '@moija/client';
+import type { EventDetailed, User, GroupScoped, RSVP, CommentInput } from '@moija/client';
+import { RSVPInput } from '@moija/client';
 import { useCurrentUserContext } from '../../contexts/CurrentUserContext';
-import { PhotoUrlOrUploadModal } from '../../components/PhotoUrlOrUploadModal';
 import { ResolvableImage } from '../../components/ResolvableImage';
+import {
+  pickImageFromLibrary,
+  uploadPickedImageAsset,
+  uploadWebImageFile,
+  isCancelled,
+  type PickedImageAsset,
+} from '../../services/pickAndUploadImage';
 import { useResolvedImageUrls } from '../../hooks/useResolvedImageUrls';
 
-type PendingCommentPhoto = { id: string; uri: string };
+type PendingCommentPhoto = { id: string; uri: string; pendingUpload: PickedImageAsset | File };
 
 // ── Photo Carousel ───────────────────────────────────────────────────────────
 function PhotoCarousel({
@@ -175,40 +182,65 @@ export default function EventDetailScreen() {
   const [input,       setInput]       = useState('');
   const [pendingPhotos, setPendingPhotos] = useState<PendingCommentPhoto[]>([]);
   const [pendingPreviewLightbox, setPendingPreviewLightbox] = useState<string | null>(null);
-  const [showCommentPhotoModal, setShowCommentPhotoModal] = useState(false);
+  const commentPhotoFileInputRef = useRef<{ click: () => void } | null>(null);
   const [lightbox,    setLightbox]    = useState<{ url: string; name: string; ts: Date } | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [commentPostBusy, setCommentPostBusy] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
 
-  const removePendingPhoto = useCallback(
-    async (p: PendingCommentPhoto) => {
-      const drop = () => {
-        setPendingPhotos((rows) => rows.filter((x) => x.id !== p.id));
-        setPendingPreviewLightbox((open) => (open === p.uri ? null : open));
-      };
+  const removePendingPhoto = useCallback((p: PendingCommentPhoto) => {
+    if (p.uri.startsWith('blob:')) {
+      URL.revokeObjectURL(p.uri);
+    }
+    setPendingPhotos((rows) => rows.filter((x) => x.id !== p.id));
+    setPendingPreviewLightbox((open) => (open === p.uri ? null : open));
+  }, []);
 
-      if (p.uri.startsWith('blob:')) {
-        URL.revokeObjectURL(p.uri);
-        drop();
+  const addPendingCommentPhoto = useCallback((previewUri: string, pendingUpload: PickedImageAsset | File) => {
+    setPendingPhotos((rows) => [...rows, { id: uid(), uri: previewUri, pendingUpload }]);
+  }, []);
+
+  const pickCommentPhotoNative = useCallback(async () => {
+    if (!currentUserId) {
+      Alert.alert('Sign in', 'You must be signed in to add photos.');
+      return;
+    }
+    try {
+      const asset = await pickImageFromLibrary();
+      addPendingCommentPhoto(asset.uri, asset);
+    } catch (e) {
+      if (!isCancelled(e)) {
+        Alert.alert('Photo', e instanceof Error ? e.message : 'Could not pick image');
+      }
+    }
+  }, [addPendingCommentPhoto, currentUserId]);
+
+  const onCommentWebPhotoChange = useCallback(
+    (e: ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = '';
+      if (!file) return;
+      if (!file.type.startsWith('image/')) {
+        Alert.alert('Upload', 'Please choose an image file.');
         return;
       }
-      if (/^https?:\/\//i.test(p.uri)) {
-        if (currentUserId) {
-          try {
-            await UploadsService.deleteUploadedObject(currentUserId, { sourceUrl: p.uri });
-          } catch (err: unknown) {
-            const status = err instanceof ApiError ? err.status : 0;
-            if (status !== 400 && status !== 404) {
-              Alert.alert('Remove photo', 'Could not delete the file from storage. Try again.');
-              return;
-            }
-          }
-        }
-      }
-      drop();
+      const previewUri = URL.createObjectURL(file);
+      addPendingCommentPhoto(previewUri, file);
     },
-    [currentUserId],
+    [addPendingCommentPhoto],
   );
+
+  const onCommentPhotoButtonPress = useCallback(() => {
+    if (!currentUserId) {
+      Alert.alert('Sign in', 'You must be signed in to add photos.');
+      return;
+    }
+    if (Platform.OS === 'web') {
+      commentPhotoFileInputRef.current?.click();
+    } else {
+      void pickCommentPhotoNative();
+    }
+  }, [currentUserId, pickCommentPhotoNative]);
 
   if (!eventId) {
     return (
@@ -334,23 +366,41 @@ export default function EventDetailScreen() {
 
   const postComment = async () => {
     if (!input.trim() && !pendingPhotos.length) return;
+    if (!currentUserId) return;
+    setCommentPostBusy(true);
     try {
-      const newComment: any = {
+      const photoUrls = await Promise.all(
+        pendingPhotos.map(async (p) => {
+          const src = p.pendingUpload;
+          if (typeof File !== 'undefined' && src instanceof File) {
+            return uploadWebImageFile(currentUserId, src);
+          }
+          return uploadPickedImageAsset(currentUserId, src as PickedImageAsset);
+        }),
+      );
+
+      const newComment: CommentInput = {
         id: uid(),
         userId: currentUserId,
-        photos: pendingPhotos.map((p) => p.uri),
+        photos: photoUrls,
       };
-      
       if (input.trim()) {
         newComment.text = input.trim();
       }
-      
+
       await createCommentMutation.mutateAsync(newComment);
-      
-      setInput(''); setPendingPhotos([]);
+
+      for (const p of pendingPhotos) {
+        if (p.uri.startsWith('blob:')) URL.revokeObjectURL(p.uri);
+      }
+      setInput('');
+      setPendingPhotos([]);
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
-    } catch (error: any) {
-      Alert.alert('Error', error?.body?.message || error?.message || 'Failed to post comment');
+    } catch (error: unknown) {
+      const err = error as { body?: { message?: string }; message?: string };
+      Alert.alert('Error', err?.body?.message || err?.message || 'Failed to post comment');
+    } finally {
+      setCommentPostBusy(false);
     }
   };
 
@@ -649,7 +699,18 @@ export default function EventDetailScreen() {
           </ScrollView>
         )}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <TouchableOpacity onPress={() => setShowCommentPhotoModal(true)} style={styles.photoBtn}>
+          {Platform.OS === 'web' && (
+            <input
+              ref={(el) => {
+                commentPhotoFileInputRef.current = el;
+              }}
+              type="file"
+              accept="image/*"
+              style={{ display: 'none' }}
+              onChange={onCommentWebPhotoChange}
+            />
+          )}
+          <TouchableOpacity onPress={onCommentPhotoButtonPress} style={styles.photoBtn}>
             <Ionicons name="camera-outline" size={20} color={Colors.textSub} />
           </TouchableOpacity>
           <TextInput
@@ -659,7 +720,15 @@ export default function EventDetailScreen() {
             style={[styles.commentInput, { flex: 1, minWidth: 120 }]}
             onSubmitEditing={postComment}
           />
-          <TouchableOpacity onPress={postComment} style={[styles.postBtn, !(input.trim() || pendingPhotos.length) && styles.postBtnDisabled]}>
+          <TouchableOpacity
+            onPress={postComment}
+            disabled={commentPostBusy || createCommentMutation.isPending}
+            style={[
+              styles.postBtn,
+              (!(input.trim() || pendingPhotos.length) || commentPostBusy || createCommentMutation.isPending) &&
+                styles.postBtnDisabled,
+            ]}
+          >
             <Text style={styles.postBtnText}>Post</Text>
           </TouchableOpacity>
         </View>
@@ -687,36 +756,6 @@ export default function EventDetailScreen() {
           </View>
         </Modal>
       )}
-
-      <PhotoUrlOrUploadModal
-        visible={showCommentPhotoModal}
-        onClose={() => setShowCommentPhotoModal(false)}
-        userId={currentUserId ?? ''}
-        title="Add photo to comment"
-        onPickPreview={(previewUri, uploadId) =>
-          setPendingPhotos((p) => [...p, { id: uploadId, uri: previewUri }])
-        }
-        onAdd={(url, uploadId) => {
-          if (uploadId) {
-            setPendingPhotos((p) =>
-              p.map((x) => {
-                if (x.id !== uploadId) return x;
-                if (x.uri.startsWith('blob:')) URL.revokeObjectURL(x.uri);
-                return { ...x, uri: url };
-              }),
-            );
-          } else {
-            setPendingPhotos((p) => [...p, { id: uid(), uri: url }]);
-          }
-        }}
-        onUploadFailed={(uploadId) => {
-          setPendingPhotos((p) => {
-            const row = p.find((x) => x.id === uploadId);
-            if (row?.uri.startsWith('blob:')) URL.revokeObjectURL(row.uri);
-            return p.filter((x) => x.id !== uploadId);
-          });
-        }}
-      />
 
       {/* Attendance sheet */}
       <AttendanceSheet ev={ev} group={group} users={users} visible={showAttend} onClose={() => setShowAttend(false)} />

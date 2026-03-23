@@ -200,6 +200,35 @@ export class S3UploadService {
   }
 
   /**
+   * Server-side cleanup: delete `uploads/...` in our bucket when a stored URL is dropped from the DB.
+   * No per-user prefix check (call only after authz). Ignores external URLs, missing config, and errors.
+   */
+  public async deleteManagedUploadBestEffort(sourceUrl: string): Promise<void> {
+    try {
+      const cfg = getS3Config();
+      if (!cfg) return;
+      const key = tryExtractUploadObjectKey(sourceUrl, cfg);
+      if (!key) return;
+      const client = new S3Client({
+        region: cfg.region,
+        credentials: {
+          accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+        },
+        requestChecksumCalculation: 'WHEN_REQUIRED',
+      });
+      await client.send(
+        new DeleteObjectCommand({
+          Bucket: cfg.bucket,
+          Key: key,
+        }),
+      );
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  /**
    * Presigned GET for stored app URLs; unknown / external URLs are returned unchanged as viewUrl.
    */
   public async presignGetBatch(sourceUrls: string[]): Promise<PresignGetBatchResponse> {

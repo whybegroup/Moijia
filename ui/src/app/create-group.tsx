@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import * as Crypto from 'expo-crypto';
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput,
@@ -13,6 +13,8 @@ import { useCreateGroup } from '../hooks/api/useGroups';
 import { useAuth } from '../contexts/AuthContext';
 import { GroupAvatar } from '../components/GroupAvatar';
 import { AvatarPickerModal } from '../components/AvatarPickerModal';
+import type { PendingAvatarFile } from '../services/pickAndUploadImage';
+import { uploadPendingAvatarFile } from '../services/pickAndUploadImage';
 
 const DEFAULT_AVATAR_SEED = 'auto';
 
@@ -30,6 +32,25 @@ export default function CreateGroupScreen() {
   const valid = !!draftName.trim();
 
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
+  const pendingAvatarFileRef = useRef<PendingAvatarFile | null>(null);
+  const createAvatarSnapshotRef = useRef<{ thumbnail: string | null; seed: string } | null>(null);
+
+  const openAvatarPicker = () => {
+    createAvatarSnapshotRef.current = { thumbnail: draftThumbnail, seed: draftSeed };
+    setShowAvatarPicker(true);
+  };
+
+  const closeAvatarPicker = () => {
+    const snap = createAvatarSnapshotRef.current;
+    if (snap) {
+      setDraftThumbnail(snap.thumbnail);
+      setDraftSeed(snap.seed);
+    }
+    const p = pendingAvatarFileRef.current;
+    if (p?.kind === 'web') URL.revokeObjectURL(p.objectUrl);
+    pendingAvatarFileRef.current = null;
+    setShowAvatarPicker(false);
+  };
 
   const handleBack = () => {
     if (router.canGoBack()) {
@@ -43,12 +64,21 @@ export default function CreateGroupScreen() {
     if (!valid || !user) return;
 
     try {
+      let thumbnail = draftThumbnail;
+      if (pendingAvatarFileRef.current) {
+        const p = pendingAvatarFileRef.current;
+        thumbnail = await uploadPendingAvatarFile(user.uid, p);
+        if (p.kind === 'web') URL.revokeObjectURL(p.objectUrl);
+        pendingAvatarFileRef.current = null;
+        setDraftThumbnail(thumbnail);
+      }
+
       const newGroup = await createGroup.mutateAsync({
         id: groupId,
         name: draftName.trim(),
         desc: draftDesc.trim(),
         isPublic: draftIsPublic,
-        thumbnail: draftThumbnail,
+        thumbnail,
         superAdminId: user.uid,
         avatarSeed: draftSeed || draftName.trim() || undefined,
         createdBy: user.uid,
@@ -71,7 +101,7 @@ export default function CreateGroupScreen() {
         <View style={[styles.headerBlock, { borderBottomColor: Colors.border }]}>
           <View style={{ flexDirection: 'row', gap: 16, marginBottom: 16 }}>
             <TouchableOpacity
-              onPress={() => setShowAvatarPicker(true)}
+              onPress={openAvatarPicker}
               style={[
                 styles.groupThumb,
                 {
@@ -142,11 +172,14 @@ export default function CreateGroupScreen() {
       <AvatarPickerModal
         variant="group"
         visible={showAvatarPicker}
-        onClose={() => setShowAvatarPicker(false)}
+        onRequestClose={closeAvatarPicker}
         seed={draftSeed}
         onSeedChange={setDraftSeed}
         thumbnail={draftThumbnail}
         onThumbnailChange={setDraftThumbnail}
+        userId={user?.uid ?? ''}
+        deferFileUpload
+        pendingAvatarFileRef={pendingAvatarFileRef}
       />
     </SafeAreaView>
   );
