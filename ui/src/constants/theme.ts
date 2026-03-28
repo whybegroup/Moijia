@@ -62,6 +62,11 @@ export const Spacing = {
   xxl: 28,
 };
 
+/** Tab chrome: top bar height matches 16px vertical padding + 34px controls (icon buttons). */
+export const Layout = {
+  tabHeaderMinHeight: Spacing.lg * 2 + 34,
+};
+
 // ── Border Radius ─────────────────────────────────────────────────────────────
 export const Radius = {
   sm:   6,

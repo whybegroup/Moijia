@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity,
-  StyleSheet, Modal, TextInput, Platform, Alert,
+  StyleSheet, TextInput, Platform, Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -21,17 +21,18 @@ if (Platform.OS === 'web') {
 }
 import { useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { Colors, Fonts, Radius } from '../../constants/theme';
+import { Colors, Fonts, Layout, Radius } from '../../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName } from '../../utils/helpers';
 import { ListView } from '../../components/ListView';
-import { NotificationListIcon } from '../../components/NotificationListIcon';
+import { NotificationsPanelModal } from '../../components/NotificationsPanelModal';
 import { CalendarView } from '../../components/CalendarView';
 import { Pill } from '../../components/ui';
 import Svg, { Path } from 'react-native-svg';
-import { useEvents, useGroups, useNotifications, useAllGroupMemberColors, useUpdateNotification, useMarkAllNotificationsRead } from '../../hooks/api';
+import { useEvents, useGroups, useNotifications, useAllGroupMemberColors } from '../../hooks/api';
 import { queryKeys } from '../../config/queryClient';
 import { useCurrentUserContext } from '../../contexts/CurrentUserContext';
 import { EventsCalendarGlyph } from '../../components/TabScreenIcons';
+import { CreateOrJoinButton } from '../../components/CreateOrJoinButton';
 
 export default function FeedScreen() {
   const router = useRouter();
@@ -42,9 +43,6 @@ export default function FeedScreen() {
   const { data: allGroups = [], isLoading: groupsLoading } = useGroups(currentUserId ?? '');
   const { data: notifs = [], isLoading: notifsLoading } = useNotifications(currentUserId || '');
   const { data: groupColors = {}, isLoading: colorsLoading } = useAllGroupMemberColors(currentUserId || '');
-  const updateNotification = useUpdateNotification();
-  const markAllAsRead = useMarkAllNotificationsRead();
-  
   const groups = allGroups.filter(g => g.membershipStatus === 'member' || g.membershipStatus === 'admin');
   
   const loading = eventsLoading || groupsLoading || notifsLoading || colorsLoading;
@@ -126,8 +124,6 @@ export default function FeedScreen() {
   const [showPast,    setShowPast]    = useState(false);
   const [showNotifs, setShowNotifs] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
-  const [showNoGroupAlert, setShowNoGroupAlert] = useState(false);
-
   const unread = notifs.filter(n => !n.read).length;
 
   const filtered = useMemo(() => {
@@ -240,19 +236,7 @@ export default function FeedScreen() {
             })}
           </View>
 
-          {/* Create */}
-          <TouchableOpacity
-            onPress={() => {
-              if (groups.length === 0) {
-                setShowNoGroupAlert(true);
-                return;
-              }
-              router.push('/create-event');
-            }}
-            style={styles.createBtn}
-          >
-            <Text style={styles.createBtnText}>+ Event</Text>
-          </TouchableOpacity>
+          <CreateOrJoinButton userId={currentUserId} eventEligibleGroupCount={groups.length} />
 
           {/* Bell */}
           <TouchableOpacity
@@ -594,7 +578,7 @@ export default function FeedScreen() {
             groups={groups}
             groupColors={groupColors}
             onSelect={ev => router.push(`/event/${ev.id}`)}
-            onSelectGroup={groupId => router.push(`/group/${groupId}`)}
+            onSelectGroup={groupId => router.push(`/groups/${groupId}`)}
           />
         ) : (
           <CalendarView
@@ -602,7 +586,7 @@ export default function FeedScreen() {
             groups={groups}
             groupColors={groupColors}
             onSelectEvent={ev => router.push(`/event/${ev.id}`)}
-            onSelectGroup={groupId => router.push(`/group/${groupId}`)}
+            onSelectGroup={groupId => router.push(`/groups/${groupId}`)}
           />
         )}
       </View>
@@ -651,113 +635,32 @@ export default function FeedScreen() {
         />
       )}
 
-      {/* Notif dropdown - Modal ensures it's always on top */}
-      <Modal
+      <NotificationsPanelModal
         visible={showNotifs}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowNotifs(false)}
-      >
-        <View style={styles.notifOverlay}>
-          <TouchableOpacity
-            style={styles.notifBackdrop}
-            onPress={() => setShowNotifs(false)}
-            activeOpacity={1}
-          />
-          <View style={styles.notifPanel}>
-            <View style={styles.notifHeader}>
-              <Text style={styles.notifTitle}>Notifications</Text>
-              {unread > 0 && (
-                <TouchableOpacity onPress={() => {
-                  markAllAsRead.mutate(currentUserId);
-                }}>
-                  <Text style={styles.notifMarkAll}>Mark all read</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-            <ScrollView style={{ maxHeight: 340 }} showsVerticalScrollIndicator={false}>
-              {notifs.map((n, i) => {
-                const group = groups.find(g => g.id === n.groupId);
-                const userColorHex = group ? (groupColors[group.id] || getDefaultGroupThemeFromName(group.name)) : '#EC4899';
-                const p = getGroupColor(userColorHex);
-                return (
-                  <TouchableOpacity
-                    key={n.id}
-                    onPress={() => {
-                      // Mark notification as read
-                      if (!n.read) {
-                        updateNotification.mutate({ id: n.id, read: true });
-                      }
-                      
-                      // Navigate if applicable
-                      if (!n.navigable) return;
-                      setShowNotifs(false);
-                      if (n.dest === 'event' && n.eventId) router.push(`/event/${n.eventId}`);
-                      else if (n.dest === 'group' && n.groupId) router.push(`/group/${n.groupId}`);
-                    }}
-                    style={[styles.notifRow, { backgroundColor: n.read ? 'transparent' : p.row }, i < notifs.length - 1 && { borderBottomWidth: 1, borderBottomColor: Colors.border }]}
-                    activeOpacity={n.navigable ? 0.7 : 1}
-                  >
-                    <View style={[styles.notifIcon, { backgroundColor: n.read ? Colors.bg : p.row, borderColor: n.read ? Colors.border : p.cal }]}>
-                      <NotificationListIcon
-                        type={n.type}
-                        icon={n.icon}
-                        color={n.read ? Colors.textSub : p.text}
-                      />
-                    </View>
-                    <View style={{ flex: 1, minWidth: 0 }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-                        <Text style={{ fontSize: 13, fontFamily: n.read ? Fonts.medium : Fonts.bold, color: Colors.text }} numberOfLines={1}>{n.title}</Text>
-                        {!n.read && <View style={styles.unreadDot} />}
-                      </View>
-                      <Text style={{ fontSize: 12, color: Colors.textSub }} numberOfLines={1}>{n.body}</Text>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
+        onClose={() => setShowNotifs(false)}
+        userId={currentUserId || ''}
+        notifications={notifs}
+        isLoading={notifsLoading}
+        groups={groups.map((g) => ({ id: g.id, name: g.name }))}
+        groupColors={groupColors}
+      />
 
-      {/* No Group Alert */}
-      <Modal
-        visible={showNoGroupAlert}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowNoGroupAlert(false)}
-      >
-        <View style={styles.alertOverlay}>
-          <View style={styles.alertBox}>
-            <Text style={styles.alertTitle}>No Groups</Text>
-            <Text style={styles.alertMessage}>You need to join or create a group before creating an event.</Text>
-            <TouchableOpacity 
-              onPress={() => setShowNoGroupAlert(false)}
-              style={styles.alertButton}
-            >
-              <Text style={styles.alertButtonText}>OK</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safe:        { flex: 1, backgroundColor: Colors.bg },
-  header:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border },
+  header:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: Layout.tabHeaderMinHeight, paddingHorizontal: 20, paddingVertical: 16, backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border },
   headerTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   pageTitle:   { fontSize: 18, fontFamily: Fonts.extraBold, color: Colors.text },
   filtersContainer: { backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border },
   actions:     { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  viewToggle:  { flexDirection: 'row', backgroundColor: Colors.bg, borderRadius: 10, borderWidth: 1, borderColor: Colors.border, padding: 3, gap: 2 },
-  viewBtn:     { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+  viewToggle:  { flexDirection: 'row', alignItems: 'stretch', height: 34, backgroundColor: Colors.bg, borderRadius: 10, borderWidth: 1, borderColor: Colors.border, padding: 2, gap: 2 },
+  viewBtn:     { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 10, borderRadius: 8 },
   viewBtnActive: { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border },
   iconBtn:     { width: 34, height: 34, borderRadius: 17, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surface, alignItems: 'center', justifyContent: 'center' },
   iconBtnActive:{ backgroundColor: Colors.bg, borderColor: Colors.accent },
-  createBtn:   { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 10, backgroundColor: Colors.accent },
-  createBtnText:{ fontSize: 13, fontFamily: Fonts.semiBold, color: Colors.accentFg },
   bellDot:     { position: 'absolute', top: 1, right: 1, width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.notGoing, borderWidth: 2, borderColor: Colors.surface },
   pillsRow:    { flexGrow: 0, paddingLeft: 20, paddingVertical: 8 },
   feedContent:   { flex: 1, paddingHorizontal: 16, paddingTop: 8, zIndex: 0 },
@@ -1016,25 +919,10 @@ const styles = StyleSheet.create({
   },
   filterPanel: { paddingBottom: 6 },
   filterSectionLabel:{ fontSize: 11, fontFamily: Fonts.semiBold, color: Colors.textMuted, letterSpacing: 0.6, marginBottom: 8 },
-  notifOverlay:  { flex: 1, opacity: 1 },
-  notifBackdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.2)', opacity: 1 },
-  notifPanel:    { position: 'absolute', top: 110, right: 16, width: 300, backgroundColor: Colors.surface, borderRadius: 16, borderWidth: 1, borderColor: Colors.border, overflow: 'hidden', opacity: 1, elevation: 999, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 12 },
-  notifHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 14, borderBottomWidth: 1, borderBottomColor: Colors.border },
-  notifTitle:  { fontSize: 15, fontFamily: Fonts.bold, color: Colors.text },
-  notifMarkAll:{ fontSize: 12, fontFamily: Fonts.semiBold, color: Colors.textSub },
-  notifRow:    { flexDirection: 'row', alignItems: 'flex-start', gap: 10, padding: 12 },
-  notifIcon:   { width: 36, height: 36, borderRadius: 18, borderWidth: 1, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  unreadDot:   { width: 6, height: 6, borderRadius: 3, backgroundColor: Colors.notGoing },
   emptyState:  { alignItems: 'center', paddingTop: 80, paddingHorizontal: 40 },
   emptyGlyph:  { marginBottom: 16 },
   emptyTitle:  { fontSize: 20, fontFamily: Fonts.bold, color: Colors.text, marginBottom: 8 },
   emptyDesc:   { fontSize: 14, fontFamily: Fonts.regular, color: Colors.textMuted, textAlign: 'center', marginBottom: 24, lineHeight: 20 },
   emptyBtn:    { paddingHorizontal: 24, paddingVertical: 12, borderRadius: Radius.lg, backgroundColor: Colors.accent },
   emptyBtnText:{ fontSize: 15, fontFamily: Fonts.semiBold, color: Colors.accentFg },
-  alertOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center', padding: 24 },
-  alertBox: { backgroundColor: Colors.surface, borderRadius: Radius['2xl'], padding: 24, width: '100%', maxWidth: 320, alignItems: 'center' },
-  alertTitle: { fontSize: 18, fontFamily: Fonts.bold, color: Colors.text, marginBottom: 12 },
-  alertMessage: { fontSize: 14, fontFamily: Fonts.regular, color: Colors.textSub, textAlign: 'center', marginBottom: 20, lineHeight: 20 },
-  alertButton: { paddingHorizontal: 32, paddingVertical: 10, borderRadius: Radius.lg, backgroundColor: Colors.accent, width: '100%' },
-  alertButtonText: { fontSize: 15, fontFamily: Fonts.semiBold, color: Colors.accentFg, textAlign: 'center' },
 });

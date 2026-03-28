@@ -288,6 +288,7 @@ export class GroupService {
       thumbnail: group.thumbnail,
       avatarSeed: group.avatarSeed,
       isPublic: group.isPublic,
+      requireApprovalToJoin: group.requireApprovalToJoin ?? true,
       memberCount,
       membershipStatus,
       deletedAt: group.deletedAt ?? undefined,
@@ -428,6 +429,23 @@ export class GroupService {
   }
 
   /**
+   * Replace the group's invite code with a newly generated unique code.
+   * Does not change memberships — only affects joining via the old code or link.
+   */
+  public async regenerateInviteCode(id: string, updatedBy: string): Promise<{ inviteCode: string }> {
+    const row = await prisma.group.findUnique({ where: { id } });
+    if (!row || row.deletedAt) {
+      throw new Error('Group not found');
+    }
+    const inviteCode = await this.generateUniqueInviteCode(row.name);
+    await prisma.group.update({
+      where: { id },
+      data: { inviteCode, updatedBy },
+    });
+    return { inviteCode };
+  }
+
+  /**
    * Hard-delete a group (removes group and all related data). Superadmin only.
    * Best-effort removal of group thumbnail and all event / comment photos from S3.
    */
@@ -541,7 +559,7 @@ export class GroupService {
   }
 
   /**
-   * Join a group by invite code. Public groups: immediate membership. Private groups: creates pending request.
+   * Join a group by invite code. If requireApprovalToJoin is false, membership is immediate; otherwise pending.
    * Returns groupName and status for UI feedback.
    */
   public async joinByInviteCode(
@@ -570,12 +588,12 @@ export class GroupService {
     }
     return {
       groupName: group.name,
-      status: group.isPublic ? 'joined' : 'pending',
+      status: group.requireApprovalToJoin ? 'pending' : 'joined',
     };
   }
 
   /**
-   * Join a group. Public groups: immediate membership. Private groups: creates pending request.
+   * Join a group. If requireApprovalToJoin is false, membership is immediate; otherwise pending.
    */
   public async joinGroup(groupId: string, userId: string): Promise<void> {
     const group = await prisma.group.findUnique({ where: { id: groupId } });
@@ -592,7 +610,7 @@ export class GroupService {
       if (existing.status === 'active') return; // Already a member
       if (existing.status === 'pending') return; // Request already sent
       if (existing.status === 'rejected') {
-        const status = group.isPublic ? 'active' : 'pending';
+        const status = group.requireApprovalToJoin ? 'pending' : 'active';
         await prisma.groupMember.update({
           where: { groupId_userId: { groupId, userId } },
           data: { status },
@@ -600,7 +618,7 @@ export class GroupService {
         return;
       }
     } else {
-      const status = group.isPublic ? 'active' : 'pending';
+      const status = group.requireApprovalToJoin ? 'pending' : 'active';
       await prisma.groupMember.create({
         data: {
           groupId,
@@ -966,6 +984,7 @@ export class GroupService {
       avatarSeed: group.avatarSeed,
       inviteCode: group.inviteCode,
       isPublic: group.isPublic,
+      requireApprovalToJoin: group.requireApprovalToJoin ?? true,
       superAdminId: superAdmin ? superAdmin.userId : '',
       adminIds: admins.map((m: any) => m.userId),
       memberIds: activeMembers.map((m: any) => m.userId),

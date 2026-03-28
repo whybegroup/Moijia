@@ -149,6 +149,34 @@ export class GroupController extends Controller {
   }
 
   /**
+   * Regenerate invite code
+   * @summary Issues a new invite code for joining; existing members are unchanged. Requires admin.
+   */
+  @Post('{id}/regenerate-invite-code')
+  @SuccessResponse('200', 'OK')
+  public async regenerateInviteCode(
+    @Path() id: string,
+    @Query() userId: string
+  ): Promise<{ inviteCode: string }> {
+    if (!userId) {
+      this.setStatus(400);
+      throw new Error('userId is required');
+    }
+    const scoped = await this.groupService.getByIdForUser(id, userId);
+    if (!scoped) {
+      this.setStatus(404);
+      throw new Error('Group not found');
+    }
+    if (scoped.membershipStatus !== 'admin') {
+      this.setStatus(403);
+      throw new Error('Must be admin to regenerate invite code');
+    }
+    const { inviteCode } = await this.groupService.regenerateInviteCode(id, userId);
+    this.setStatus(200);
+    return { inviteCode };
+  }
+
+  /**
    * Hard-delete a group
    * @summary Permanently removes a group and all its data. Superadmin only.
    */

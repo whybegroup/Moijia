@@ -19,6 +19,8 @@ export interface Group {
   inviteCode?: string | null;
   /** Whether the group is publicly visible */
   isPublic: boolean;
+  /** When true, new members must be approved; when false, join is immediate */
+  requireApprovalToJoin: boolean;
   /** ID of the group's super admin */
   superAdminId: string;
   /** Array of admin user IDs */
@@ -47,6 +49,7 @@ export interface GroupScoped {
   thumbnail?: string | null;
   avatarSeed?: string | null;
   isPublic: boolean;
+  requireApprovalToJoin: boolean;
   memberCount: number;
   membershipStatus: MembershipStatus;
   /** Present when member or admin */
@@ -82,6 +85,7 @@ export interface GroupInput {
   avatarSeed?: string | null;
   inviteCode?: string | null;
   isPublic: boolean;
+  requireApprovalToJoin?: boolean;
   superAdminId: string;
   adminIds?: string[];
   memberIds?: string[];
@@ -97,6 +101,7 @@ export interface GroupUpdate {
   thumbnail?: string | null;
   avatarSeed?: string | null;
   isPublic?: boolean;
+  requireApprovalToJoin?: boolean;
   superAdminId?: string;
   adminIds?: string[];
   memberIds?: string[];

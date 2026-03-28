@@ -700,7 +700,7 @@ export default function EventDetailScreen() {
         )}
         <TouchableOpacity 
           style={styles.navGroup}
-          onPress={() => router.push(`/group/${ev.groupId}`)}
+          onPress={() => router.push(`/groups/${ev.groupId}`)}
           activeOpacity={0.7}
         >
           <View style={[styles.groupDot, { backgroundColor: p.dot }]} />

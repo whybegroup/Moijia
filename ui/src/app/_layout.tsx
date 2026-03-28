@@ -1,7 +1,8 @@
 import { useEffect } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
+import { focusManager } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import Toast from 'react-native-toast-message';
@@ -54,8 +55,6 @@ function RootLayoutNav() {
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="event/[id]" />
       <Stack.Screen name="event/edit/[id]" />
-      <Stack.Screen name="group/[id]" />
-      <Stack.Screen name="group/[id]/preferences" />
       <Stack.Screen name="create-event" />
       <Stack.Screen
         name="create-group"
@@ -71,6 +70,17 @@ export default function RootLayout() {
     DMSans_500Medium,
     DMSans_700Bold,
   });
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    focusManager.setEventListener((handleFocus) => {
+      const sub = AppState.addEventListener('change', (state) => {
+        handleFocus(state === 'active');
+      });
+      handleFocus(AppState.currentState === 'active');
+      return () => sub.remove();
+    });
+  }, []);
 
   useEffect(() => {
     if (fontsLoaded || fontError) SplashScreen.hideAsync();

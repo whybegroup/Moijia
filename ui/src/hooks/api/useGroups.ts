@@ -1,8 +1,49 @@
-import { useMutation, useQuery, useQueryClient, keepPreviousData, useInfiniteQuery } from '@tanstack/react-query';
-import { GroupsService, type GroupInput, type GroupUpdate, type MembershipRequestAction } from '@moija/client';
+import { useEffect } from 'react';
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  keepPreviousData,
+  useInfiniteQuery,
+  type QueryClient,
+  type InfiniteData,
+} from '@tanstack/react-query';
+import {
+  GroupsService,
+  type GroupInput,
+  type GroupUpdate,
+  type GroupScoped,
+  type MembershipRequestAction,
+  type PublicGroupsPage,
+} from '@moija/client';
 import { queryKeys } from '../../config/queryClient';
 
 const PUBLIC_GROUPS_PAGE_SIZE = 10;
+
+/** Reuse list / public-discovery data so group detail can render without waiting on a duplicate GET /groups/:id. */
+function readGroupScopedFromCaches(
+  queryClient: QueryClient,
+  userId: string,
+  groupId: string
+): GroupScoped | undefined {
+  for (const includeDeleted of [false, true] as const) {
+    const list = queryClient.getQueryData<GroupScoped[]>(queryKeys.groups.all(userId, includeDeleted));
+    const hit = list?.find((g) => g.id === groupId);
+    if (hit) return hit;
+  }
+  const publicEntries = queryClient.getQueriesData<InfiniteData<PublicGroupsPage>>({
+    queryKey: ['groups', 'public', userId],
+    exact: false,
+  });
+  for (const [, data] of publicEntries) {
+    if (!data?.pages?.length) continue;
+    for (const page of data.pages) {
+      const hit = page.items.find((g) => g.id === groupId);
+      if (hit) return hit;
+    }
+  }
+  return undefined;
+}
 
 export function usePublicGroupsInfinite(
   userId: string | undefined,
@@ -19,6 +60,7 @@ export function usePublicGroupsInfinite(
       return next < lastPage.total ? next : undefined;
     },
     enabled: !!userId?.trim(),
+    refetchInterval: 3000,
   });
 }
 
@@ -33,11 +75,18 @@ export function useGroups(userId: string, includeDeleted = false) {
 }
 
 export function useGroup(id: string, userId: string) {
+  const queryClient = useQueryClient();
   return useQuery({
     queryKey: queryKeys.groups.detail(id, userId),
     queryFn: () => GroupsService.getGroup(id, userId),
     enabled: !!id && !!userId,
     refetchInterval: 3000,
+    placeholderData: (previousData) => {
+      const fromList = readGroupScopedFromCaches(queryClient, userId, id);
+      if (fromList) return fromList;
+      if (previousData && previousData.id === id) return previousData;
+      return undefined;
+    },
   });
 }
 
@@ -55,6 +104,17 @@ export function useCreateGroup(userId: string) {
 
   return useMutation({
     mutationFn: (data: GroupInput) => GroupsService.createGroup(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.groups._base });
+    },
+  });
+}
+
+export function useRegenerateInviteCode(groupId: string, userId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => GroupsService.regenerateInviteCode(groupId, userId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.groups._base });
     },
@@ -120,11 +180,11 @@ export function useRecoverGroup(userId: string) {
   });
 }
 
-export function usePendingRequests(id: string, userId: string) {
+export function usePendingRequests(id: string, userId: string, opts?: { enabled?: boolean }) {
   return useQuery({
     queryKey: queryKeys.groups.pendingRequests(id),
     queryFn: () => GroupsService.getPendingRequests(id, userId),
-    enabled: !!id && !!userId,
+    enabled: opts?.enabled !== false && !!id && !!userId,
     refetchInterval: 3000, // Poll every 3s to pick up new join requests
   });
 }
@@ -224,9 +284,18 @@ export function useSetSuperAdmin(groupId: string, performedBy: string) {
 }
 
 export function useGroupMemberColor(groupId: string, userId: string) {
+  const queryClient = useQueryClient();
   return useQuery({
     queryKey: queryKeys.groups.memberColor(groupId, userId),
-    queryFn: () => GroupsService.getMemberColor(groupId, userId),
+    queryFn: async () => {
+      const batchKey = queryKeys.groups.allMemberColors(userId);
+      const batchState = queryClient.getQueryState(batchKey);
+      const batch = queryClient.getQueryData<Record<string, string>>(batchKey);
+      if (batchState?.status === 'success') {
+        return { colorHex: batch?.[groupId] ?? null };
+      }
+      return GroupsService.getMemberColor(groupId, userId);
+    },
     enabled: !!groupId && !!userId,
   });
 }
@@ -244,9 +313,23 @@ export function useUpdateGroupMemberColor(groupId: string, userId: string) {
 }
 
 export function useAllGroupMemberColors(userId: string) {
-  return useQuery({
+  const queryClient = useQueryClient();
+  const query = useQuery({
     queryKey: queryKeys.groups.allMemberColors(userId),
     queryFn: () => GroupsService.getAllMemberColors(userId),
     enabled: !!userId,
+    refetchInterval: 3000,
   });
+
+  useEffect(() => {
+    const data = query.data;
+    if (!userId || !data || typeof data !== 'object') return;
+    for (const [gid, hex] of Object.entries(data as Record<string, string>)) {
+      queryClient.setQueryData(queryKeys.groups.memberColor(gid, userId), {
+        colorHex: hex || null,
+      });
+    }
+  }, [userId, query.data, queryClient]);
+
+  return query;
 }

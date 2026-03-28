@@ -45,6 +45,8 @@ model Group {
   avatarSeed String?  // DiceBear icons seed for generated avatar
   inviteCode String?   @unique
   isPublic   Boolean   @default(false)
+  /// When true, new joins (public or private) start as pending until an admin approves.
+  requireApprovalToJoin Boolean @default(true)
   createdBy  String
   updatedBy  String
   createdAt  DateTime  @default(now())

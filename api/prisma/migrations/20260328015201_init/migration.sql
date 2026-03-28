@@ -18,6 +18,7 @@ CREATE TABLE "groups" (
     "avatarSeed" TEXT,
     "inviteCode" TEXT,
     "isPublic" BOOLEAN NOT NULL DEFAULT false,
+    "requireApprovalToJoin" BOOLEAN NOT NULL DEFAULT true,
     "createdBy" TEXT NOT NULL,
     "updatedBy" TEXT NOT NULL,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -87,6 +88,18 @@ CREATE TABLE "rsvps" (
 );
 
 -- CreateTable
+CREATE TABLE "event_watches" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "eventId" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "watching" BOOLEAN NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "event_watches_eventId_fkey" FOREIGN KEY ("eventId") REFERENCES "events" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "event_watches_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
 CREATE TABLE "comments" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "eventId" TEXT NOT NULL,
@@ -134,3 +147,6 @@ CREATE UNIQUE INDEX "group_members_groupId_userId_key" ON "group_members"("group
 
 -- CreateIndex
 CREATE UNIQUE INDEX "rsvps_eventId_userId_key" ON "rsvps"("eventId", "userId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "event_watches_eventId_userId_key" ON "event_watches"("eventId", "userId");

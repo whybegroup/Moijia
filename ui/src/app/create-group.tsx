@@ -17,6 +17,7 @@ import type { PendingAvatarFile } from '../services/pickAndUploadImage';
 import { uploadPendingAvatarFile } from '../services/pickAndUploadImage';
 
 const DEFAULT_AVATAR_SEED = 'auto';
+const AVATAR_SIZE = 56;
 
 export default function CreateGroupScreen() {
   const router = useRouter();
@@ -87,7 +88,7 @@ export default function CreateGroupScreen() {
       });
 
       // Navigate to the new group
-      router.replace(`/group/${newGroup.id}`);
+      router.replace(`/groups/${newGroup.id}`);
     } catch {
       Alert.alert('Error', 'Failed to create group. Please try again.');
     }
@@ -99,7 +100,7 @@ export default function CreateGroupScreen() {
 
       <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
         <View style={[styles.headerBlock, { borderBottomColor: Colors.border }]}>
-          <View style={{ flexDirection: 'row', gap: 16, marginBottom: 16 }}>
+          <View style={styles.avatarNameRow}>
             <TouchableOpacity
               onPress={openAvatarPicker}
               style={[
@@ -107,17 +108,22 @@ export default function CreateGroupScreen() {
                 {
                   backgroundColor: getGroupColor(getDefaultGroupThemeFromName(draftName || 'Group')).row,
                   borderColor: getGroupColor(getDefaultGroupThemeFromName(draftName || 'Group')).cal,
-                  borderRadius: groupAvatarBorderRadius(56),
+                  borderRadius: groupAvatarBorderRadius(AVATAR_SIZE),
                 },
               ]}
               activeOpacity={0.8}
             >
-              <GroupAvatar seed={draftSeed || DEFAULT_AVATAR_SEED} thumbnail={draftThumbnail} size={56} style={{ width: 56, height: 56 }} />
+              <GroupAvatar
+                seed={draftSeed || DEFAULT_AVATAR_SEED}
+                thumbnail={draftThumbnail}
+                size={AVATAR_SIZE}
+                style={{ width: AVATAR_SIZE, height: AVATAR_SIZE }}
+              />
             </TouchableOpacity>
-            <View style={{ flex: 1, minWidth: 0 }}>
+            <View style={styles.nameFieldWrap}>
               <TextInput
                 value={draftName}
-                onChangeText={(text) => { 
+                onChangeText={(text) => {
                   setDraftName(text);
                   if (text) {
                     setDraftSeed(text);
@@ -127,19 +133,19 @@ export default function CreateGroupScreen() {
                 }}
                 placeholder="Group name"
                 placeholderTextColor={Colors.textMuted}
-                style={[styles.inlineNameInput, { marginBottom: 4 }]}
+                style={styles.nameInput}
                 autoCorrect={false}
-              />
-              <TextInput
-                value={draftDesc}
-                onChangeText={setDraftDesc}
-                placeholder="Description"
-                placeholderTextColor={Colors.textMuted}
-                style={[styles.inlineDescInput, { minHeight: 60 }]}
-                multiline
               />
             </View>
           </View>
+          <TextInput
+            value={draftDesc}
+            onChangeText={setDraftDesc}
+            placeholder="Description"
+            placeholderTextColor={Colors.textMuted}
+            style={styles.descInputFull}
+            multiline
+          />
 
           <View style={styles.inviteSection}>
             <View style={[styles.inviteRow, styles.inviteToggleRow, { borderTopWidth: 1, borderTopColor: Colors.border }]}>
@@ -188,9 +194,37 @@ export default function CreateGroupScreen() {
 const styles = StyleSheet.create({
   safe:            { flex: 1, backgroundColor: Colors.bg },
   headerBlock:     { backgroundColor: Colors.surface, padding: 20, borderBottomWidth: 1 },
-  groupThumb:      { width: 56, height: 56, borderWidth: 1, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  inlineNameInput: { flex: 1, minWidth: 0, paddingVertical: 0, paddingHorizontal: 0, borderBottomWidth: 1, borderBottomColor: Colors.border, backgroundColor: 'transparent', fontSize: 19, fontFamily: Fonts.extraBold, color: Colors.text, ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' as any, outlineWidth: 0 } as any) : null) },
-  inlineDescInput: { flex: 1, minWidth: 0, paddingVertical: 4, paddingHorizontal: 0, borderBottomWidth: 1, borderBottomColor: Colors.border, backgroundColor: 'transparent', fontSize: 13, fontFamily: Fonts.regular, color: Colors.text, minHeight: 40, textAlignVertical: 'top', ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' as any, outlineWidth: 0 } as any) : null) },
+  avatarNameRow:   { flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 16 },
+  groupThumb:      { width: AVATAR_SIZE, height: AVATAR_SIZE, borderWidth: 1, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  nameFieldWrap:   { flex: 1, minWidth: 0, height: AVATAR_SIZE, justifyContent: 'center', borderBottomWidth: 1, borderBottomColor: Colors.border },
+  nameInput:       {
+    width: '100%',
+    paddingVertical: Platform.OS === 'ios' ? 10 : 0,
+    paddingHorizontal: 0,
+    margin: 0,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    fontSize: 19,
+    fontFamily: Fonts.extraBold,
+    color: Colors.text,
+    textAlignVertical: 'center',
+    ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' as any, outlineWidth: 0 } as any) : null),
+  },
+  descInputFull:   {
+    width: '100%',
+    minHeight: 88,
+    paddingTop: 8,
+    paddingBottom: 8,
+    paddingHorizontal: 0,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+    backgroundColor: 'transparent',
+    fontSize: 13,
+    fontFamily: Fonts.regular,
+    color: Colors.text,
+    textAlignVertical: 'top',
+    ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' as any, outlineWidth: 0 } as any) : null),
+  },
   inviteSection:   { marginTop: 12, paddingBottom: 8 },
   inviteRow:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4, paddingHorizontal: 0, borderTopWidth: 1, borderTopColor: Colors.border },
   inviteToggleRow: { paddingVertical: 4 },

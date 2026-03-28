@@ -1,8 +1,10 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, Platform, TextInput, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
-import { Colors, Fonts, Radius } from '../../constants/theme';
+import { useRouter, useFocusEffect } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '../../config/queryClient';
+import { Colors, Fonts, Layout, Radius } from '../../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName, groupAvatarBorderRadius } from '../../utils/helpers';
 import { useGroups, useAllGroupMemberColors, useUpdateUser } from '../../hooks/api';
 import { useAuth } from '../../contexts/AuthContext';
@@ -14,12 +16,33 @@ import { deleteManagedUploadFireAndForget } from '../../services/managedUploadDe
 
 export default function ProfileScreen() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { user: firebaseUser, signOut } = useAuth();
   const { userId, user } = useCurrentUserContext();
   const updateUser = useUpdateUser(userId || '');
 
   const { data: groups = [] } = useGroups(userId ?? '');
   const { data: groupColors = {} } = useAllGroupMemberColors(userId || '');
+
+  const myGroupsForSettings = useMemo(
+    () =>
+      groups.filter(
+        (g) =>
+          g.membershipStatus === 'member' ||
+          g.membershipStatus === 'admin' ||
+          g.membershipStatus === 'pending'
+      ),
+    [groups]
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      const uid = userId?.trim();
+      if (!uid) return;
+      queryClient.invalidateQueries({ queryKey: queryKeys.groups.all(uid, false) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.groups.allMemberColors(uid) });
+    }, [userId, queryClient])
+  );
 
   const [draftDisplayName, setDraftDisplayName] = useState('');
   const [editingDisplayName, setEditingDisplayName] = useState(false);
@@ -178,15 +201,20 @@ export default function ProfileScreen() {
         {/* My groups */}
         <Text style={styles.sectionLabel}>My Group Settings</Text>
         <View style={[styles.card, { marginBottom: 20 }]}>
-          {groups.map((g, i) => {
+          {myGroupsForSettings.length === 0 ? (
+            <Text style={{ fontSize: 14, fontFamily: Fonts.regular, color: Colors.textMuted, paddingVertical: 12, paddingHorizontal: 4 }}>
+              Join a group from the Groups tab to manage settings here.
+            </Text>
+          ) : null}
+          {myGroupsForSettings.map((g, i) => {
             const userColorHex = groupColors[g.id] || getDefaultGroupThemeFromName(g.name);
             const p = getGroupColor(userColorHex);
             const isPending = g.membershipStatus === 'pending';
             return (
               <TouchableOpacity
                 key={g.id}
-                onPress={() => router.push(isPending ? `/group/${g.id}` : `/group/${g.id}/preferences`)}
-                style={[styles.groupRow, i < groups.length - 1 && styles.rowBorder]}
+                onPress={() => router.push(isPending ? `/groups/${g.id}` : `/groups/${g.id}/preferences`)}
+                style={[styles.groupRow, i < myGroupsForSettings.length - 1 && styles.rowBorder]}
                 activeOpacity={0.7}
               >
                 <View style={[styles.groupIcon, { backgroundColor: p.row, borderColor: p.cal }]}>
@@ -246,7 +274,7 @@ export default function ProfileScreen() {
 
 const styles = StyleSheet.create({
   safe:             { flex: 1, backgroundColor: Colors.bg },
-  header:           { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border },
+  header:           { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: Layout.tabHeaderMinHeight, paddingHorizontal: 20, paddingVertical: 16, backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border },
   title:            { fontSize: 18, fontFamily: Fonts.extraBold, color: Colors.text },
   userCard:         { backgroundColor: Colors.surface, borderRadius: 16, borderWidth: 1, borderColor: Colors.border, padding: 20, marginBottom: 16, flexDirection: 'row', alignItems: 'center', gap: 16 },
   bigAvatar:        { width: 60, height: 60, borderRadius: 30, alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' },
