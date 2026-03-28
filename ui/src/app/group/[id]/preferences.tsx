@@ -5,5 +5,5 @@ export default function LegacyGroupPreferencesRedirect() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const gid = Array.isArray(id) ? id[0] : id;
   if (!gid) return null;
-  return <Redirect href={`/groups/${gid}/preferences`} />;
+  return <Redirect href={`/groups/${gid}`} />;
 }

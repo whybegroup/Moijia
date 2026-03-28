@@ -18,7 +18,7 @@ import {
 } from '@moija/client';
 import { queryKeys } from '../../config/queryClient';
 
-const PUBLIC_GROUPS_PAGE_SIZE = 10;
+const PUBLIC_GROUPS_PAGE_SIZE = 5;
 
 /** Reuse list / public-discovery data so group detail can render without waiting on a duplicate GET /groups/:id. */
 function readGroupScopedFromCaches(

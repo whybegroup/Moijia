@@ -1,48 +1,18 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, Platform, TextInput, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, useFocusEffect } from 'expo-router';
-import { useQueryClient } from '@tanstack/react-query';
-import { queryKeys } from '../../config/queryClient';
 import { Colors, Fonts, Layout, Radius } from '../../constants/theme';
-import { getGroupColor, getDefaultGroupThemeFromName, groupAvatarBorderRadius } from '../../utils/helpers';
-import { useGroups, useAllGroupMemberColors, useUpdateUser } from '../../hooks/api';
+import { useUpdateUser } from '../../hooks/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useCurrentUserContext } from '../../contexts/CurrentUserContext';
 import { UserAvatar } from '../../components/UserAvatar';
 import { AvatarPickerModal } from '../../components/AvatarPickerModal';
-import { GroupAvatar } from '../../components/GroupAvatar';
 import { deleteManagedUploadFireAndForget } from '../../services/managedUploadDelete';
 
 export default function ProfileScreen() {
-  const router = useRouter();
-  const queryClient = useQueryClient();
   const { user: firebaseUser, signOut } = useAuth();
   const { userId, user } = useCurrentUserContext();
   const updateUser = useUpdateUser(userId || '');
-
-  const { data: groups = [] } = useGroups(userId ?? '');
-  const { data: groupColors = {} } = useAllGroupMemberColors(userId || '');
-
-  const myGroupsForSettings = useMemo(
-    () =>
-      groups.filter(
-        (g) =>
-          g.membershipStatus === 'member' ||
-          g.membershipStatus === 'admin' ||
-          g.membershipStatus === 'pending'
-      ),
-    [groups]
-  );
-
-  useFocusEffect(
-    useCallback(() => {
-      const uid = userId?.trim();
-      if (!uid) return;
-      queryClient.invalidateQueries({ queryKey: queryKeys.groups.all(uid, false) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.groups.allMemberColors(uid) });
-    }, [userId, queryClient])
-  );
 
   const [draftDisplayName, setDraftDisplayName] = useState('');
   const [editingDisplayName, setEditingDisplayName] = useState(false);
@@ -198,40 +168,6 @@ export default function ProfileScreen() {
           </View>
         </View>
 
-        {/* My groups */}
-        <Text style={styles.sectionLabel}>My Group Settings</Text>
-        <View style={[styles.card, { marginBottom: 20 }]}>
-          {myGroupsForSettings.length === 0 ? (
-            <Text style={{ fontSize: 14, fontFamily: Fonts.regular, color: Colors.textMuted, paddingVertical: 12, paddingHorizontal: 4 }}>
-              Join a group from the Groups tab to manage settings here.
-            </Text>
-          ) : null}
-          {myGroupsForSettings.map((g, i) => {
-            const userColorHex = groupColors[g.id] || getDefaultGroupThemeFromName(g.name);
-            const p = getGroupColor(userColorHex);
-            const isPending = g.membershipStatus === 'pending';
-            return (
-              <TouchableOpacity
-                key={g.id}
-                onPress={() => router.push(isPending ? `/groups/${g.id}` : `/groups/${g.id}/preferences`)}
-                style={[styles.groupRow, i < myGroupsForSettings.length - 1 && styles.rowBorder]}
-                activeOpacity={0.7}
-              >
-                <View style={[styles.groupIcon, { backgroundColor: p.row, borderColor: p.cal }]}>
-                  <GroupAvatar seed={g.avatarSeed} thumbnail={g.thumbnail} name={g.name} size={36} />
-                </View>
-                <Text style={styles.groupName}>{g.name}</Text>
-                {isPending && (
-                  <Text style={{ fontSize: 11, fontFamily: Fonts.semiBold, color: Colors.textMuted, marginRight: 4 }}>
-                    Pending
-                  </Text>
-                )}
-                <Text style={{ color: Colors.textMuted, fontSize: 16 }}>›</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-
         {/* Sign out */}
         <TouchableOpacity style={styles.signOutBtn} onPress={handleSignOut}>
           <Text style={styles.signOutText}>Sign Out</Text>
@@ -284,10 +220,7 @@ const styles = StyleSheet.create({
   userHandle:       { fontSize: 14, color: Colors.textMuted, fontFamily: Fonts.regular, marginBottom: 8 },
   sectionLabel:     { fontSize: 11, fontFamily: Fonts.semiBold, color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 10 },
   card:             { backgroundColor: Colors.surface, borderRadius: 16, borderWidth: 1, borderColor: Colors.border, overflow: 'hidden' },
-  groupRow:         { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12 },
   rowBorder:        { borderBottomWidth: 1, borderBottomColor: Colors.border },
-  groupIcon:        { width: 36, height: 36, borderRadius: groupAvatarBorderRadius(36), borderWidth: 1, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  groupName:        { flex: 1, fontSize: 14, fontFamily: Fonts.medium, color: Colors.text },
   infoRow:          { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 14 },
   infoLabel:        { fontSize: 14, fontFamily: Fonts.regular, color: Colors.textMuted },
   infoValue:        { fontSize: 14, fontFamily: Fonts.medium, color: Colors.text },

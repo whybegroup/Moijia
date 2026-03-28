@@ -29,6 +29,7 @@ import { useCurrentUserContext } from '../../../contexts/CurrentUserContext';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path, Rect } from 'react-native-svg';
 import { GroupAvatar } from '../../../components/GroupAvatar';
+import { GroupMemberThemeAndNotifications } from '../../../components/GroupMemberThemeAndNotifications';
 import { AvatarPickerModal } from '../../../components/AvatarPickerModal';
 import { UserAvatar } from '../../../components/UserAvatar';
 import { deleteManagedUploadFireAndForget } from '../../../services/managedUploadDelete';
@@ -135,8 +136,9 @@ export default function GroupDetailScreen() {
 
   const superAdminId = group.superAdminId ?? '';
   const admins = group.adminIds ?? [];
-  const isAdmin = group.membershipStatus === 'admin';
   const isSuperAdmin = superAdminId === currentUserId;
+  const isAdmin = group.membershipStatus === 'admin';
+  const canManageMembers = isAdmin || isSuperAdmin;
   const isPending = group.membershipStatus === 'pending';
   const isSoftDeleted = !!group.deletedAt;
 
@@ -370,36 +372,28 @@ export default function GroupDetailScreen() {
               />
             </TouchableOpacity>
             <View style={styles.nameFieldWrap}>
-              {isAdmin ? (
-                <TextInput
-                  value={draftName}
-                  onChangeText={setDraftName}
-                  placeholder="Group name"
-                  placeholderTextColor={Colors.textMuted}
-                  style={styles.nameInput}
-                  autoCapitalize="words"
-                  autoCorrect={false}
-                />
-              ) : (
-                <Text style={[styles.groupName, styles.nameInputSlot]} numberOfLines={1}>
-                  {group.name}
-                </Text>
-              )}
+              <TextInput
+                value={draftName}
+                onChangeText={setDraftName}
+                placeholder="No name"
+                placeholderTextColor={Colors.textMuted}
+                style={styles.nameInput}
+                readOnly={!isAdmin}
+                autoCapitalize="words"
+                autoCorrect={false}
+              />
             </View>
           </View>
 
-          {isAdmin ? (
-            <TextInput
-              value={draftDesc}
-              onChangeText={setDraftDesc}
-              placeholder="Description"
-              placeholderTextColor={Colors.textMuted}
-              style={styles.descInputFull}
-              multiline
-            />
-          ) : group.desc ? (
-            <Text style={styles.groupDescFull}>{group.desc}</Text>
-          ) : null}
+          <TextInput
+            value={draftDesc}
+            onChangeText={setDraftDesc}
+            placeholder="Description"
+            placeholderTextColor={Colors.textMuted}
+            style={styles.descInputFull}
+            multiline
+            readOnly={!isAdmin}
+          />
           {(!isPending && inviteCode) || (isAdmin || isSuperAdmin) ? (
             <View style={styles.inviteSection}>
               {(isAdmin || isSuperAdmin) && (
@@ -510,7 +504,7 @@ export default function GroupDetailScreen() {
           </View>
         ) : (
         <View style={{ padding: 16, paddingBottom: 100 }}>
-          {isAdmin && (
+          {canManageMembers && (
             <>
               {/* Pending requests */}
               {pendingRequestUsers.length > 0 && (
@@ -610,7 +604,7 @@ export default function GroupDetailScreen() {
             </>
           )}
 
-          {!isAdmin &&
+          {!canManageMembers &&
             (group.membershipStatus === 'none' && group.isPublic ? (
               <>
                 <Text style={styles.sectionLabel}>JOIN</Text>
@@ -647,27 +641,37 @@ export default function GroupDetailScreen() {
                 </View>
               </>
             ) : (
-              <View style={styles.card}>
-                {(group.memberIds ?? []).map((memberId, i) => {
-                  const isSuperAdminMember = memberId === superAdminId;
-                  const isAdminMember = admins.includes(memberId);
-                  const user = getUser(memberId);
-                  const displayName = user.displayName;
-                  return (
-                    <View key={i} style={[styles.memberRow, i < (group.memberIds ?? []).length - 1 && styles.rowBorder]}>
-                      <UserAvatar seed={user.displayName || user.name} backgroundColor={[user.avatarSeed]} thumbnail={user.thumbnail} size={38} />
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.memberName}>{displayName}</Text>
-                        <Text style={styles.memberRole}>
-                          {isSuperAdminMember ? 'Super Admin' : isAdminMember ? 'Admin' : 'Member'}
-                        </Text>
+              <>
+                <Text style={styles.sectionLabel}>MEMBERS · {(group.memberIds ?? []).length}</Text>
+                <View style={[styles.card, { marginBottom: 16 }]}>
+                  {(group.memberIds ?? []).map((memberId, i) => {
+                    const isSuperAdminMember = memberId === superAdminId;
+                    const isAdminMember = admins.includes(memberId);
+                    const user = getUser(memberId);
+                    const displayName = user.displayName;
+                    return (
+                      <View key={i} style={[styles.memberRow, i < (group.memberIds ?? []).length - 1 && styles.rowBorder]}>
+                        <UserAvatar seed={user.displayName || user.name} backgroundColor={[user.avatarSeed]} thumbnail={user.thumbnail} size={38} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.memberName}>{displayName}</Text>
+                          <Text style={styles.memberRole}>
+                            {isSuperAdminMember ? 'Super Admin' : isAdminMember ? 'Admin' : 'Member'}
+                          </Text>
+                        </View>
+                        {isSuperAdminMember && <Ionicons name="star" size={16} color="#CA8A04" />}
                       </View>
-                      {isSuperAdminMember && <Ionicons name="star" size={16} color="#CA8A04" />}
-                    </View>
-                  );
-                })}
-              </View>
+                    );
+                  })}
+                </View>
+              </>
             ))}
+
+          {(group.membershipStatus === 'member' || group.membershipStatus === 'admin') && !!currentUserId && (
+            <>
+              <View style={{ height: 16 }} />
+              <GroupMemberThemeAndNotifications groupId={groupId} userId={currentUserId} groupName={group.name} />
+            </>
+          )}
 
           {group.membershipStatus !== 'none' && (
           <>
