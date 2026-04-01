@@ -19,11 +19,11 @@ import {
   resolveCanonicalMemberUserId,
   type MemberRow,
 } from '../utils/commentMentions';
-import { S3UploadService } from './S3UploadService';
+import { LocalUploadService } from './LocalUploadService';
 
 const prisma = new PrismaClient();
 const notificationService = new NotificationService();
-const s3Uploads = new S3UploadService();
+const localUploads = new LocalUploadService();
 
 const COMMENT_MENTION_NOTIFICATION_TITLE = 'You were mentioned';
 /** Shown when a group admin removes someone else's comment (soft-delete). */
@@ -456,7 +456,7 @@ export class EventService {
         }
       });
 
-      await Promise.all(removedUrls.map((u) => s3Uploads.deleteManagedUploadBestEffort(u)));
+      await Promise.all(removedUrls.map((u) => localUploads.deleteManagedUploadBestEffort(u)));
     }
 
     // Update event data
@@ -502,7 +502,7 @@ export class EventService {
     await prisma.event.delete({
       where: { id },
     });
-    await Promise.all(urlsToPurge.map((u) => s3Uploads.deleteManagedUploadBestEffort(u)));
+    await Promise.all(urlsToPurge.map((u) => localUploads.deleteManagedUploadBestEffort(u)));
   }
 
   /**

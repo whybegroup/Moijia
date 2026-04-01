@@ -38,7 +38,7 @@ export async function pickImageFromLibrary(): Promise<PickedImageAsset> {
 }
 
 /**
- * Presign + PUT to S3. Requires API env S3_* + AWS_* (see api `S3UploadService`).
+ * Presign + PUT to the API (local `api/data` storage; set API_PUBLIC_URL if clients use another host).
  */
 export async function uploadPickedImageAsset(userId: string, asset: PickedImageAsset): Promise<string> {
   if (!userId) throw new Error('You must be signed in to upload photos.');

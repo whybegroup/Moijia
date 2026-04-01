@@ -1,6 +1,5 @@
 /**
- * Request a short-lived URL to PUT an image directly to S3.
- * Replace env placeholders when you configure your bucket (see `S3UploadService`).
+ * Request a short-lived signed URL to PUT an image into API local storage (`api/data`).
  */
 export interface PresignUploadRequest {
   userId: string;
@@ -18,7 +17,7 @@ export interface PresignUploadResponse {
 }
 
 export interface PresignGetBatchRequest {
-  /** Stored image URLs from the database (S3 object URLs or pass-through externals). */
+  /** Stored image URLs from the database (API file URLs or pass-through externals). */
   sourceUrls: string[];
 }
 

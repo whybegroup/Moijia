@@ -3,6 +3,7 @@ import { config as loadEnv } from 'dotenv';
 import express, { Application, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { RegisterRoutes } from './generated/routes';
+import { registerLocalUploadRoutes } from './services/LocalUploadService';
 import { apiReference } from '@scalar/express-api-reference';
 import * as fs from 'fs';
 import * as yaml from 'js-yaml';
@@ -14,6 +15,7 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors());
+registerLocalUploadRoutes(app);
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 

@@ -1,0 +1,24 @@
+FROM node:24.14.0-bookworm
+
+WORKDIR /app
+
+COPY api/client/ ./api/client/
+COPY package.json.docker ./package.json
+COPY ui/package.json ./ui/package.json
+COPY ui/.npmrc ./ui/.npmrc
+
+RUN npm install
+
+COPY ui/app.config.js ./ui
+COPY ui/babel.config.js ./ui
+COPY ui/expo-env.d.ts ./ui
+COPY ui/index.js ./ui
+COPY ui/metro.config.js ./ui
+COPY ui/tsconfig.json ./ui
+
+COPY ui/src/ ./ui/src/
+COPY ui/assets/ ./ui/assets/ 
+
+WORKDIR /app/ui
+
+CMD ["npm", "run", "web"]

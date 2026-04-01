@@ -13,8 +13,6 @@ COPY src/ ./src/
 COPY scripts/ ./scripts/
 
 RUN npm run generate
-COPY .env .
-
 RUN npm run build
 RUN cp src/generated/openapi.yaml dist/generated/openapi.yaml
 

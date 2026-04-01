@@ -1,11 +1,11 @@
 import { PrismaClient } from '@prisma/client';
 import { Group, GroupScoped, GroupInput, GroupUpdate, GroupRole, MembershipRequestAction, User } from '../models';
 import { NotificationService } from './NotificationService';
-import { S3UploadService } from './S3UploadService';
+import { LocalUploadService } from './LocalUploadService';
 
 const prisma = new PrismaClient();
 const notificationService = new NotificationService();
-const s3Uploads = new S3UploadService();
+const localUploads = new LocalUploadService();
 
 export class GroupService {
   /**
@@ -485,7 +485,7 @@ export class GroupService {
     await prisma.group.delete({
       where: { id },
     });
-    await Promise.all(urlsToPurge.map((u) => s3Uploads.deleteManagedUploadBestEffort(u)));
+    await Promise.all(urlsToPurge.map((u) => localUploads.deleteManagedUploadBestEffort(u)));
   }
 
   /**
