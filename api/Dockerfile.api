@@ -1,0 +1,22 @@
+FROM node:24.14.0-bookworm
+
+WORKDIR /app
+
+COPY package.json ./
+RUN npm install
+
+COPY prisma/migrations ./prisma/migrations
+COPY prisma/schema.prisma ./prisma/schema.prisma
+COPY tsconfig.json .
+COPY tsoa.json .
+COPY src/ ./src/
+COPY scripts/ ./scripts/
+
+RUN npm run generate
+COPY .env .
+
+RUN npm run build
+RUN cp src/generated/openapi.yaml dist/generated/openapi.yaml
+
+# Foreground process (do not use package.json "start" here — it backgrounds with nohup).
+CMD ["node", "dist/server.js"]

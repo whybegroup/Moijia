@@ -1,5 +1,5 @@
 client/
 src/generated/
-prisma/*.db
-prisma/*.db-journal
+prisma/data/*.db
+prisma/data/*.db-journal
 .env

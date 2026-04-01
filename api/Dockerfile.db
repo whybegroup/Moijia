@@ -1,0 +1,12 @@
+FROM node:24.14.0-bookworm
+
+WORKDIR /app
+
+COPY package.json ./
+RUN npm install
+
+COPY prisma/migrations ./prisma/migrations
+COPY prisma/schema.prisma ./prisma/schema.prisma
+RUN npm run db:generate
+
+CMD ["npm", "run", "db:deploy"]

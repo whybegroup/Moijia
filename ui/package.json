@@ -10,8 +10,8 @@
     "android:install": "adb install -r android/app/build/outputs/apk/release/app-release.apk",
     "android:install:debug": "adb install -r android/app/build/outputs/apk/debug/app-debug.apk",
     "android:signing": "./android/gradlew -p android :app:signingReport",
-    "ios": "expo run:ios",
-    "ios:build": "cd ios && pod install",
+    "ios": "expo prebuild && expo run:ios",
+    "ios:build": "expo prebuild && cd ios && pod install",
     "web": "expo start --web"
   },
   "dependencies": {

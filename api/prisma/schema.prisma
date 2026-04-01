@@ -3,7 +3,7 @@
 
 datasource db {
   provider = "sqlite"
-  url      = "file:./moija.db"
+  url      = "file:./data/moija.db"
 }
 
 generator client {

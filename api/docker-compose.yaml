@@ -1,0 +1,21 @@
+services:
+  api:
+    depends_on:
+      - db
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - 3000:3000
+      - 5555:5555
+    image: danbyun0110/moija:1.0.0
+    volumes:
+      - ./prisma/data:/app/prisma/data
+    restart: always
+  db:
+    build:
+      context: .
+      dockerfile: Dockerfile.db
+    image: danbyun0110/moija-db:1.0.0
+    volumes:
+      - ./prisma/data:/app/prisma/data
