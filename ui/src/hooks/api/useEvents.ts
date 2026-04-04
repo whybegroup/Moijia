@@ -47,7 +47,7 @@ export function useEvent(id: string, userId: string) {
     refetchOnWindowFocus: true,
     refetchOnMount: true,
     refetchOnReconnect: true,
-    refetchIntervalInBackground: false,
+    refetchIntervalInBackground: true,
   });
 }
 

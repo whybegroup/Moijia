@@ -13,12 +13,12 @@ export interface Group {
   desc: string;
   /** Group thumbnail/avatar URL */
   thumbnail?: string | null;
+  /** Cover / banner image URLs (uploaded), ordered */
+  coverPhotos: string[];
   /** DiceBear icons seed for generated avatar */
   avatarSeed?: string | null;
   /** Unique invite code for joining the group */
   inviteCode?: string | null;
-  /** Whether the group is publicly visible */
-  isPublic: boolean;
   /** When true, new members must be approved; when false, join is immediate */
   requireApprovalToJoin: boolean;
   /** ID of the group's super admin */
@@ -47,8 +47,8 @@ export interface GroupScoped {
   name: string;
   desc: string;
   thumbnail?: string | null;
+  coverPhotos: string[];
   avatarSeed?: string | null;
-  isPublic: boolean;
   requireApprovalToJoin: boolean;
   memberCount: number;
   membershipStatus: MembershipStatus;
@@ -68,12 +68,6 @@ export interface GroupScoped {
   deletedBy?: string | null;
 }
 
-/** Paginated public groups for discovery (server-side offset/limit) */
-export interface PublicGroupsPage {
-  items: GroupScoped[];
-  total: number;
-}
-
 /**
  * Input for creating a new group
  */
@@ -82,9 +76,9 @@ export interface GroupInput {
   name: string;
   desc: string;
   thumbnail?: string | null;
+  coverPhotos?: string[];
   avatarSeed?: string | null;
   inviteCode?: string | null;
-  isPublic: boolean;
   requireApprovalToJoin?: boolean;
   superAdminId: string;
   adminIds?: string[];
@@ -99,8 +93,8 @@ export interface GroupUpdate {
   name?: string;
   desc?: string;
   thumbnail?: string | null;
+  coverPhotos?: string[];
   avatarSeed?: string | null;
-  isPublic?: boolean;
   requireApprovalToJoin?: boolean;
   superAdminId?: string;
   adminIds?: string[];

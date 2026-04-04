@@ -7,6 +7,8 @@ const prisma = new PrismaClient();
 const notificationService = new NotificationService();
 const localUploads = new LocalUploadService();
 
+const GROUP_COVER_PHOTOS_INCLUDE = { orderBy: { id: 'asc' as const } };
+
 export class GroupService {
   /**
    * Generate a unique invite code based on group name
@@ -114,6 +116,7 @@ export class GroupService {
             user: true,
           },
         },
+        coverPhotos: GROUP_COVER_PHOTOS_INCLUDE,
       },
     });
 
@@ -150,71 +153,11 @@ export class GroupService {
             user: true,
           },
         },
+        coverPhotos: GROUP_COVER_PHOTOS_INCLUDE,
       },
     });
 
     return groups.map((g) => this.mapGroupScoped(g, userId));
-  }
-
-  /**
-   * Paginated public groups for discovery. Scoped like getAllForUser per userId.
-   * When includeJoined is false, only groups the user is not an active or pending member of.
-   */
-  public async getPublicGroupsPage(
-    userId: string,
-    opts: { limit: number; offset: number; q?: string; includeJoined?: boolean }
-  ): Promise<{ items: GroupScoped[]; total: number }> {
-    const q = opts.q?.trim();
-    const includeJoined = opts.includeJoined !== false;
-
-    const searchClause =
-      q && q.length > 0
-        ? {
-            OR: [{ name: { contains: q } }, { desc: { contains: q } }],
-          }
-        : {};
-
-    const membershipClause = !includeJoined
-      ? {
-          NOT: {
-            members: {
-              some: {
-                userId,
-                status: { in: ['active', 'pending'] },
-              },
-            },
-          },
-        }
-      : {};
-
-    const where = {
-      deletedAt: null,
-      isPublic: true,
-      ...searchClause,
-      ...membershipClause,
-    };
-
-    const [total, groups] = await prisma.$transaction([
-      prisma.group.count({ where }),
-      prisma.group.findMany({
-        where,
-        skip: opts.offset,
-        take: opts.limit,
-        orderBy: { name: 'asc' },
-        include: {
-          members: {
-            include: {
-              user: true,
-            },
-          },
-        },
-      }),
-    ]);
-
-    return {
-      items: groups.map((g) => this.mapGroupScoped(g, userId)),
-      total,
-    };
   }
 
   /**
@@ -229,6 +172,7 @@ export class GroupService {
             user: true,
           },
         },
+        coverPhotos: GROUP_COVER_PHOTOS_INCLUDE,
       },
     });
 
@@ -248,6 +192,7 @@ export class GroupService {
             user: true,
           },
         },
+        coverPhotos: GROUP_COVER_PHOTOS_INCLUDE,
       },
     });
 
@@ -259,6 +204,11 @@ export class GroupService {
       if (!isSuperadmin) return null;
     }
     return this.mapGroupScoped(group, userId);
+  }
+
+  private mapGroupCoverUrls(group: { coverPhotos?: { photoUrl: string }[] }): string[] {
+    if (!group.coverPhotos?.length) return [];
+    return group.coverPhotos.map((p) => p.photoUrl);
   }
 
   /**
@@ -286,8 +236,8 @@ export class GroupService {
       name: group.name,
       desc: group.desc,
       thumbnail: group.thumbnail,
+      coverPhotos: this.mapGroupCoverUrls(group),
       avatarSeed: group.avatarSeed,
-      isPublic: group.isPublic,
       requireApprovalToJoin: group.requireApprovalToJoin ?? true,
       memberCount,
       membershipStatus,
@@ -318,7 +268,15 @@ export class GroupService {
    * Create a new group with members
    */
   public async create(input: GroupInput): Promise<Group> {
-    const { superAdminId, adminIds = [], memberIds = [], createdBy, inviteCode, ...groupData } = input;
+    const {
+      superAdminId,
+      adminIds = [],
+      memberIds = [],
+      createdBy,
+      inviteCode,
+      coverPhotos = [],
+      ...groupData
+    } = input;
 
     // Generate unique invite code if not provided
     const finalInviteCode = inviteCode || await this.generateUniqueInviteCode(input.name);
@@ -330,6 +288,9 @@ export class GroupService {
         inviteCode: finalInviteCode,
         createdBy,
         updatedBy: createdBy,
+        coverPhotos: {
+          create: coverPhotos.map((photoUrl) => ({ photoUrl })),
+        },
         members: {
           create: [
             // Super admin
@@ -351,6 +312,7 @@ export class GroupService {
             user: true,
           },
         },
+        coverPhotos: GROUP_COVER_PHOTOS_INCLUDE,
       },
     });
 
@@ -361,7 +323,7 @@ export class GroupService {
    * Update a group
    */
   public async update(id: string, input: GroupUpdate): Promise<Group> {
-    const { superAdminId, adminIds, memberIds, updatedBy, ...groupData } = input;
+    const { superAdminId, adminIds, memberIds, updatedBy, coverPhotos, ...groupData } = input;
 
     // If member lists are provided, update them
     if (superAdminId || adminIds || memberIds) {
@@ -402,6 +364,29 @@ export class GroupService {
       });
     }
 
+    if (coverPhotos !== undefined) {
+      const existing = await prisma.group.findUnique({
+        where: { id },
+        select: { coverPhotos: { select: { photoUrl: true } } },
+      });
+      if (existing) {
+        const previousUrls = existing.coverPhotos.map((p) => p.photoUrl);
+        const nextSet = new Set(coverPhotos);
+        const removedUrls = previousUrls.filter((u) => !nextSet.has(u));
+
+        await prisma.$transaction(async (tx) => {
+          await tx.groupPhoto.deleteMany({ where: { groupId: id } });
+          if (coverPhotos.length > 0) {
+            await tx.groupPhoto.createMany({
+              data: coverPhotos.map((photoUrl) => ({ groupId: id, photoUrl })),
+            });
+          }
+        });
+
+        await Promise.all(removedUrls.map((u) => localUploads.deleteManagedUploadBestEffort(u)));
+      }
+    }
+
     // Update group data
     if (Object.keys(groupData).length > 0 || updatedBy) {
       await prisma.group.update({
@@ -422,6 +407,7 @@ export class GroupService {
             user: true,
           },
         },
+        coverPhotos: GROUP_COVER_PHOTOS_INCLUDE,
       },
     });
 
@@ -455,6 +441,7 @@ export class GroupService {
       where: { id },
       select: {
         thumbnail: true,
+        coverPhotos: { select: { photoUrl: true } },
         events: {
           select: {
             coverPhotos: { select: { photoUrl: true } },
@@ -474,6 +461,10 @@ export class GroupService {
     const urls: string[] = [];
     const t = snapshot.thumbnail?.trim();
     if (t) urls.push(t);
+    for (const gp of snapshot.coverPhotos) {
+      const u = gp.photoUrl?.trim();
+      if (u) urls.push(u);
+    }
     for (const ev of snapshot.events) {
       for (const p of ev.coverPhotos) urls.push(p.photoUrl);
       for (const c of ev.comments) {
@@ -981,9 +972,9 @@ export class GroupService {
       name: group.name,
       desc: group.desc,
       thumbnail: group.thumbnail,
+      coverPhotos: this.mapGroupCoverUrls(group),
       avatarSeed: group.avatarSeed,
       inviteCode: group.inviteCode,
-      isPublic: group.isPublic,
       requireApprovalToJoin: group.requireApprovalToJoin ?? true,
       superAdminId: superAdmin ? superAdmin.userId : '',
       adminIds: admins.map((m: any) => m.userId),

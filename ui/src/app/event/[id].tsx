@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo, useCallback, type ChangeEvent } from 'react';
+import React, { useState, useRef, useMemo, useCallback, useEffect, type ChangeEvent } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput,
   StyleSheet, Image, Modal, Linking, Alert, FlatList,
@@ -6,15 +6,17 @@ import {
   type StyleProp,
   type TextStyle,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Swipeable } from 'react-native-gesture-handler';
+import Swipeable, { type SwipeableMethods } from 'react-native-gesture-handler/ReanimatedSwipeable';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { Colors, Fonts, Radius, Shadows } from '../../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName, fmtTime, fmtDateFull, timeAgo, dDiff, getMyWaitlistPosition } from '../../utils/helpers';
 import { computeMentionUserIdsForPost, type MentionMemberRow } from '../../utils/mentionUtils';
-import { Avatar, Sheet } from '../../components/ui';
+import { Avatar, Sheet, formSectionTitleStyle } from '../../components/ui';
 import { CommentMentionInput } from '../../components/CommentMentionInput';
 import { UserAvatar } from '../../components/UserAvatar';
 import { UserAvatarStack } from '../../components/UserAvatarStack';
@@ -30,6 +32,7 @@ import {
   useGroupMemberColor,
   useDeleteEvent,
   useSetEventWatch,
+  useUpdateEvent,
 } from '../../hooks/api';
 import { uid, getNoResponseIds } from '../../utils/api-helpers';
 import type { CommentInput, EventDetailed, GroupScoped, RSVP, User } from '@moija/client';
@@ -41,6 +44,7 @@ import {
   uploadPickedImageAsset,
   uploadWebImageFile,
   isCancelled,
+  pickAndUploadCoverPhoto,
   type PickedImageAsset,
 } from '../../services/pickAndUploadImage';
 import { useResolvedImageUrls } from '../../hooks/useResolvedImageUrls';
@@ -60,10 +64,14 @@ function PhotoCarousel({
   photos,
   urlMap,
   onPhotoPress,
+  canRemove,
+  onRemoveAt,
 }: {
   photos: string[];
   urlMap: Map<string, string>;
   onPhotoPress: (url: string) => void;
+  canRemove?: boolean;
+  onRemoveAt?: (index: number) => void;
 }) {
   const { width: windowWidth } = useWindowDimensions();
   const ITEM_WIDTH = Math.min(windowWidth - 40, 400);
@@ -77,27 +85,37 @@ function PhotoCarousel({
       snapToInterval={ITEM_WIDTH + 12}
       decelerationRate="fast"
       contentContainerStyle={{ paddingHorizontal: 20, gap: 12 }}
-      style={{ marginBottom: 16 }}
-      renderItem={({ item }) => (
-        <TouchableOpacity
-          onPress={() => onPhotoPress(item)}
-          activeOpacity={0.9}
-          style={{ width: ITEM_WIDTH }}
-        >
-          <ResolvableImage
-            storedUrl={item}
-            urlMap={urlMap}
-            style={{
-              width: ITEM_WIDTH,
-              height: 240,
-              borderRadius: 12,
-              backgroundColor: Colors.bg,
-              borderWidth: 1,
-              borderColor: Colors.border,
-            }}
-            resizeMode="cover"
-          />
-        </TouchableOpacity>
+      style={{ marginBottom: 22 }}
+      renderItem={({ item, index }) => (
+        <View style={{ width: ITEM_WIDTH, position: 'relative' }}>
+          <TouchableOpacity
+            onPress={() => onPhotoPress(item)}
+            activeOpacity={0.9}
+          >
+            <ResolvableImage
+              storedUrl={item}
+              urlMap={urlMap}
+              style={{
+                width: ITEM_WIDTH,
+                height: 240,
+                borderRadius: 12,
+                backgroundColor: Colors.bg,
+                borderWidth: 1,
+                borderColor: Colors.border,
+              }}
+              resizeMode="cover"
+            />
+          </TouchableOpacity>
+          {canRemove && onRemoveAt ? (
+            <TouchableOpacity
+              onPress={() => onRemoveAt(index)}
+              style={styles.carouselRemoveThumb}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="close" size={11} color="#fff" />
+            </TouchableOpacity>
+          ) : null}
+        </View>
       )}
       keyExtractor={(_, index) => index.toString()}
     />
@@ -243,8 +261,21 @@ export default function EventDetailScreen() {
 
   const eventId = Array.isArray(id) ? id[0] : id;
 
-  const { data: ev, isLoading: eventLoading } = useEvent(eventId || '', currentUserId ?? '');
-  const { data: group, isLoading: groupLoading } = useGroup(ev?.groupId || '', currentUserId ?? '');
+  const { data: ev, isLoading: eventLoading, refetch: refetchEvent } = useEvent(
+    eventId || '',
+    currentUserId ?? ''
+  );
+  const { data: group, isLoading: groupLoading, refetch: refetchGroup } = useGroup(
+    ev?.groupId || '',
+    currentUserId ?? ''
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      void refetchEvent();
+      void refetchGroup();
+    }, [refetchEvent, refetchGroup])
+  );
   const { data: allUsers = [] } = useUsers();
   const { data: memberColorData } = useGroupMemberColor(ev?.groupId || '', currentUserId);
   const createOrUpdateRSVPMutation = useCreateOrUpdateRSVP(eventId || '');
@@ -254,6 +285,21 @@ export default function EventDetailScreen() {
   const deleteCommentMutation = useDeleteComment(eventId || '');
   const deleteEventMutation = useDeleteEvent(currentUserId ?? '');
   const setWatchMutation = useSetEventWatch(eventId || '', currentUserId ?? undefined);
+  const updateEventMutation = useUpdateEvent(eventId || '', currentUserId ?? '');
+
+  const [localCoverPhotos, setLocalCoverPhotos] = useState<string[]>([]);
+  const [coverPhotoBusy, setCoverPhotoBusy] = useState(false);
+  /** Server snapshot key; when the API returns new cover URLs, sync local state (same event id stays mounted across edit → back). */
+  const lastServerCoverPhotosKeyRef = useRef<string>('');
+
+  useEffect(() => {
+    const e = ev as EventDetailed | undefined;
+    if (!e?.id) return;
+    const key = JSON.stringify(e.coverPhotos ?? []);
+    if (key === lastServerCoverPhotosKeyRef.current) return;
+    lastServerCoverPhotosKeyRef.current = key;
+    setLocalCoverPhotos(e.coverPhotos ?? []);
+  }, [ev]);
 
   /** Group roster for @mentions (server validates the same set). */
   const mentionMemberRows: MentionMemberRow[] = useMemo(() => {
@@ -281,11 +327,12 @@ export default function EventDetailScreen() {
     const e = ev as EventDetailed | undefined;
     if (!e) return [];
     (e.coverPhotos || []).forEach((u) => s.add(u));
+    localCoverPhotos.forEach((u) => s.add(u));
     for (const c of e.comments || []) {
       (c.photos || []).forEach((u) => s.add(u));
     }
     return [...s];
-  }, [ev]);
+  }, [ev, localCoverPhotos]);
 
   const resolvedImageMap = useResolvedImageUrls(allSourceUrls);
 
@@ -302,14 +349,23 @@ export default function EventDetailScreen() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [commentPostBusy, setCommentPostBusy] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
-  const commentSwipeRefs = useRef<Map<string, React.ElementRef<typeof Swipeable>>>(new Map());
+  const commentSwipeRefById = useRef(new Map<string, React.RefObject<SwipeableMethods | null>>());
 
-  const closeCommentSwipe = (commentId: string) => {
-    const s = commentSwipeRefs.current.get(commentId);
-    if (s) {
-      requestAnimationFrame(() => s.close());
+  const refForCommentSwipe = useCallback((commentId: string) => {
+    let r = commentSwipeRefById.current.get(commentId);
+    if (!r) {
+      r = React.createRef<SwipeableMethods | null>();
+      commentSwipeRefById.current.set(commentId, r);
     }
-  };
+    return r;
+  }, []);
+
+  const closeCommentSwipe = useCallback((commentId: string) => {
+    const r = commentSwipeRefById.current.get(commentId);
+    if (r?.current) {
+      requestAnimationFrame(() => r.current?.close());
+    }
+  }, []);
 
   const removePendingPhoto = useCallback((p: PendingCommentPhoto) => {
     if (p.uri.startsWith('blob:')) {
@@ -440,6 +496,50 @@ export default function EventDetailScreen() {
   const canEdit = ev.createdBy === currentUserId || 
                   group.superAdminId === currentUserId || 
                   (group.adminIds ?? []).includes(currentUserId);
+  const coverPhotosForDisplay = canEdit ? localCoverPhotos : (ev.coverPhotos ?? []);
+  const showEventPhotosSection = coverPhotosForDisplay.length > 0 || canEdit;
+
+  const persistCoverPhotos = async (next: string[]) => {
+    if (!currentUserId) return;
+    await updateEventMutation.mutateAsync({
+      updatedBy: currentUserId,
+      coverPhotos: next,
+    });
+  };
+
+  const removeCoverPhotoAt = async (index: number) => {
+    if (!currentUserId || !canEdit) return;
+    const prev = localCoverPhotos;
+    const next = prev.filter((_, j) => j !== index);
+    setLocalCoverPhotos(next);
+    try {
+      await persistCoverPhotos(next);
+    } catch {
+      setLocalCoverPhotos(prev);
+      Alert.alert('Error', 'Failed to remove photo');
+    }
+  };
+
+  const addCoverPhotoFromPicker = async () => {
+    if (!currentUserId || !canEdit || coverPhotoBusy) return;
+    setCoverPhotoBusy(true);
+    try {
+      const url = await pickAndUploadCoverPhoto(currentUserId);
+      if (!url) return;
+      const prev = localCoverPhotos;
+      const next = [...prev, url];
+      setLocalCoverPhotos(next);
+      try {
+        await persistCoverPhotos(next);
+      } catch {
+        setLocalCoverPhotos(prev);
+        Alert.alert('Error', 'Failed to add photo');
+      }
+    } finally {
+      setCoverPhotoBusy(false);
+    }
+  };
+
   const canModerateComments =
     group.superAdminId === currentUserId || (group.adminIds ?? []).includes(currentUserId ?? '');
 
@@ -765,22 +865,58 @@ export default function EventDetailScreen() {
             {ev.subtitle ? <Text style={styles.eventSubtitle}>{ev.subtitle}</Text> : null}
           </View>
 
-          {/* Cover photos */}
-          {ev.coverPhotos && ev.coverPhotos.length > 0 && (
-            <View style={{ marginTop: ev.subtitle ? 0 : 16 }}>
-              <PhotoCarousel
-                photos={ev.coverPhotos}
-                urlMap={resolvedImageMap}
-                onPhotoPress={(url) =>
-                  setLightbox({
-                    url,
-                    name: getUserSafe(ev.createdBy).displayName,
-                    ts: new Date(ev.createdAt),
-                  })
-                }
-              />
+          {/* Photos */}
+          {showEventPhotosSection ? (
+            <View style={{ marginTop: ev.subtitle ? 4 : 10 }}>
+              <View style={{ paddingHorizontal: 20 }}>
+                <Text style={formSectionTitleStyle}>
+                  Photos{coverPhotosForDisplay.length > 0 ? ` · ${coverPhotosForDisplay.length}` : ''}
+                </Text>
+              </View>
+              {coverPhotosForDisplay.length > 0 ? (
+                <PhotoCarousel
+                  photos={coverPhotosForDisplay}
+                  urlMap={resolvedImageMap}
+                  canRemove={canEdit}
+                  onRemoveAt={(i) => void removeCoverPhotoAt(i)}
+                  onPhotoPress={(url) =>
+                    setLightbox({
+                      url,
+                      name: getUserSafe(ev.createdBy).displayName,
+                      ts: new Date(ev.createdAt),
+                    })
+                  }
+                />
+              ) : null}
+              {canEdit ? (
+                <View
+                  style={{
+                    paddingHorizontal: 20,
+                    marginTop: coverPhotosForDisplay.length > 0 ? 4 : 0,
+                    marginBottom: 16,
+                  }}
+                >
+                  <View style={styles.eventPhotosAddCard}>
+                    <TouchableOpacity
+                      onPress={() => void addCoverPhotoFromPicker()}
+                      style={styles.eventPhotosAddBtn}
+                      disabled={coverPhotoBusy}
+                      activeOpacity={0.85}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                        {coverPhotoBusy ? (
+                          <ActivityIndicator size="small" color={Colors.textSub} />
+                        ) : (
+                          <Ionicons name="camera-outline" size={16} color={Colors.textSub} />
+                        )}
+                        <Text style={{ fontSize: 12, color: Colors.textSub, fontFamily: Fonts.medium }}>Add photo</Text>
+                      </View>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : null}
             </View>
-          )}
+          ) : null}
 
           <View style={{ paddingHorizontal: 20 }}>
             {/* Info rows */}
@@ -914,10 +1050,7 @@ export default function EventDetailScreen() {
             return (
             <Swipeable
               key={c.id}
-              ref={(ref) => {
-                if (ref) commentSwipeRefs.current.set(c.id, ref);
-                else commentSwipeRefs.current.delete(c.id);
-              }}
+              ref={refForCommentSwipe(c.id)}
               enabled={hasActions}
               overshootRight={false}
               renderRightActions={() => (
@@ -1432,6 +1565,31 @@ const styles = StyleSheet.create({
   },
   eventTitle:       { fontSize: 21, fontFamily: Fonts.extraBold, color: Colors.text, lineHeight: 28, marginBottom: 4 },
   eventSubtitle:    { fontSize: 14, color: Colors.textMuted, fontFamily: Fonts.regular, marginBottom: 16 },
+  carouselRemoveThumb: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: Colors.text,
+    borderWidth: 2,
+    borderColor: Colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  eventPhotosAddCard: {
+    backgroundColor: Colors.bg,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    overflow: 'hidden',
+  },
+  eventPhotosAddBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    alignItems: 'flex-start',
+  },
   infoText:         { fontSize: 14, color: Colors.textSub, fontFamily: Fonts.regular, lineHeight: 20, flex: 1 },
   descBox:          { backgroundColor: Colors.bg, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border, padding: 12, marginBottom: 16 },
   descText:         { fontSize: 14, color: Colors.text, fontFamily: Fonts.regular, lineHeight: 22 },

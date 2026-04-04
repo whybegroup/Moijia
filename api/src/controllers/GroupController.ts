@@ -11,7 +11,7 @@ import {
   Tags,
   SuccessResponse,
 } from 'tsoa';
-import { Group, GroupScoped, GroupInput, GroupUpdate, User, MembershipRequestAction, PublicGroupsPage } from '../models';
+import { Group, GroupScoped, GroupInput, GroupUpdate, User, MembershipRequestAction } from '../models';
 import { GroupService } from '../services/GroupService';
 
 @Route('groups')
@@ -34,33 +34,6 @@ export class GroupController extends Controller {
       throw new Error('userId is required');
     }
     return this.groupService.getAllForUser(userId, includeDeleted === true);
-  }
-
-  /**
-   * List public groups with pagination (offset/limit). Must be registered before `GET /groups/:id`.
-   * @summary Paginated public groups for discovery. includeJoined=false hides groups you already belong to or have a pending request for.
-   */
-  @Get('public')
-  public async getPublicGroups(
-    @Query() userId: string,
-    @Query() limit: number = 10,
-    @Query() offset: number = 0,
-    @Query() q?: string,
-    @Query() includeJoined?: boolean
-  ): Promise<PublicGroupsPage> {
-    if (!userId) {
-      this.setStatus(400);
-      throw new Error('userId is required');
-    }
-    const lim = Math.min(Math.max(Number(limit) || 10, 1), 50);
-    const off = Math.max(Number(offset) || 0, 0);
-    const page = await this.groupService.getPublicGroupsPage(userId, {
-      limit: lim,
-      offset: off,
-      q,
-      includeJoined: includeJoined !== false,
-    });
-    return { items: page.items, total: page.total };
   }
 
   /**
@@ -307,25 +280,6 @@ export class GroupController extends Controller {
       }
       throw e;
     }
-  }
-
-  /**
-   * Join a group
-   * @summary Join a public group (immediate) or request to join a private group (pending)
-   */
-  @Post('{id}/join')
-  @SuccessResponse('200', 'OK')
-  public async joinGroup(
-    @Path() id: string,
-    @Body() body: { userId: string }
-  ): Promise<void> {
-    const group = await this.groupService.getById(id);
-    if (!group) {
-      this.setStatus(404);
-      throw new Error('Group not found');
-    }
-    await this.groupService.joinGroup(id, body.userId);
-    this.setStatus(200);
   }
 
   /**

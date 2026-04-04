@@ -4,9 +4,7 @@ import {
   useQuery,
   useQueryClient,
   keepPreviousData,
-  useInfiniteQuery,
   type QueryClient,
-  type InfiniteData,
 } from '@tanstack/react-query';
 import {
   GroupsService,
@@ -14,13 +12,10 @@ import {
   type GroupUpdate,
   type GroupScoped,
   type MembershipRequestAction,
-  type PublicGroupsPage,
 } from '@moija/client';
 import { queryKeys } from '../../config/queryClient';
 
-const PUBLIC_GROUPS_PAGE_SIZE = 5;
-
-/** Reuse list / public-discovery data so group detail can render without waiting on a duplicate GET /groups/:id. */
+/** Reuse list data so group detail can render without waiting on a duplicate GET /groups/:id. */
 function readGroupScopedFromCaches(
   queryClient: QueryClient,
   userId: string,
@@ -31,37 +26,7 @@ function readGroupScopedFromCaches(
     const hit = list?.find((g) => g.id === groupId);
     if (hit) return hit;
   }
-  const publicEntries = queryClient.getQueriesData<InfiniteData<PublicGroupsPage>>({
-    queryKey: ['groups', 'public', userId],
-    exact: false,
-  });
-  for (const [, data] of publicEntries) {
-    if (!data?.pages?.length) continue;
-    for (const page of data.pages) {
-      const hit = page.items.find((g) => g.id === groupId);
-      if (hit) return hit;
-    }
-  }
   return undefined;
-}
-
-export function usePublicGroupsInfinite(
-  userId: string | undefined,
-  q: string,
-  includeJoined: boolean
-) {
-  return useInfiniteQuery({
-    queryKey: queryKeys.groups.public(userId ?? '', q, includeJoined),
-    queryFn: ({ pageParam }) =>
-      GroupsService.getPublicGroups(userId!, PUBLIC_GROUPS_PAGE_SIZE, pageParam, q || undefined, includeJoined),
-    initialPageParam: 0,
-    getNextPageParam: (lastPage, _pages, lastPageParam) => {
-      const next = (lastPageParam as number) + lastPage.items.length;
-      return next < lastPage.total ? next : undefined;
-    },
-    enabled: !!userId?.trim(),
-    refetchInterval: 3000,
-  });
 }
 
 export function useGroups(userId: string, includeDeleted = false) {
@@ -81,6 +46,7 @@ export function useGroup(id: string, userId: string) {
     queryFn: () => GroupsService.getGroup(id, userId),
     enabled: !!id && !!userId,
     refetchInterval: 3000,
+    refetchIntervalInBackground: true,
     placeholderData: (previousData) => {
       const fromList = readGroupScopedFromCaches(queryClient, userId, id);
       if (fromList) return fromList;
@@ -127,12 +93,24 @@ export function useUpdateGroup(id: string, userId: string) {
   return useMutation({
     mutationFn: (data: GroupUpdate) => GroupsService.updateGroup(id, userId, data),
     onMutate: async (data) => {
-      if (data.thumbnail === undefined && data.avatarSeed === undefined) return;
+      if (
+        data.thumbnail === undefined &&
+        data.avatarSeed === undefined &&
+        data.coverPhotos === undefined
+      )
+        return;
       const detailKey = queryKeys.groups.detail(id, userId);
       await queryClient.cancelQueries({ queryKey: detailKey });
       const prev = queryClient.getQueryData(detailKey);
       queryClient.setQueryData(detailKey, (old: any) =>
-        old ? { ...old, ...(data.thumbnail !== undefined && { thumbnail: data.thumbnail }), ...(data.avatarSeed !== undefined && { avatarSeed: data.avatarSeed }) } : old
+        old
+          ? {
+              ...old,
+              ...(data.thumbnail !== undefined && { thumbnail: data.thumbnail }),
+              ...(data.avatarSeed !== undefined && { avatarSeed: data.avatarSeed }),
+              ...(data.coverPhotos !== undefined && { coverPhotos: data.coverPhotos }),
+            }
+          : old
       );
       return { prev };
     },
@@ -208,18 +186,6 @@ export function useJoinByInviteCode() {
   return useMutation({
     mutationFn: ({ inviteCode, userId }: { inviteCode: string; userId: string }) =>
       GroupsService.joinByInviteCode({ inviteCode, userId }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.groups._base });
-    },
-  });
-}
-
-export function useJoinGroup() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: ({ groupId, userId }: { groupId: string; userId: string }) =>
-      GroupsService.joinGroup(groupId, { userId }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.groups._base });
     },

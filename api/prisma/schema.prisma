@@ -44,8 +44,7 @@ model Group {
   thumbnail  String?
   avatarSeed String?  // DiceBear icons seed for generated avatar
   inviteCode String?   @unique
-  isPublic   Boolean   @default(false)
-  /// When true, new joins (public or private) start as pending until an admin approves.
+  /// When true, new joins start as pending until an admin approves.
   requireApprovalToJoin Boolean @default(true)
   createdBy  String
   updatedBy  String
@@ -55,10 +54,23 @@ model Group {
   deletedBy  String?
 
   // Relations
-  members GroupMember[]
-  events  Event[]
+  members     GroupMember[]
+  events      Event[]
+  coverPhotos GroupPhoto[]
 
   @@map("groups")
+}
+
+model GroupPhoto {
+  id        Int      @id @default(autoincrement())
+  groupId   String
+  photoUrl  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@map("group_photos")
 }
 
 model GroupMember {

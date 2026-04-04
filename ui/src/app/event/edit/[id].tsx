@@ -1,5 +1,5 @@
-import React, { useState, useRef } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, Alert, Modal, Platform } from 'react-native';
+import React, { useState, useRef, useMemo, type ChangeEvent } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, Alert, Modal, Platform, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -7,10 +7,18 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { Colors, Fonts, Radius } from '../../../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName } from '../../../utils/helpers';
 import { useEvent, useGroup, useUpdateEvent, useAllGroupMemberColors, useDeleteEvent } from '../../../hooks/api';
-import { NavBar, Field, Toggle } from '../../../components/ui';
+import { NavBar, Field, Toggle, formSectionTitleStyle } from '../../../components/ui';
 import { useCurrentUserContext } from '../../../contexts/CurrentUserContext';
-import { PhotoUrlOrUploadModal } from '../../../components/PhotoUrlOrUploadModal';
 import { ResolvableImage } from '../../../components/ResolvableImage';
+import {
+  pickDeferredCoverPhotoNative,
+  createWebDeferredCoverPhoto,
+  uploadCoverPhotoDrafts,
+  revokeCoverPhotoDraftPreview,
+  coverPhotoDraftDisplayUri,
+  type CoverPhotoDraft,
+} from '../../../services/pickAndUploadImage';
+import type { EventDetailed } from '@moija/client';
 
 export default function EditEventScreen() {
   const router = useRouter();
@@ -38,6 +46,25 @@ export default function EditEventScreen() {
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   };
 
+  const formFromEvent = (e: EventDetailed) => ({
+    title: e.title || '',
+    subtitle: e.subtitle || '',
+    groupId: e.groupId || '',
+    startDate: formatDate(e.start),
+    startTime: formatTime(e.start),
+    startAllDay: e.isAllDay || false,
+    endDate: formatDate(e.end),
+    endTime: formatTime(e.end),
+    endAllDay: e.isAllDay || false,
+    location: e.location || '',
+    minAttendees: e.minAttendees ? String(e.minAttendees) : '',
+    maxAttendees: e.maxAttendees ? String(e.maxAttendees) : '',
+    allowMaybe: e.allowMaybe || false,
+    enableWaitlist: e.enableWaitlist || false,
+    description: e.description || '',
+    coverPhotoDrafts: (e.coverPhotos || []).map((url) => ({ kind: 'remote' as const, url })),
+  });
+
   const [form, setForm] = useState({
     title: existingEvent?.title || '',
     subtitle: existingEvent?.subtitle || '',
@@ -54,7 +81,7 @@ export default function EditEventScreen() {
     allowMaybe: existingEvent?.allowMaybe || false,
     enableWaitlist: existingEvent?.enableWaitlist || false,
     description: existingEvent?.description || '',
-    coverPhotos: existingEvent?.coverPhotos || [],
+    coverPhotoDrafts: [] as CoverPhotoDraft[],
   });
   const [errors, setErrors] = useState({
     startDate: '',
@@ -67,6 +94,7 @@ export default function EditEventScreen() {
   const [showEndDatePicker, setShowEndDatePicker] = useState(false);
   const [showEndTimePicker, setShowEndTimePicker] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [coverPhotoBusy, setCoverPhotoBusy] = useState(false);
   /** Only hydrate form when switching events; refetches after mutations must not wipe unsaved edits. */
   const hydratedEventIdRef = useRef<string | null>(null);
 
@@ -75,24 +103,7 @@ export default function EditEventScreen() {
     if (!existingEvent) return;
     if (hydratedEventIdRef.current === existingEvent.id) return;
     hydratedEventIdRef.current = existingEvent.id;
-    setForm({
-      title: existingEvent.title || '',
-      subtitle: existingEvent.subtitle || '',
-      groupId: existingEvent.groupId || '',
-      startDate: formatDate(existingEvent.start),
-      startTime: formatTime(existingEvent.start),
-      startAllDay: existingEvent.isAllDay || false,
-      endDate: formatDate(existingEvent.end),
-      endTime: formatTime(existingEvent.end),
-      endAllDay: existingEvent.isAllDay || false,
-      location: existingEvent.location || '',
-      minAttendees: existingEvent.minAttendees ? String(existingEvent.minAttendees) : '',
-      maxAttendees: existingEvent.maxAttendees ? String(existingEvent.maxAttendees) : '',
-      allowMaybe: existingEvent.allowMaybe || false,
-      enableWaitlist: existingEvent.enableWaitlist || false,
-      description: existingEvent.description || '',
-      coverPhotos: existingEvent.coverPhotos || [],
-    });
+    setForm(formFromEvent(existingEvent));
   }, [existingEvent]);
 
   const needGroupForPermission =
@@ -111,6 +122,44 @@ export default function EditEventScreen() {
     }
   }, [eventId, existingEvent, currentUserId, eventGroup, loading, router]);
 
+  const isDirty = useMemo(() => {
+    if (!existingEvent) return false;
+    const b = formFromEvent(existingEvent);
+    const sc = existingEvent.coverPhotos || [];
+    if (form.coverPhotoDrafts.length !== sc.length) return true;
+    for (let i = 0; i < form.coverPhotoDrafts.length; i++) {
+      const d = form.coverPhotoDrafts[i];
+      if (d.kind === 'pending') return true;
+      if (d.kind === 'remote' && d.url !== sc[i]) return true;
+    }
+    return (
+      form.title.trim() !== b.title.trim() ||
+      form.subtitle.trim() !== b.subtitle.trim() ||
+      form.startDate !== b.startDate ||
+      form.startTime !== b.startTime ||
+      form.endDate !== b.endDate ||
+      form.endTime !== b.endTime ||
+      form.startAllDay !== b.startAllDay ||
+      form.endAllDay !== b.endAllDay ||
+      form.location.trim() !== b.location.trim() ||
+      form.minAttendees !== b.minAttendees ||
+      form.maxAttendees !== b.maxAttendees ||
+      form.allowMaybe !== b.allowMaybe ||
+      form.enableWaitlist !== b.enableWaitlist ||
+      form.description.trim() !== b.description.trim()
+    );
+  }, [existingEvent, form]);
+
+  const resetFormFromEvent = () => {
+    if (!existingEvent) return;
+    setForm((prev) => {
+      prev.coverPhotoDrafts.forEach((d) => revokeCoverPhotoDraftPreview(d));
+      return formFromEvent(existingEvent);
+    });
+  };
+
+  const coverPhotoFileInputRef = useRef<{ click: () => void } | null>(null);
+
   if (!eventId || loading || !existingEvent) {
     return null;
   }
@@ -118,38 +167,51 @@ export default function EditEventScreen() {
   const set = (k: string, v: any) => setForm(p => ({ ...p, [k]: v }));
   const ok  = !!form.title.trim() && !!form.startDate && !!form.endDate;
 
-  const persistCoverPhotos = async (next: string[]) => {
-    if (!currentUserId || !eventId) return;
-    await updateEventMutation.mutateAsync({
-      updatedBy: currentUserId,
-      coverPhotos: next,
+  const removeCoverPhotoAt = (index: number) => {
+    setForm((p) => {
+      const d = p.coverPhotoDrafts[index];
+      if (d) revokeCoverPhotoDraftPreview(d);
+      return { ...p, coverPhotoDrafts: p.coverPhotoDrafts.filter((_, j) => j !== index) };
     });
   };
 
-  const removeCoverPhotoAt = async (index: number) => {
+  const addCoverPhotoFromPicker = async () => {
     if (!currentUserId) return;
-    const prev = form.coverPhotos;
-    const next = prev.filter((_, j) => j !== index);
-    set('coverPhotos', next);
+    if (Platform.OS === 'web') {
+      coverPhotoFileInputRef.current?.click();
+      return;
+    }
+    if (coverPhotoBusy) return;
+    setCoverPhotoBusy(true);
     try {
-      await persistCoverPhotos(next);
-    } catch {
-      set('coverPhotos', prev);
-      Alert.alert('Error', 'Failed to remove photo');
+      const picked = await pickDeferredCoverPhotoNative();
+      if (picked) {
+        setForm((p) => ({
+          ...p,
+          coverPhotoDrafts: [
+            ...p.coverPhotoDrafts,
+            { kind: 'pending', previewUri: picked.previewUri, pending: picked.pending },
+          ],
+        }));
+      }
+    } finally {
+      setCoverPhotoBusy(false);
     }
   };
 
-  const addCoverPhoto = async (url: string) => {
-    if (!currentUserId) return;
-    const prev = form.coverPhotos;
-    const next = [...prev, url];
-    set('coverPhotos', next);
-    try {
-      await persistCoverPhotos(next);
-    } catch {
-      set('coverPhotos', prev);
-      Alert.alert('Error', 'Failed to add photo');
+  const onCoverPhotoWebFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !currentUserId) return;
+    if (!file.type.startsWith('image/')) {
+      Alert.alert('Upload', 'Please choose an image file.');
+      return;
     }
+    const { previewUri, pending } = createWebDeferredCoverPhoto(file);
+    setForm((p) => ({
+      ...p,
+      coverPhotoDrafts: [...p.coverPhotoDrafts, { kind: 'pending', previewUri, pending }],
+    }));
   };
 
   const submit = async () => {
@@ -169,12 +231,22 @@ export default function EditEventScreen() {
       }
       
       const isAllDay = form.startAllDay && form.endAllDay && form.startDate === form.endDate;
+
+      let coverPhotos: string[] = [];
+      if (form.coverPhotoDrafts.length > 0) {
+        try {
+          coverPhotos = await uploadCoverPhotoDrafts(currentUserId, form.coverPhotoDrafts);
+        } catch {
+          Alert.alert('Error', 'Failed to upload photos. Try again.');
+          return;
+        }
+      }
       
       await updateEventMutation.mutateAsync({
         title: form.title.trim(),
         subtitle: form.subtitle.trim() || undefined,
         description: form.description.trim() || undefined,
-        coverPhotos: form.coverPhotos,
+        coverPhotos,
         start: start.toISOString(),
         end: end.toISOString(),
         isAllDay: isAllDay || undefined,
@@ -201,8 +273,6 @@ export default function EditEventScreen() {
       Alert.alert('Error', 'Failed to delete event');
     }
   };
-
-  const [showCoverPhotoModal, setShowCoverPhotoModal] = useState(false);
 
   const getTimeDate = (timeStr: string) => {
     const [hours, minutes] = timeStr.split(':').map(Number);
@@ -292,11 +362,32 @@ export default function EditEventScreen() {
     <SafeAreaView style={styles.safe}>
       <NavBar title="Edit Event" onBack={handleBack}
         right={
-          <TouchableOpacity onPress={submit} style={[styles.headerBtn, !ok && styles.headerBtnDis]}>
-            <Text style={[styles.headerBtnText, !ok && { color: Colors.textMuted }]} numberOfLines={1}>
-              Save
-            </Text>
-          </TouchableOpacity>
+          <View style={styles.navEditActions}>
+            <TouchableOpacity
+              onPress={resetFormFromEvent}
+              disabled={!isDirty || updateEventMutation.isPending}
+              style={[styles.resetBtn, (!isDirty || updateEventMutation.isPending) && styles.resetBtnDisabled]}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.resetBtnText, (!isDirty || updateEventMutation.isPending) && { color: Colors.textMuted }]}>
+                Reset
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={submit}
+              style={[styles.headerBtn, !ok && styles.headerBtnDis]}
+              disabled={updateEventMutation.isPending}
+              activeOpacity={0.8}
+            >
+              {updateEventMutation.isPending ? (
+                <ActivityIndicator size="small" color={Colors.accentFg} />
+              ) : (
+                <Text style={[styles.headerBtnText, !ok && { color: Colors.textMuted }]} numberOfLines={1}>
+                  Save
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
         }
       />
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
@@ -610,18 +701,44 @@ export default function EditEventScreen() {
 
         <Field label="Description">
           <View style={styles.descBox}>
-            {form.coverPhotos.length > 0 && (
+            <TextInput value={form.description} onChangeText={v => set('description', v)}
+              placeholder={'Add notes, directions, agenda, or a helpful link'}
+              placeholderTextColor={Colors.textMuted}
+              multiline numberOfLines={5} style={styles.descInput} />
+            <View style={styles.descToolbar}>
+              <Text style={{ fontSize: 11, color: Colors.textMuted }}>{form.description.length}/500</Text>
+            </View>
+          </View>
+        </Field>
+
+        <View style={styles.photosSection}>
+          {Platform.OS === 'web' && (
+            <input
+              ref={(el) => {
+                coverPhotoFileInputRef.current = el;
+              }}
+              type="file"
+              accept="image/*"
+              style={{ display: 'none' }}
+              onChange={onCoverPhotoWebFileChange}
+            />
+          )}
+          <Text style={formSectionTitleStyle}>
+            Photos{form.coverPhotoDrafts.length > 0 ? ` · ${form.coverPhotoDrafts.length}` : ''}
+          </Text>
+          <View style={styles.photosCard}>
+            {form.coverPhotoDrafts.length > 0 && (
               <ScrollView horizontal showsHorizontalScrollIndicator={false}
                 style={{ borderBottomWidth: 1, borderBottomColor: Colors.border }}
                 contentContainerStyle={{ gap: 4, padding: 10 }}>
-                {form.coverPhotos.map((uri, i) => (
-                  <View key={i} style={{ position: 'relative' }}>
+                {form.coverPhotoDrafts.map((d, i) => (
+                  <View key={`${i}-${coverPhotoDraftDisplayUri(d)}`} style={{ position: 'relative' }}>
                     <ResolvableImage
-                      storedUrl={uri}
+                      storedUrl={coverPhotoDraftDisplayUri(d)}
                       style={{ width: 80, height: 80, borderRadius: Radius.lg }}
                       resizeMode="cover"
                     />
-                    <TouchableOpacity onPress={() => void removeCoverPhotoAt(i)}
+                    <TouchableOpacity onPress={() => removeCoverPhotoAt(i)}
                       style={styles.removeThumb}>
                       <Ionicons name="close" size={11} color="#fff" />
                     </TouchableOpacity>
@@ -629,29 +746,25 @@ export default function EditEventScreen() {
                 ))}
               </ScrollView>
             )}
-            <TextInput value={form.description} onChangeText={v => set('description', v)}
-              placeholder={'Add notes, directions, agenda, or a helpful link'}
-              placeholderTextColor={Colors.textMuted}
-              multiline numberOfLines={5} style={styles.descInput} />
-            <View style={styles.descToolbar}>
-              <TouchableOpacity onPress={() => setShowCoverPhotoModal(true)} style={styles.photoBtn}>
+            <View style={[styles.photosToolbar, form.coverPhotoDrafts.length === 0 && { borderTopWidth: 0 }]}>
+              <TouchableOpacity
+                onPress={() => void addCoverPhotoFromPicker()}
+                style={styles.photoBtn}
+                disabled={coverPhotoBusy || !currentUserId}
+              >
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                  <Ionicons name="camera-outline" size={16} color={Colors.textSub} />
+                  {coverPhotoBusy ? (
+                    <ActivityIndicator size="small" color={Colors.textSub} />
+                  ) : (
+                    <Ionicons name="camera-outline" size={16} color={Colors.textSub} />
+                  )}
                   <Text style={{ fontSize: 12, color: Colors.textSub, fontFamily: Fonts.medium }}>Add photo</Text>
                 </View>
               </TouchableOpacity>
-              <Text style={{ fontSize: 11, color: Colors.textMuted }}>{form.description.length}/500</Text>
             </View>
-
-        <PhotoUrlOrUploadModal
-          visible={showCoverPhotoModal}
-          onClose={() => setShowCoverPhotoModal(false)}
-          userId={currentUserId ?? ''}
-          title="Add cover photo"
-          onAdd={(url) => void addCoverPhoto(url)}
-        />
+            <Text style={styles.photosDeferHint}>Photos upload when you save.</Text>
           </View>
-        </Field>
+        </View>
 
         <Field label="Settings">
           <View style={styles.settingsCard}>
@@ -662,8 +775,16 @@ export default function EditEventScreen() {
           </View>
         </Field>
 
-        <TouchableOpacity onPress={submit} style={[styles.submitBtn, !ok && { backgroundColor: Colors.border }]} disabled={!ok}>
-          <Text style={[styles.submitBtnText, !ok && { color: Colors.textMuted }]}>Save Changes</Text>
+        <TouchableOpacity
+          onPress={submit}
+          style={[styles.submitBtn, (!ok || updateEventMutation.isPending) && { backgroundColor: Colors.border }]}
+          disabled={!ok || updateEventMutation.isPending}
+        >
+          {updateEventMutation.isPending ? (
+            <ActivityIndicator size="small" color={Colors.accentFg} />
+          ) : (
+            <Text style={[styles.submitBtnText, !ok && { color: Colors.textMuted }]}>Save Changes</Text>
+          )}
         </TouchableOpacity>
 
         <TouchableOpacity onPress={() => setShowDeleteConfirm(true)} style={styles.deleteBtn}>
@@ -696,6 +817,10 @@ const styles = StyleSheet.create({
   headerBtn:     { paddingHorizontal: 16, paddingVertical: 8, borderRadius: Radius.lg, backgroundColor: Colors.accent, flexShrink: 0 },
   headerBtnDis:  { backgroundColor: Colors.border },
   headerBtnText: { fontSize: 13, fontFamily: Fonts.semiBold, color: Colors.accentFg },
+  navEditActions: { flexDirection: 'row', alignItems: 'center', gap: 12, flexShrink: 1 },
+  resetBtn:      { paddingVertical: 8, paddingHorizontal: 4, flexShrink: 0 },
+  resetBtnDisabled: { opacity: 0.45 },
+  resetBtnText:  { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.text },
   groupChip:     { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 6, borderRadius: Radius.full, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surface },
   chipText:      { fontSize: 13, color: Colors.textSub, fontFamily: Fonts.regular },
   groupReadonly: { fontSize: 14, color: Colors.text, fontFamily: Fonts.semiBold, paddingVertical: 4 },
@@ -708,7 +833,11 @@ const styles = StyleSheet.create({
   settingsCard:  { backgroundColor: Colors.surface, borderRadius: Radius.xl, borderWidth: 1, borderColor: Colors.border, paddingHorizontal: 16 },
   descBox:       { backgroundColor: Colors.surface, borderRadius: Radius.xl, borderWidth: 1.5, borderColor: Colors.border, overflow: 'hidden' },
   descInput:     { padding: 12, paddingHorizontal: 14, fontSize: 14, color: Colors.text, fontFamily: Fonts.regular, minHeight: 100, textAlignVertical: 'top' },
-  descToolbar:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 8, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: Colors.border },
+  descToolbar:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', padding: 8, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: Colors.border },
+  photosSection: { marginTop: 0, marginBottom: 18 },
+  photosCard:    { backgroundColor: Colors.surface, borderRadius: 16, borderWidth: 1, borderColor: Colors.border, overflow: 'hidden' },
+  photosToolbar: { flexDirection: 'row', alignItems: 'center', padding: 8, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: Colors.border },
+  photosDeferHint: { fontSize: 11, color: Colors.textMuted, fontFamily: Fonts.regular, paddingHorizontal: 12, paddingBottom: 10, lineHeight: 16 },
   photoBtn:      { paddingHorizontal: 10, paddingVertical: 5, borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.bg },
   removeThumb:   { position: 'absolute', top: -5, right: -5, width: 18, height: 18, borderRadius: 9, backgroundColor: Colors.text, borderWidth: 2, borderColor: Colors.surface, alignItems: 'center', justifyContent: 'center' },
   submitBtn:     { padding: 13, borderRadius: Radius.lg, backgroundColor: Colors.accent, alignItems: 'center', marginTop: 8 },

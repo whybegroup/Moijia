@@ -17,7 +17,6 @@ CREATE TABLE "groups" (
     "thumbnail" TEXT,
     "avatarSeed" TEXT,
     "inviteCode" TEXT,
-    "isPublic" BOOLEAN NOT NULL DEFAULT false,
     "requireApprovalToJoin" BOOLEAN NOT NULL DEFAULT true,
     "createdBy" TEXT NOT NULL,
     "updatedBy" TEXT NOT NULL,
@@ -25,6 +24,16 @@ CREATE TABLE "groups" (
     "updatedAt" DATETIME NOT NULL,
     "deletedAt" DATETIME,
     "deletedBy" TEXT
+);
+
+-- CreateTable
+CREATE TABLE "group_photos" (
+    "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    "groupId" TEXT NOT NULL,
+    "photoUrl" TEXT NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "group_photos_groupId_fkey" FOREIGN KEY ("groupId") REFERENCES "groups" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable

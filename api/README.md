@@ -18,12 +18,6 @@ sudo apt install -y caddy
 ```
 
 ```bash
-sudo caddy validate --config /etc/caddy/Caddyfile
-sudo systemctl reload caddy
-sudo systemctl status caddy
-```
-
-```bash
 sudo cat >> /etc/caddy/Caddyfile << EOF
 # The Caddyfile is an easy way to configure your Caddy web server.
 #
@@ -52,6 +46,12 @@ api.danielbyun.com {
 # Refer to the Caddy docs for more information:
 # https://caddyserver.com/docs/caddyfile
 EOF
+```
+
+```bash
+sudo caddy validate --config /etc/caddy/Caddyfile
+sudo systemctl reload caddy
+sudo systemctl status caddy
 ```
 
 ```bash
@@ -531,7 +531,6 @@ const result = await prisma.$transaction(async (tx) => {
       emoji: '🎉',
       colorHex: '#FF5733',
       desc: 'A cool group',
-      isPublic: true
     }
   });
   

@@ -6,15 +6,18 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { Colors, Fonts, Radius } from '../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName, groupAvatarBorderRadius } from '../utils/helpers';
-import { NavBar, Toggle } from '../components/ui';
+import { NavBar, Field, formSectionTitleStyle } from '../components/ui';
 import { useCreateGroup } from '../hooks/api/useGroups';
 import { useAuth } from '../contexts/AuthContext';
 import { GroupAvatar } from '../components/GroupAvatar';
 import { AvatarPickerModal } from '../components/AvatarPickerModal';
 import type { PendingAvatarFile } from '../services/pickAndUploadImage';
 import { uploadPendingAvatarFile } from '../services/pickAndUploadImage';
+import { ResolvableImage } from '../components/ResolvableImage';
+import { pickAndUploadCoverPhoto } from '../services/pickAndUploadImage';
 
 const DEFAULT_AVATAR_SEED = 'auto';
 const AVATAR_SIZE = 56;
@@ -29,7 +32,8 @@ export default function CreateGroupScreen() {
   const [draftDesc, setDraftDesc] = useState('');
   const [draftSeed, setDraftSeed] = useState('');
   const [draftThumbnail, setDraftThumbnail] = useState<string | null>(null);
-  const [draftIsPublic, setDraftIsPublic] = useState(true);
+  const [draftCoverPhotos, setDraftCoverPhotos] = useState<string[]>([]);
+  const [coverPhotoBusy, setCoverPhotoBusy] = useState(false);
   const valid = !!draftName.trim();
 
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
@@ -51,6 +55,17 @@ export default function CreateGroupScreen() {
     if (p?.kind === 'web') URL.revokeObjectURL(p.objectUrl);
     pendingAvatarFileRef.current = null;
     setShowAvatarPicker(false);
+  };
+
+  const addCoverPhotoFromPicker = async () => {
+    if (!user?.uid || coverPhotoBusy) return;
+    setCoverPhotoBusy(true);
+    try {
+      const url = await pickAndUploadCoverPhoto(user.uid);
+      if (url) setDraftCoverPhotos((prev) => [...prev, url]);
+    } finally {
+      setCoverPhotoBusy(false);
+    }
   };
 
   const handleBack = () => {
@@ -78,8 +93,8 @@ export default function CreateGroupScreen() {
         id: groupId,
         name: draftName.trim(),
         desc: draftDesc.trim(),
-        isPublic: draftIsPublic,
         thumbnail,
+        coverPhotos: draftCoverPhotos,
         superAdminId: user.uid,
         avatarSeed: draftSeed || draftName.trim() || undefined,
         createdBy: user.uid,
@@ -87,7 +102,6 @@ export default function CreateGroupScreen() {
         memberIds: [user.uid],
       });
 
-      // Navigate to the new group
       router.replace(`/groups/${newGroup.id}`);
     } catch {
       Alert.alert('Error', 'Failed to create group. Please try again.');
@@ -138,28 +152,74 @@ export default function CreateGroupScreen() {
               />
             </View>
           </View>
-          <TextInput
-            value={draftDesc}
-            onChangeText={setDraftDesc}
-            placeholder="Description"
-            placeholderTextColor={Colors.textMuted}
-            style={styles.descInputFull}
-            multiline
-          />
 
-          <View style={styles.inviteSection}>
-            <View style={[styles.inviteRow, styles.inviteToggleRow, { borderTopWidth: 1, borderTopColor: Colors.border }]}>
-              <Toggle
-                value={!draftIsPublic}
-                onChange={(v) => setDraftIsPublic(!v)}
-                label="Private group (invite only)"
-                style={{ borderBottomWidth: 0 }}
+          <Field label="Description">
+            <View style={styles.descBox}>
+              <TextInput
+                value={draftDesc}
+                onChangeText={setDraftDesc}
+                placeholder="What's this group about?"
+                placeholderTextColor={Colors.textMuted}
+                multiline
+                numberOfLines={5}
+                style={styles.descInput}
               />
+              <View style={styles.descToolbar}>
+                <Text style={{ fontSize: 11, color: Colors.textMuted }}>{draftDesc.length}/500</Text>
+              </View>
+            </View>
+          </Field>
+        </View>
+
+        <View style={styles.photosSection}>
+          <Text style={formSectionTitleStyle}>
+            Photos{draftCoverPhotos.length > 0 ? ` · ${draftCoverPhotos.length}` : ''}
+          </Text>
+          <View style={styles.photosCard}>
+            {draftCoverPhotos.length > 0 && (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={{ borderBottomWidth: 1, borderBottomColor: Colors.border }}
+                contentContainerStyle={{ gap: 4, padding: 10 }}
+              >
+                {draftCoverPhotos.map((uri, i) => (
+                  <View key={`${uri}-${i}`} style={{ position: 'relative' }}>
+                    <ResolvableImage
+                      storedUrl={uri}
+                      style={{ width: 80, height: 80, borderRadius: Radius.lg }}
+                      resizeMode="cover"
+                    />
+                    <TouchableOpacity
+                      onPress={() => setDraftCoverPhotos(draftCoverPhotos.filter((_, j) => j !== i))}
+                      style={styles.removeThumb}
+                    >
+                      <Ionicons name="close" size={11} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </ScrollView>
+            )}
+            <View style={[styles.photosToolbar, draftCoverPhotos.length === 0 && { borderTopWidth: 0 }]}>
+              <TouchableOpacity
+                onPress={() => void addCoverPhotoFromPicker()}
+                style={styles.photoBtn}
+                disabled={coverPhotoBusy}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                  {coverPhotoBusy ? (
+                    <ActivityIndicator size="small" color={Colors.textSub} />
+                  ) : (
+                    <Ionicons name="camera-outline" size={16} color={Colors.textSub} />
+                  )}
+                  <Text style={{ fontSize: 12, color: Colors.textSub, fontFamily: Fonts.medium }}>Add photo</Text>
+                </View>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
 
-        <View style={{ padding: 16, paddingBottom: 100 }}>
+        <View style={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 100 }}>
           <TouchableOpacity
             onPress={handleCreate}
             disabled={!valid || createGroup.isPending}
@@ -210,24 +270,14 @@ const styles = StyleSheet.create({
     textAlignVertical: 'center',
     ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' as any, outlineWidth: 0 } as any) : null),
   },
-  descInputFull:   {
-    width: '100%',
-    minHeight: 88,
-    paddingTop: 8,
-    paddingBottom: 8,
-    paddingHorizontal: 0,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-    backgroundColor: 'transparent',
-    fontSize: 13,
-    fontFamily: Fonts.regular,
-    color: Colors.text,
-    textAlignVertical: 'top',
-    ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' as any, outlineWidth: 0 } as any) : null),
-  },
-  inviteSection:   { marginTop: 12, paddingBottom: 8 },
-  inviteRow:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4, paddingHorizontal: 0, borderTopWidth: 1, borderTopColor: Colors.border },
-  inviteToggleRow: { paddingVertical: 4 },
+  descBox:         { backgroundColor: Colors.surface, borderRadius: Radius.xl, borderWidth: 1.5, borderColor: Colors.border, overflow: 'hidden' },
+  descInput:       { padding: 12, paddingHorizontal: 14, fontSize: 14, color: Colors.text, fontFamily: Fonts.regular, minHeight: 100, textAlignVertical: 'top' },
+  descToolbar:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', padding: 8, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: Colors.border },
+  photosSection:   { paddingHorizontal: 20, marginTop: 0, marginBottom: 18 },
+  photosCard:      { backgroundColor: Colors.surface, borderRadius: 16, borderWidth: 1, borderColor: Colors.border, overflow: 'hidden' },
+  photosToolbar:   { flexDirection: 'row', alignItems: 'center', padding: 8, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: Colors.border },
+  photoBtn:        { paddingHorizontal: 10, paddingVertical: 5, borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.bg },
+  removeThumb:     { position: 'absolute', top: -5, right: -5, width: 18, height: 18, borderRadius: 9, backgroundColor: Colors.text, borderWidth: 2, borderColor: Colors.surface, alignItems: 'center', justifyContent: 'center' },
   saveBtn:         { paddingVertical: 12, borderRadius: Radius.lg, backgroundColor: Colors.accent, alignItems: 'center' },
   saveBtnDisabled: { backgroundColor: Colors.border },
   saveBtnText:     { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.accentFg },

@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Colors, Fonts, Radius, Shadows } from '../../../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName, groupAvatarBorderRadius } from '../../../utils/helpers';
-import { NavBar, Toggle } from '../../../components/ui';
+import { NavBar, Toggle, formSectionTitleStyle } from '../../../components/ui';
 import {
   useGroup,
   useUsers,
@@ -15,7 +15,6 @@ import {
   useHandleMembershipRequest,
   useUpdateGroup,
   useRegenerateInviteCode,
-  useJoinGroup,
   useLeaveGroup,
   useSoftDeleteGroup,
   useDeleteGroup,
@@ -33,6 +32,8 @@ import { GroupMemberThemeAndNotifications } from '../../../components/GroupMembe
 import { AvatarPickerModal } from '../../../components/AvatarPickerModal';
 import { UserAvatar } from '../../../components/UserAvatar';
 import { deleteManagedUploadFireAndForget } from '../../../services/managedUploadDelete';
+import { ResolvableImage } from '../../../components/ResolvableImage';
+import { pickAndUploadCoverPhoto } from '../../../services/pickAndUploadImage';
 
 const AVATAR_SIZE = 56;
 
@@ -63,7 +64,6 @@ export default function GroupDetailScreen() {
   const setSuperAdmin = useSetSuperAdmin(groupId, currentUserId ?? '');
   const updateGroup = useUpdateGroup(groupId, currentUserId ?? '');
   const regenerateInviteCodeMutation = useRegenerateInviteCode(groupId, currentUserId ?? '');
-  const joinGroup = useJoinGroup();
   const leaveGroupMutation = useLeaveGroup();
   const softDeleteMutation = useSoftDeleteGroup(currentUserId ?? '');
   const hardDeleteMutation = useDeleteGroup(currentUserId ?? '');
@@ -71,12 +71,22 @@ export default function GroupDetailScreen() {
 
   const [draftName, setDraftName] = useState('');
   const [draftDesc, setDraftDesc] = useState('');
+  const [coverPhotoBusy, setCoverPhotoBusy] = useState(false);
+  const [localCoverPhotos, setLocalCoverPhotos] = useState<string[]>([]);
+  const coverHydratedRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!group) return;
     setDraftName(group.name);
     setDraftDesc(group.desc ?? '');
   }, [group?.id, group?.name, group?.desc]);
+
+  useEffect(() => {
+    if (!group) return;
+    if (coverHydratedRef.current === group.id) return;
+    coverHydratedRef.current = group.id;
+    setLocalCoverPhotos(group.coverPhotos ?? []);
+  }, [group]);
 
   const profileDirty = useMemo(() => {
     if (!group || group.membershipStatus !== 'admin') return false;
@@ -87,10 +97,10 @@ export default function GroupDetailScreen() {
   }, [group, draftName, draftDesc]);
 
   useEffect(() => {
-    if (isError || (group && group.membershipStatus === 'none' && !group.isPublic)) {
+    if (isError || (group && group.membershipStatus === 'none')) {
       router.replace('/groups');
     }
-  }, [isError, group?.membershipStatus, group?.isPublic, router]);
+  }, [isError, group?.membershipStatus, router]);
   const [memberMenu,  setMemberMenu]  = useState<{ userId: string } | null>(null);
   const [showLeave,   setShowLeave]   = useState(false);
   const [showDeactivateConfirm, setShowDeactivateConfirm] = useState(false);
@@ -307,6 +317,54 @@ export default function GroupDetailScreen() {
     }
   };
 
+  const coverPhotosForDisplay = isAdmin ? localCoverPhotos : (group.coverPhotos ?? []);
+  const showGroupCoverSection = coverPhotosForDisplay.length > 0 || (isAdmin && !isPending);
+
+  const removeCoverPhotoAt = async (index: number) => {
+    if (!currentUserId || !isAdmin) return;
+    const prev = localCoverPhotos;
+    const next = prev.filter((_, j) => j !== index);
+    setLocalCoverPhotos(next);
+    try {
+      await updateGroup.mutateAsync({
+        coverPhotos: next,
+        updatedBy: currentUserId,
+      });
+    } catch {
+      setLocalCoverPhotos(prev);
+      if (Platform.OS === 'web') window.alert('Failed to remove photo');
+      else Alert.alert('Error', 'Failed to remove photo');
+    }
+  };
+
+  const addCoverPhoto = async (url: string) => {
+    if (!currentUserId || !isAdmin) return;
+    const prev = localCoverPhotos;
+    const next = [...prev, url];
+    setLocalCoverPhotos(next);
+    try {
+      await updateGroup.mutateAsync({
+        coverPhotos: next,
+        updatedBy: currentUserId,
+      });
+    } catch {
+      setLocalCoverPhotos(prev);
+      if (Platform.OS === 'web') window.alert('Failed to add photo');
+      else Alert.alert('Error', 'Failed to add photo');
+    }
+  };
+
+  const addCoverPhotoFromPicker = async () => {
+    if (!currentUserId || !isAdmin || coverPhotoBusy) return;
+    setCoverPhotoBusy(true);
+    try {
+      const url = await pickAndUploadCoverPhoto(currentUserId);
+      if (url) await addCoverPhoto(url);
+    } finally {
+      setCoverPhotoBusy(false);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safe}>
       <NavBar
@@ -394,25 +452,12 @@ export default function GroupDetailScreen() {
             multiline
             readOnly={!isAdmin}
           />
+
           {(!isPending && inviteCode) || (isAdmin || isSuperAdmin) ? (
             <View style={styles.inviteSection}>
               {(isAdmin || isSuperAdmin) && (
                 <View style={[styles.inviteRow, styles.inviteToggleRow, { borderTopWidth: 1, borderTopColor: Colors.border }]}>
                   <View style={{ flex: 1 }}>
-                    <Toggle
-                      value={!group.isPublic}
-                      style={{ borderBottomWidth: 1 }}
-                      onChange={async (v) => {
-                        if (updateGroup.isPending) return;
-                        try {
-                          await updateGroup.mutateAsync({ isPublic: !v, updatedBy: currentUserId ?? '' });
-                        } catch {
-                          if (Platform.OS === 'web') window.alert('Failed to update visibility');
-                          else Alert.alert('Error', 'Failed to update visibility');
-                        }
-                      }}
-                      label="Private group (invite only)"
-                    />
                     <Toggle
                       value={group.requireApprovalToJoin}
                       style={{ borderBottomWidth: 0 }}
@@ -476,8 +521,62 @@ export default function GroupDetailScreen() {
           ) : null}
         </View>
 
+        {showGroupCoverSection ? (
+          <View style={styles.photosSection}>
+            <Text style={formSectionTitleStyle}>
+              Photos{coverPhotosForDisplay.length > 0 ? ` · ${coverPhotosForDisplay.length}` : ''}
+            </Text>
+            <View style={[styles.card, styles.photosCard]}>
+              {coverPhotosForDisplay.length > 0 && (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={{ borderBottomWidth: isAdmin && !isPending ? 1 : 0, borderBottomColor: Colors.border }}
+                  contentContainerStyle={{ gap: 4, padding: 10 }}
+                >
+                  {coverPhotosForDisplay.map((uri, i) => (
+                    <View key={`${uri}-${i}`} style={{ position: 'relative' }}>
+                      <ResolvableImage
+                        storedUrl={uri}
+                        style={{ width: 80, height: 80, borderRadius: Radius.lg }}
+                        resizeMode="cover"
+                      />
+                      {isAdmin && !isPending && (
+                        <TouchableOpacity
+                          onPress={() => void removeCoverPhotoAt(i)}
+                          style={styles.coverRemoveThumb}
+                        >
+                          <Ionicons name="close" size={11} color="#fff" />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  ))}
+                </ScrollView>
+              )}
+              {isAdmin && !isPending && (
+                <View style={[styles.coverToolbar, coverPhotosForDisplay.length === 0 && { borderTopWidth: 0 }]}>
+                  <TouchableOpacity
+                    onPress={() => void addCoverPhotoFromPicker()}
+                    style={styles.coverPhotoBtn}
+                    disabled={coverPhotoBusy}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                      {coverPhotoBusy ? (
+                        <ActivityIndicator size="small" color={Colors.textSub} />
+                      ) : (
+                        <Ionicons name="camera-outline" size={16} color={Colors.textSub} />
+                      )}
+                      <Text style={{ fontSize: 12, color: Colors.textSub, fontFamily: Fonts.medium }}>Add photo</Text>
+                    </View>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          </View>
+        ) : null}
+
         {isPending ? (
-          <View style={{ padding: 16, paddingBottom: 100 }}>
+          <View style={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 100 }}>
             <View style={[styles.card, { borderColor: '#FDE68A', backgroundColor: '#FFFBEB', padding: 24, alignItems: 'center' }]}>
               <Ionicons name="hourglass-outline" size={28} color="#92400E" style={{ marginBottom: 8 }} />
               <Text style={{ fontSize: 16, fontFamily: Fonts.semiBold, color: Colors.text, marginBottom: 8 }}>
@@ -503,7 +602,7 @@ export default function GroupDetailScreen() {
             </View>
           </View>
         ) : (
-        <View style={{ padding: 16, paddingBottom: 100 }}>
+        <View style={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 100 }}>
           {canManageMembers && (
             <>
               {/* Pending requests */}
@@ -604,67 +703,31 @@ export default function GroupDetailScreen() {
             </>
           )}
 
-          {!canManageMembers &&
-            (group.membershipStatus === 'none' && group.isPublic ? (
-              <>
-                <Text style={styles.sectionLabel}>JOIN</Text>
-                <View style={[styles.card, { padding: 16 }]}>
-                  <Text style={{ fontSize: 14, color: Colors.textSub, fontFamily: Fonts.regular, marginBottom: 14 }}>
-                    {group.memberCount} {group.memberCount === 1 ? 'member' : 'members'} · Public group
-                  </Text>
-                  <TouchableOpacity
-                    onPress={() => {
-                      if (!currentUserId?.trim()) return;
-                      joinGroup.mutate(
-                        { groupId, userId: currentUserId },
-                        {
-                          onError: (e: any) => {
-                            const msg = e?.body?.error ?? e?.message ?? 'Could not join';
-                            if (Platform.OS === 'web') window.alert(msg);
-                            else Alert.alert('Error', msg);
-                          },
-                        }
-                      );
-                    }}
-                    disabled={!currentUserId || joinGroup.isPending}
-                    style={[styles.visitJoinBtn, (!currentUserId || joinGroup.isPending) && { opacity: 0.45 }]}
-                    activeOpacity={0.85}
-                  >
-                    {joinGroup.isPending ? (
-                      <ActivityIndicator size="small" color={Colors.accentFg} />
-                    ) : (
-                      <Text style={styles.visitJoinBtnText}>
-                        {group.requireApprovalToJoin !== false ? 'Request to join' : 'Join group'}
-                      </Text>
-                    )}
-                  </TouchableOpacity>
-                </View>
-              </>
-            ) : (
-              <>
-                <Text style={styles.sectionLabel}>MEMBERS · {(group.memberIds ?? []).length}</Text>
-                <View style={[styles.card, { marginBottom: 16 }]}>
-                  {(group.memberIds ?? []).map((memberId, i) => {
-                    const isSuperAdminMember = memberId === superAdminId;
-                    const isAdminMember = admins.includes(memberId);
-                    const user = getUser(memberId);
-                    const displayName = user.displayName;
-                    return (
-                      <View key={i} style={[styles.memberRow, i < (group.memberIds ?? []).length - 1 && styles.rowBorder]}>
-                        <UserAvatar seed={user.displayName || user.name} backgroundColor={[user.avatarSeed]} thumbnail={user.thumbnail} size={38} />
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.memberName}>{displayName}</Text>
-                          <Text style={styles.memberRole}>
-                            {isSuperAdminMember ? 'Super Admin' : isAdminMember ? 'Admin' : 'Member'}
-                          </Text>
-                        </View>
-                        {isSuperAdminMember && <Ionicons name="star" size={16} color="#CA8A04" />}
+          {!canManageMembers && group.membershipStatus === 'member' && (
+            <>
+              <Text style={styles.sectionLabel}>MEMBERS · {(group.memberIds ?? []).length}</Text>
+              <View style={[styles.card, { marginBottom: 16 }]}>
+                {(group.memberIds ?? []).map((memberId, i) => {
+                  const isSuperAdminMember = memberId === superAdminId;
+                  const isAdminMember = admins.includes(memberId);
+                  const user = getUser(memberId);
+                  const displayName = user.displayName;
+                  return (
+                    <View key={i} style={[styles.memberRow, i < (group.memberIds ?? []).length - 1 && styles.rowBorder]}>
+                      <UserAvatar seed={user.displayName || user.name} backgroundColor={[user.avatarSeed]} thumbnail={user.thumbnail} size={38} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.memberName}>{displayName}</Text>
+                        <Text style={styles.memberRole}>
+                          {isSuperAdminMember ? 'Super Admin' : isAdminMember ? 'Admin' : 'Member'}
+                        </Text>
                       </View>
-                    );
-                  })}
-                </View>
-              </>
-            ))}
+                      {isSuperAdminMember && <Ionicons name="star" size={16} color="#CA8A04" />}
+                    </View>
+                  );
+                })}
+              </View>
+            </>
+          )}
 
           {(group.membershipStatus === 'member' || group.membershipStatus === 'admin') && !!currentUserId && (
             <>
@@ -859,6 +922,23 @@ const styles = StyleSheet.create({
     ...(Platform.OS === 'web' ? ({ outlineStyle: 'none', outlineWidth: 0 } as any) : null),
   },
   nameInputSlot:    { flex: 1, minWidth: 0 },
+  photosSection:    { paddingHorizontal: 20, marginTop: 0, marginBottom: 18 },
+  photosCard:       { overflow: 'hidden' },
+  coverToolbar:     { flexDirection: 'row', alignItems: 'center', padding: 8, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: Colors.border },
+  coverPhotoBtn:    { paddingHorizontal: 10, paddingVertical: 5, borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.bg },
+  coverRemoveThumb: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: Colors.text,
+    borderWidth: 2,
+    borderColor: Colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   descInputFull:    {
     width: '100%',
     minHeight: 88,
@@ -915,10 +995,8 @@ const styles = StyleSheet.create({
   copyIconBtn:      { padding: 4 },
   copyIconWrap:     { width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
   copyIconText:     { fontSize: 16, fontFamily: Fonts.bold },
-  visitJoinBtn:     { paddingVertical: 12, borderRadius: Radius.lg, backgroundColor: Colors.accent, alignItems: 'center', justifyContent: 'center', minHeight: 44 },
-  visitJoinBtnText: { fontSize: 15, fontFamily: Fonts.semiBold, color: Colors.accentFg },
   card:             { backgroundColor: Colors.surface, borderRadius: 16, borderWidth: 1, borderColor: Colors.border, overflow: 'hidden' },
-  sectionLabel:     { fontSize: 11, fontFamily: Fonts.semiBold, color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 10 },
+  sectionLabel:     { fontSize: 12, fontFamily: Fonts.semiBold, color: Colors.textSub, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 6 },
   pendingCard:      { borderColor: '#FDE68A', marginBottom: 16 },
   memberRow:        { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12 },
   rowBorder:        { borderBottomWidth: 1, borderBottomColor: Colors.border },

@@ -2,10 +2,21 @@ import React from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, StyleProp, ViewStyle,
   ScrollView, Modal, TextInput, KeyboardAvoidingView, Platform,
+  type TextStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Radius, Shadows, Fonts, Layout } from '../constants/theme';
 import { avatarColor } from '../utils/helpers';
+
+/** Same as Field labels — Photos and other form-style section titles. */
+export const formSectionTitleStyle: TextStyle = {
+  fontSize: 12,
+  fontFamily: Fonts.semiBold,
+  color: Colors.textSub,
+  textTransform: 'uppercase',
+  letterSpacing: 0.6,
+  marginBottom: 6,
+};
 
 // ── Avatar ────────────────────────────────────────────────────────────────────
 interface AvatarProps {
@@ -317,11 +328,7 @@ const styles = StyleSheet.create({
     color: Colors.textMuted, letterSpacing: 0.8,
     marginBottom: 10,
   },
-  fieldLabel: {
-    fontSize: 12, fontFamily: Fonts.semiBold,
-    color: Colors.textSub, textTransform: 'uppercase',
-    letterSpacing: 0.6, marginBottom: 6,
-  },
+  fieldLabel: formSectionTitleStyle,
   tInput: {
     padding: 10, paddingHorizontal: 14,
     borderRadius: Radius.lg, borderWidth: 1.5,

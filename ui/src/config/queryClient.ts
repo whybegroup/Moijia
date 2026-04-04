@@ -23,8 +23,6 @@ export const queryKeys = {
   },
   groups: {
     _base: ['groups'] as const,
-    public: (userId: string, q: string, includeJoined: boolean) =>
-      ['groups', 'public', userId, q, includeJoined] as const,
     all: (userId: string, includeDeleted?: boolean) => ['groups', userId, includeDeleted ?? false] as const,
     detail: (id: string, userId: string) => ['groups', 'detail', id, userId] as const,
     members: (id: string) => ['groups', id, 'members'] as const,
