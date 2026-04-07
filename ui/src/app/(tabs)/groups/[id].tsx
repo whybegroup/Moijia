@@ -484,28 +484,43 @@ export default function GroupDetailScreen() {
               />
             </TouchableOpacity>
             <View style={styles.nameFieldWrap}>
-              <TextInput
-                value={draftName}
-                onChangeText={setDraftName}
-                placeholder="No name"
-                placeholderTextColor={Colors.textMuted}
-                style={styles.nameInput}
-                readOnly={!isAdmin}
-                autoCapitalize="words"
-                autoCorrect={false}
-              />
+              {isAdmin ? (
+                <TextInput
+                  value={draftName}
+                  onChangeText={setDraftName}
+                  placeholder="No name"
+                  placeholderTextColor={Colors.textMuted}
+                  style={styles.nameInput}
+                  autoCapitalize="words"
+                  autoCorrect={false}
+                />
+              ) : (
+                <View style={styles.nameReadOnlyCenter}>
+                  <Text
+                    style={[styles.nameReadOnly, !group.name.trim() && styles.readOnlyPlaceholder]}
+                    numberOfLines={2}
+                  >
+                    {group.name.trim() ? group.name : 'No name'}
+                  </Text>
+                </View>
+              )}
             </View>
           </View>
 
-          <TextInput
-            value={draftDesc}
-            onChangeText={setDraftDesc}
-            placeholder="Description"
-            placeholderTextColor={Colors.textMuted}
-            style={styles.descInputFull}
-            multiline
-            readOnly={!isAdmin}
-          />
+          {isAdmin ? (
+            <TextInput
+              value={draftDesc}
+              onChangeText={setDraftDesc}
+              placeholder="Description"
+              placeholderTextColor={Colors.textMuted}
+              style={styles.descInputFull}
+              multiline
+            />
+          ) : group.desc?.trim() ? (
+            <View style={styles.descReadOnlyWrap}>
+              <Text style={styles.groupDescFull}>{group.desc}</Text>
+            </View>
+          ) : null}
 
           {groupPhotosSection}
 
@@ -909,6 +924,12 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
+  /** Non-admins: title is vertically centered in the avatar row */
+  nameReadOnlyCenter: {
+    flex: 1,
+    minWidth: 0,
+    justifyContent: 'center',
+  },
   nameInput:        {
     flex: 1,
     minWidth: 0,
@@ -922,6 +943,15 @@ const styles = StyleSheet.create({
     color: Colors.text,
     textAlignVertical: 'center',
     ...(Platform.OS === 'web' ? ({ outlineStyle: 'none', outlineWidth: 0 } as any) : null),
+  },
+  nameReadOnly: {
+    fontSize: 19,
+    fontFamily: Fonts.extraBold,
+    color: Colors.text,
+  },
+  readOnlyPlaceholder: {
+    color: Colors.textMuted,
+    fontFamily: Fonts.regular,
   },
   nameInputSlot:    { flex: 1, minWidth: 0 },
   /** No horizontal padding — parent ScrollView column already uses paddingHorizontal: 20 */
@@ -963,6 +993,14 @@ const styles = StyleSheet.create({
     color: Colors.text,
     textAlignVertical: 'top',
     ...(Platform.OS === 'web' ? ({ outlineStyle: 'none', outlineWidth: 0 } as any) : null),
+  },
+  descReadOnlyWrap: {
+    width: '100%',
+    minHeight: 88,
+    paddingTop: 8,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
   },
   groupDescFull:    { width: '100%', fontSize: 13, color: Colors.textSub, fontFamily: Fonts.regular, lineHeight: 18 },
   navEditActions:   { flexDirection: 'row', alignItems: 'center', gap: 8 },

@@ -928,7 +928,7 @@ export default function EventDetailScreen() {
               onPress={() => router.push(`/event/edit/${id}`)}
               style={styles.navIconBtn}
             >
-              <Ionicons name="settings-outline" size={20} color={Colors.text} />
+              <Ionicons name="create-outline" size={20} color={Colors.text} />
             </TouchableOpacity>
             <TouchableOpacity
               onPress={() => setShowDeleteConfirm(true)}
