@@ -99,6 +99,25 @@ export function useUpdateEvent(id: string, userId: string) {
   });
 }
 
+/** Update start/end for any event id (e.g. week calendar drag). */
+export function useWeekEventTimeMove(userId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (p: { eventId: string; start: string; end: string }) => {
+      if (!userId) throw new Error('Not signed in');
+      return EventsService.updateEvent(p.eventId, userId, {
+        start: p.start,
+        end: p.end,
+        updatedBy: userId,
+      });
+    },
+    onSuccess: (_data, vars) => {
+      invalidateEventQueries(queryClient, vars.eventId, userId);
+    },
+  });
+}
+
 export function useDeleteEvent(userId: string) {
   const queryClient = useQueryClient();
 

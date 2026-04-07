@@ -3,7 +3,7 @@ import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, Alert,
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Colors, Fonts, Radius } from '../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName, formatLocalDateInput } from '../utils/helpers';
 import { NavBar, Field, Toggle, formSectionTitleStyle } from '../components/ui';
@@ -22,6 +22,7 @@ import {
 
 export default function CreateEventScreen() {
   const router = useRouter();
+  const calendarParams = useLocalSearchParams<{ start?: string; end?: string }>();
   const { userId: currentUserId } = useCurrentUserContext();
   const today = formatLocalDateInput(new Date());
   const { data: groups = [] } = useGroups(currentUserId ?? '');
@@ -356,6 +357,43 @@ export default function CreateEventScreen() {
     set('endTime', timeStr);
     validateEndTime(timeStr, form.startTime, form.endDate, form.startDate);
   };
+
+  const calendarPresetAppliedRef = useRef(false);
+  useEffect(() => {
+    if (calendarPresetAppliedRef.current) return;
+    const rawS = calendarParams.start;
+    const rawE = calendarParams.end;
+    const sStr = typeof rawS === 'string' ? rawS : Array.isArray(rawS) ? rawS[0] : undefined;
+    const eStr = typeof rawE === 'string' ? rawE : Array.isArray(rawE) ? rawE[0] : undefined;
+    if (!sStr || !eStr) return;
+    const start = new Date(sStr);
+    const end = new Date(eStr);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end.getTime() <= start.getTime()) {
+      return;
+    }
+    calendarPresetAppliedRef.current = true;
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const startDate = formatLocalDateInput(start);
+    const endDate = formatLocalDateInput(end);
+    const startTime = `${pad(start.getHours())}:${pad(start.getMinutes())}`;
+    const endTime = `${pad(end.getHours())}:${pad(end.getMinutes())}`;
+    setForm((prev) => ({
+      ...prev,
+      startDate,
+      startTime,
+      endDate,
+      endTime,
+      startAllDay: false,
+      endAllDay: false,
+    }));
+    setErrors((e) => ({
+      ...e,
+      startDate: '',
+      startTime: '',
+      endDate: '',
+      endTime: '',
+    }));
+  }, [calendarParams.start, calendarParams.end]);
 
   return (
     <SafeAreaView style={styles.safe}>

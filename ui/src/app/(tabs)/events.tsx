@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Platform, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -25,11 +25,24 @@ import { NotificationsPanelModal } from '../../components/NotificationsPanelModa
 import { CalendarView } from '../../components/CalendarView';
 import { Pill } from '../../components/ui';
 import Svg, { Path } from 'react-native-svg';
-import { useEvents, useGroups, useNotifications, useAllGroupMemberColors } from '../../hooks/api';
+import {
+  useEvents,
+  useGroups,
+  useNotifications,
+  useAllGroupMemberColors,
+  useWeekEventTimeMove,
+} from '../../hooks/api';
 import { queryKeys } from '../../config/queryClient';
 import { useCurrentUserContext } from '../../contexts/CurrentUserContext';
 import { EventsCalendarGlyph } from '../../components/TabScreenIcons';
 import { CreateOrJoinButton } from '../../components/CreateOrJoinButton';
+import {
+  loadEventsScreenPrefs,
+  saveEventsScreenPrefs,
+  parseCalendarFocusIso,
+  type EventsScreenPersistedV1,
+  type CalendarScopeMode,
+} from '../../utils/eventsScreenPrefs';
 
 export default function EventsScreen() {
   const router = useRouter();
@@ -40,6 +53,7 @@ export default function EventsScreen() {
   const { data: allGroups = [] } = useGroups(currentUserId ?? '');
   const { data: notifs = [], isLoading: notifsLoading } = useNotifications(currentUserId || '');
   const { data: groupColors = {} } = useAllGroupMemberColors(currentUserId || '');
+  const weekEventTimeMove = useWeekEventTimeMove(currentUserId ?? '');
   const groups = allGroups.filter(g => g.membershipStatus === 'member' || g.membershipStatus === 'admin');
   
   // Manual polling for notifications every 5 seconds
@@ -112,7 +126,69 @@ export default function EventsScreen() {
   };
   const [showNotifs, setShowNotifs] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
+  const [calendarScopeMode, setCalendarScopeMode] = useState<CalendarScopeMode>('week');
+  const [calendarFocusDate, setCalendarFocusDate] = useState(() => new Date());
+  const [prefsReady, setPrefsReady] = useState(false);
   const unread = notifs.filter(n => !n.read).length;
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const partial = await loadEventsScreenPrefs();
+      if (cancelled) return;
+      if (partial) {
+        if (partial.viewMode) setViewMode(partial.viewMode);
+        if (partial.calendarScopeMode) setCalendarScopeMode(partial.calendarScopeMode);
+        if (partial.calendarFocusIso !== undefined) {
+          setCalendarFocusDate(parseCalendarFocusIso(partial.calendarFocusIso));
+        }
+        if (partial.selectedGroupIds !== undefined) setSelectedGroupIds(partial.selectedGroupIds);
+        if (partial.filterRsvp !== undefined) setFilterRsvp(partial.filterRsvp);
+        if (partial.filterNeeds !== undefined) setFilterNeeds(partial.filterNeeds);
+        if (partial.showAdvancedFilters !== undefined) setShowAdvancedFilters(partial.showAdvancedFilters);
+        if (partial.startDateText) setStartDateText(partial.startDateText);
+        if (partial.endDateText) setEndDateText(partial.endDateText);
+        if (partial.startMode) setStartMode(partial.startMode);
+        if (partial.endMode) setEndMode(partial.endMode);
+      }
+      if (!cancelled) setPrefsReady(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!prefsReady) return;
+    const payload: EventsScreenPersistedV1 = {
+      v: 1,
+      viewMode,
+      calendarScopeMode,
+      calendarFocusIso: calendarFocusDate.toISOString(),
+      selectedGroupIds,
+      filterRsvp,
+      filterNeeds,
+      showAdvancedFilters,
+      startDateText,
+      endDateText,
+      startMode,
+      endMode,
+    };
+    void saveEventsScreenPrefs(payload);
+  }, [
+    prefsReady,
+    viewMode,
+    calendarScopeMode,
+    calendarFocusDate,
+    selectedGroupIds,
+    filterRsvp,
+    filterNeeds,
+    showAdvancedFilters,
+    startDateText,
+    endDateText,
+    startMode,
+    endMode,
+  ]);
 
   const filtered = useMemo(() => {
     const parseBound = (txt: string): Date | null => {
@@ -581,6 +657,38 @@ export default function EventsScreen() {
             groupColors={groupColors}
             onSelectEvent={ev => router.push(`/event/${ev.id}`)}
             onSelectGroup={groupId => router.push(`/groups/${groupId}`)}
+            calendarFocusDate={calendarFocusDate}
+            onCalendarFocusDateChange={setCalendarFocusDate}
+            calendarScopeMode={calendarScopeMode}
+            onCalendarScopeModeChange={setCalendarScopeMode}
+            onWeekCreateEvent={(start, end) =>
+              router.push(
+                `/create-event?start=${encodeURIComponent(start.toISOString())}&end=${encodeURIComponent(end.toISOString())}`
+              )
+            }
+            onWeekEventTimeMove={
+              currentUserId
+                ? async (ev, start, end) => {
+                    try {
+                      await weekEventTimeMove.mutateAsync({
+                        eventId: ev.id,
+                        start: start.toISOString(),
+                        end: end.toISOString(),
+                      });
+                      setCalendarFocusDate(
+                        new Date(start.getFullYear(), start.getMonth(), start.getDate())
+                      );
+                    } catch {
+                      Alert.alert('Error', 'Could not update event time');
+                    }
+                  }
+                : undefined
+            }
+            weekEventMovePendingId={
+              weekEventTimeMove.isPending && weekEventTimeMove.variables
+                ? weekEventTimeMove.variables.eventId
+                : null
+            }
           />
         )}
       </View>

@@ -1,14 +1,31 @@
-import { useState, useMemo } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
-import { Colors, Fonts } from '../constants/theme';
+import { useState, useMemo, useCallback, useEffect } from 'react';
+import {
+  View,
+  Text,
+  ScrollView,
+  TouchableOpacity,
+  StyleSheet,
+  Modal,
+  Pressable,
+  Platform,
+  useWindowDimensions,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { Colors, Fonts, Radius } from '../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName } from '../utils/helpers';
 import { isSameDay, isToday } from '../utils/helpers';
 import type { EventDetailed, GroupScoped } from '@moija/client';
 import { useCurrentUserContext } from '../contexts/CurrentUserContext';
 import { EventRow } from './EventRow';
+import { WeekDayTimelineGestures } from './WeekDayTimelineGestures';
+import { WeekTimedEventDraggable } from './WeekTimedEventDraggable';
 import { useUsers } from '../hooks/api';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+import type { CalendarScopeMode } from '../utils/eventsScreenPrefs';
+
+export type { CalendarScopeMode };
 
 interface CalendarViewProps {
   events: EventDetailed[];
@@ -16,6 +33,67 @@ interface CalendarViewProps {
   groupColors?: Record<string, string>;
   onSelectEvent: (ev: EventDetailed) => void;
   onSelectGroup?: (groupId: string) => void;
+  /** When set with `onCalendarFocusDateChange`, calendar navigation is controlled (e.g. for persistence). */
+  calendarFocusDate?: Date;
+  onCalendarFocusDateChange?: (date: Date) => void;
+  calendarScopeMode?: CalendarScopeMode;
+  onCalendarScopeModeChange?: (mode: CalendarScopeMode) => void;
+  /** Week view: tap or drag on the time grid to open create-event with that range (tap = 30 min). */
+  onWeekCreateEvent?: (start: Date, end: Date) => void;
+  /** Week view: hosts / group admins drag timed blocks to reschedule (start/end preserved duration). */
+  onWeekEventTimeMove?: (ev: EventDetailed, start: Date, end: Date) => void | Promise<void>;
+  /** While a week drag-update is in flight, that event id shows as busy. */
+  weekEventMovePendingId?: string | null;
+}
+
+const HOUR_HEIGHT = 40;
+const TIMELINE_HEIGHT = 24 * HOUR_HEIGHT;
+/** Matches week day header row height (frozen gutter spacer) */
+const WEEK_HEADER_ROW_HEIGHT = 56;
+const ALLDAY_CHIP_BLOCK = 30;
+
+function estimateAllDayBandHeight(eventCount: number): number {
+  if (eventCount <= 0) return 0;
+  return Math.min(6 + eventCount * ALLDAY_CHIP_BLOCK, 160);
+}
+
+function startOfWeekSunday(d: Date): Date {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const dow = x.getDay();
+  x.setDate(x.getDate() - dow);
+  return x;
+}
+
+function addDays(d: Date, n: number): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+}
+
+function dayStart(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
+}
+
+function dayEnd(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
+}
+
+function dateKey(d: Date): string {
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+function calendarDateOnly(d: Date): number {
+  d = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  return d.getTime();
+}
+
+function sameCalendarMonth(a: Date, b: Date): boolean {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
+}
+
+function formatHourLabel(h: number): string {
+  if (h === 0) return '12 AM';
+  if (h < 12) return `${h} AM`;
+  if (h === 12) return '12 PM';
+  return `${h - 12} PM`;
 }
 
 function getMonthGrid(year: number, month: number): (Date | null)[][] {
@@ -40,18 +118,196 @@ function getMonthGrid(year: number, month: number): (Date | null)[][] {
   return rows;
 }
 
-export function CalendarView({ events, groups, groupColors = {}, onSelectEvent, onSelectGroup }: CalendarViewProps) {
+/** Timed segment of an event within a single calendar day (local). */
+function timedSegmentForDay(
+  ev: EventDetailed,
+  day: Date
+): { top: number; height: number } | null {
+  if (ev.isAllDay) return null;
+  const evS = new Date(ev.start);
+  const evE = new Date(ev.end);
+  const ds = dayStart(day);
+  const de = dayEnd(day);
+  if (evE.getTime() <= ds.getTime() || evS.getTime() >= de.getTime()) return null;
+  const clipS = evS > ds ? evS : ds;
+  const clipE = evE < de ? evE : de;
+  const dayMs = 24 * 60 * 60 * 1000;
+  const top = ((clipS.getTime() - ds.getTime()) / dayMs) * TIMELINE_HEIGHT;
+  const height = Math.max(((clipE.getTime() - clipS.getTime()) / dayMs) * TIMELINE_HEIGHT, 20);
+  return { top, height };
+}
+
+function allDayEventsForDay(day: Date, events: EventDetailed[]): EventDetailed[] {
+  const d0 = calendarDateOnly(day);
+  return events.filter((ev) => {
+    if (!ev.isAllDay) return false;
+    const s0 = calendarDateOnly(new Date(ev.start));
+    const e0 = calendarDateOnly(new Date(ev.end));
+    return d0 >= s0 && d0 <= e0;
+  });
+}
+
+type TimedSeg = { ev: EventDetailed; top: number; height: number };
+
+function timedSegmentsOverlap(a: TimedSeg, b: TimedSeg): boolean {
+  const a1 = a.top + a.height;
+  const b1 = b.top + b.height;
+  return a.top < b1 - 0.5 && b.top < a1 - 0.5;
+}
+
+/** Lane layout within one overlap-connected group (events that share time overlap). */
+function assignLanesInGroup(group: TimedSeg[]): (TimedSeg & { lane: number; laneCount: number })[] {
+  const n = group.length;
+  if (n === 0) return [];
+  const order = group.map((seg, i) => ({ seg, i }));
+  order.sort((a, b) => a.seg.top - b.seg.top || a.seg.height - b.seg.height);
+  const laneBottoms: number[] = [];
+  const laneByOrigIndex = new Array<number>(n);
+  for (const { seg, i } of order) {
+    const bottom = seg.top + seg.height;
+    let lane = 0;
+    while (lane < laneBottoms.length && laneBottoms[lane] > seg.top + 0.5) lane++;
+    if (lane === laneBottoms.length) laneBottoms.push(bottom);
+    else laneBottoms[lane] = Math.max(laneBottoms[lane], bottom);
+    laneByOrigIndex[i] = lane;
+  }
+  const laneCount = Math.max(1, laneBottoms.length);
+  return group.map((seg, i) => ({
+    ...seg,
+    lane: laneByOrigIndex[i],
+    laneCount,
+  }));
+}
+
+/** Each event only shares column width with events it actually overlaps in time (not whole-day max). */
+function assignLanesForDay(segments: TimedSeg[]): (TimedSeg & { lane: number; laneCount: number })[] {
+  if (segments.length === 0) return [];
+  const n = segments.length;
+  const adj: number[][] = Array.from({ length: n }, () => []);
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      if (timedSegmentsOverlap(segments[i], segments[j])) {
+        adj[i].push(j);
+        adj[j].push(i);
+      }
+    }
+  }
+  const visited = new Array(n).fill(false);
+  const out: (TimedSeg & { lane: number; laneCount: number })[] = new Array(n);
+  for (let s = 0; s < n; s++) {
+    if (visited[s]) continue;
+    const comp: number[] = [];
+    const stack = [s];
+    visited[s] = true;
+    while (stack.length) {
+      const u = stack.pop()!;
+      comp.push(u);
+      for (const v of adj[u]) {
+        if (!visited[v]) {
+          visited[v] = true;
+          stack.push(v);
+        }
+      }
+    }
+    const groupSegs = comp.map((idx) => segments[idx]);
+    const placed = assignLanesInGroup(groupSegs);
+    comp.forEach((idx, j) => {
+      out[idx] = placed[j];
+    });
+  }
+  return out;
+}
+
+const SCOPE_OPTIONS: { key: CalendarScopeMode; label: string }[] = [
+  { key: 'week', label: 'Week' },
+  { key: 'month', label: 'Month' },
+  { key: 'year', label: 'Year' },
+];
+
+const TIME_GUTTER_W = 44;
+
+export function CalendarView({
+  events,
+  groups,
+  groupColors = {},
+  onSelectEvent,
+  onSelectGroup,
+  calendarFocusDate: focusDateProp,
+  onCalendarFocusDateChange,
+  calendarScopeMode: scopeModeProp,
+  onCalendarScopeModeChange,
+  onWeekCreateEvent,
+  onWeekEventTimeMove,
+  weekEventMovePendingId,
+}: CalendarViewProps) {
   const { userId: meId } = useCurrentUserContext();
   const { data: allUsers = [] } = useUsers();
-  const [focusDate, setFocusDate] = useState(() => new Date());
+  const { width: winW } = useWindowDimensions();
+  const [internalFocus, setInternalFocus] = useState(() => new Date());
+  const [internalScope, setInternalScope] = useState<CalendarScopeMode>('week');
+  const [scopeMenuOpen, setScopeMenuOpen] = useState(false);
+  const [weekSlotDraft, setWeekSlotDraft] = useState<{
+    dayKey: string;
+    top: number;
+    height: number;
+  } | null>(null);
+  /** Actual width of the week day strip (avoids using full window width when parent is narrower). */
+  const [weekDaysStripMeasuredW, setWeekDaysStripMeasuredW] = useState<number | null>(null);
+  /** Source day column lifted above siblings while a timed event is dragged across days. */
+  const [weekDragSourceDayKey, setWeekDragSourceDayKey] = useState<string | null>(null);
+
+  const controlledFocus = focusDateProp != null && onCalendarFocusDateChange != null;
+  const controlledScope = scopeModeProp != null && onCalendarScopeModeChange != null;
+  const focusDate = controlledFocus ? focusDateProp! : internalFocus;
+  const scopeMode = controlledScope ? scopeModeProp! : internalScope;
+
+  const setFocusDate = useCallback(
+    (updater: Date | ((d: Date) => Date)) => {
+      if (controlledFocus) {
+        const prev = focusDateProp!;
+        const next = typeof updater === 'function' ? updater(prev) : updater;
+        onCalendarFocusDateChange!(next);
+      } else {
+        setInternalFocus((prev) => (typeof updater === 'function' ? updater(prev) : updater));
+      }
+    },
+    [controlledFocus, focusDateProp, onCalendarFocusDateChange]
+  );
+
+  const setScopeMode = useCallback(
+    (mode: CalendarScopeMode) => {
+      if (controlledScope) onCalendarScopeModeChange!(mode);
+      else setInternalScope(mode);
+    },
+    [controlledScope, onCalendarScopeModeChange]
+  );
+
+  useEffect(() => {
+    if (scopeMode !== 'week') {
+      setWeekSlotDraft(null);
+      setWeekDragSourceDayKey(null);
+    }
+  }, [scopeMode]);
+
   const year = focusDate.getFullYear();
   const month = focusDate.getMonth();
 
   const grid = useMemo(() => getMonthGrid(year, month), [year, month]);
-  
+
+  /** Day cell size for year view: 3 columns × 7 days, derived from window width. */
+  const yearMiniCellSize = useMemo(() => {
+    const yearGridHorizontalPad = 16;
+    const cardBorder = 4;
+    const cardInnerPad = 16;
+    const parentInner = winW - yearGridHorizontalPad;
+    const cardOuterW = parentInner * 0.31;
+    const cellAreaW = cardOuterW - cardBorder - cardInnerPad;
+    return Math.max(10, Math.floor(cellAreaW / 7));
+  }, [winW]);
+
   const groupsMap = useMemo(() => {
     const map: Record<string, GroupScoped> = {};
-    groups.forEach(g => map[g.id] = g);
+    groups.forEach((g) => (map[g.id] = g));
     return map;
   }, [groups]);
 
@@ -66,131 +322,639 @@ export function CalendarView({ events, groups, groupColors = {}, onSelectEvent, 
     return map;
   }, [events]);
 
-  const prevMonth = () => setFocusDate(d => new Date(d.getFullYear(), d.getMonth() - 1));
-  const nextMonth = () => setFocusDate(d => new Date(d.getFullYear(), d.getMonth() + 1));
+  const eventsByMonth = useMemo(() => {
+    const map = new Map<string, EventDetailed[]>();
+    for (const ev of events) {
+      const d = new Date(ev.start);
+      const key = `${d.getFullYear()}-${d.getMonth()}`;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(ev);
+    }
+    return map;
+  }, [events]);
+
   const goToToday = () => setFocusDate(new Date());
 
-  const selectedKey = `${focusDate.getFullYear()}-${focusDate.getMonth()}-${focusDate.getDate()}`;
-  const selectedEvents = eventsByDate.get(selectedKey) ?? [];
+  const prevNav = () => {
+    setFocusDate((d) => {
+      if (scopeMode === 'week') return addDays(d, -7);
+      if (scopeMode === 'month') return new Date(d.getFullYear(), d.getMonth() - 1, d.getDate());
+      return new Date(d.getFullYear() - 1, d.getMonth(), d.getDate());
+    });
+  };
 
-  const monthLabel = focusDate.toLocaleString('default', { month: 'long', year: 'numeric' });
+  const nextNav = () => {
+    setFocusDate((d) => {
+      if (scopeMode === 'week') return addDays(d, 7);
+      if (scopeMode === 'month') return new Date(d.getFullYear(), d.getMonth() + 1, d.getDate());
+      return new Date(d.getFullYear() + 1, d.getMonth(), d.getDate());
+    });
+  };
+
+  const selectedKey = `${focusDate.getFullYear()}-${focusDate.getMonth()}-${focusDate.getDate()}`;
+  const selectedDayEvents = eventsByDate.get(selectedKey) ?? [];
+
+  const monthListEvents = useMemo(() => {
+    const y = focusDate.getFullYear();
+    const m = focusDate.getMonth();
+    const key = `${y}-${m}`;
+    const list = eventsByMonth.get(key) ?? [];
+    return [...list].sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+  }, [focusDate, eventsByMonth]);
+
+  const listEvents = scopeMode === 'year' ? monthListEvents : selectedDayEvents;
+  const listEmptyLabel =
+    scopeMode === 'year' ? 'No events this month' : 'No events this day';
+
+  const weekStart = useMemo(() => startOfWeekSunday(focusDate), [focusDate]);
+  const weekDays = useMemo(
+    () => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)),
+    [weekStart]
+  );
+
+  /** Outer week timeline horizontal padding (weekTimelineOuter paddingHorizontal 4 × 2). */
+  const weekTimelineHPadding = 8;
+  const availWeekDaysWidth = winW - TIME_GUTTER_W - weekTimelineHPadding;
+  /** Horizontal margin total per column (weekDayColumn marginHorizontal 2 + 2). */
+  const dayColGutter = 4;
+  const maxColThatFits = (availWeekDaysWidth - 7 * dayColGutter) / 7;
+  const dayColWidth = Math.max(76, maxColThatFits);
+  const weekScrollContentWidth = 7 * dayColWidth + 7 * dayColGutter;
+  const weekNeedsHorizontalScroll = weekScrollContentWidth > availWeekDaysWidth + 0.5;
+  /** Center-to-center distance between day columns (for drag across dates). */
+  useEffect(() => {
+    if (scopeMode !== 'week' || weekNeedsHorizontalScroll) setWeekDaysStripMeasuredW(null);
+  }, [scopeMode, weekNeedsHorizontalScroll, winW]);
+
+  const dayColWidthResolved =
+    weekNeedsHorizontalScroll || weekDaysStripMeasuredW == null
+      ? dayColWidth
+      : Math.max(56, (weekDaysStripMeasuredW - 7 * dayColGutter) / 7);
+  const weekColumnStrideResolved = dayColWidthResolved + dayColGutter;
+
+  const maxAllDayBandHeight = useMemo(() => {
+    let m = 0;
+    for (const day of weekDays) {
+      m = Math.max(m, estimateAllDayBandHeight(allDayEventsForDay(day, events).length));
+    }
+    return m;
+  }, [weekDays, events]);
+
+  const navCenterLabel = useMemo(() => {
+    if (scopeMode === 'week') {
+      const weekEnd = addDays(weekStart, 6);
+      const sameYear = weekStart.getFullYear() === weekEnd.getFullYear();
+      const opts: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
+      const a = weekStart.toLocaleDateString('default', opts);
+      const b = weekEnd.toLocaleDateString(
+        'default',
+        sameYear ? opts : { ...opts, year: 'numeric' }
+      );
+      return `${a} – ${b}`;
+    }
+    if (scopeMode === 'month') {
+      return focusDate.toLocaleString('default', { month: 'long', year: 'numeric' });
+    }
+    return String(focusDate.getFullYear());
+  }, [scopeMode, focusDate, weekStart]);
+
+  const scopeLabel = SCOPE_OPTIONS.find((o) => o.key === scopeMode)?.label ?? 'Week';
+
+  const now = new Date();
+  const nowMinutes =
+    now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60;
+  const nowLineTop = (nowMinutes / (24 * 60)) * TIMELINE_HEIGHT;
+
+  const weekDaysHeaderAndBody = useMemo(
+    () => {
+      const weekColLayoutStyle = weekNeedsHorizontalScroll
+        ? ({ width: dayColWidthResolved } as const)
+        : ({ flex: 1, minWidth: 0 } as const);
+      return (
+      <>
+        <View
+          style={[
+            styles.weekDayHeaderRow,
+            { minHeight: WEEK_HEADER_ROW_HEIGHT, alignSelf: 'stretch', width: '100%' },
+          ]}
+        >
+          {weekDays.map((day) => {
+            const sel = isSameDay(day, focusDate);
+            const today = isToday(day);
+            return (
+              <TouchableOpacity
+                key={dateKey(day)}
+                style={[
+                  styles.weekDayHeaderCell,
+                  weekColLayoutStyle,
+                  sel && styles.weekDayHeaderCellSelected,
+                ]}
+                onPress={() => setFocusDate(day)}
+                activeOpacity={0.75}
+              >
+                <Text style={[styles.weekDayHeaderDow, sel && styles.weekDayHeaderTextSelected]}>
+                  {WEEKDAYS[day.getDay()]}
+                </Text>
+                <Text
+                  style={[
+                    styles.weekDayHeaderDom,
+                    sel && styles.weekDayHeaderTextSelected,
+                    today && !sel && styles.weekDayHeaderDomToday,
+                  ]}
+                >
+                  {day.getDate()}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        <View style={[styles.weekTimelineBody, { alignSelf: 'stretch', width: '100%' }]}>
+          {weekDays.map((day) => {
+            const allDay = allDayEventsForDay(day, events);
+            const timed: TimedSeg[] = [];
+            for (const ev of events) {
+              const seg = timedSegmentForDay(ev, day);
+              if (seg) timed.push({ ev, ...seg });
+            }
+            const placed = assignLanesForDay(timed);
+            const showNowLine = isToday(day);
+
+            return (
+              <View
+                key={dateKey(day)}
+                style={[
+                  styles.weekDayColumn,
+                  weekColLayoutStyle,
+                  weekDragSourceDayKey === dateKey(day) && styles.weekDayColumnDragLift,
+                ]}
+              >
+                <View
+                  style={[
+                    styles.allDayBand,
+                    maxAllDayBandHeight > 0 && { minHeight: maxAllDayBandHeight },
+                  ]}
+                >
+                  {allDay.map((ev) => {
+                    const group = groupsMap[ev.groupId];
+                    const userColorHex =
+                      groupColors[ev.groupId] ||
+                      (group ? getDefaultGroupThemeFromName(group.name) : '#EC4899');
+                    const p = getGroupColor(userColorHex);
+                    return (
+                      <TouchableOpacity
+                        key={ev.id}
+                        onPress={() => onSelectEvent(ev)}
+                        style={[styles.allDayChip, { backgroundColor: p.label, borderLeftColor: p.dot }]}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={[styles.allDayChipText, { color: p.text }]} numberOfLines={2}>
+                          {ev.title}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+                <View style={[styles.hourGrid, { height: TIMELINE_HEIGHT }]}>
+                  {Array.from({ length: 24 }, (_, h) => (
+                    <View
+                      key={h}
+                      style={[styles.hourLine, { top: h * HOUR_HEIGHT, height: HOUR_HEIGHT }]}
+                    />
+                  ))}
+                  {showNowLine ? (
+                    <View style={[styles.nowLine, { top: nowLineTop }]} pointerEvents="none" />
+                  ) : null}
+                  {onWeekCreateEvent ? (
+                    <>
+                      <WeekDayTimelineGestures
+                        day={day}
+                        timelineHeight={TIMELINE_HEIGHT}
+                        onDraftChange={(d) =>
+                          setWeekSlotDraft(d ? { dayKey: dateKey(day), ...d } : null)
+                        }
+                        onCommitRange={(start, end) => onWeekCreateEvent(start, end)}
+                      />
+                      {weekSlotDraft?.dayKey === dateKey(day) ? (
+                        <View
+                          pointerEvents="none"
+                          style={[
+                            styles.weekSlotDraft,
+                            { top: weekSlotDraft.top, height: weekSlotDraft.height },
+                          ]}
+                        />
+                      ) : null}
+                    </>
+                  ) : null}
+                  {placed.map(({ ev, top, height, lane, laneCount }) => {
+                    const group = groupsMap[ev.groupId];
+                    const userColorHex =
+                      groupColors[ev.groupId] ||
+                      (group ? getDefaultGroupThemeFromName(group.name) : '#EC4899');
+                    const p = getGroupColor(userColorHex);
+                    const wPct = 100 / laneCount;
+                    const leftPct = lane * wPct;
+                    const segKey = `wk-${ev.id}-${String(ev.start)}-${dateKey(day)}`;
+                    const creatorCanDragWeek =
+                      !!onWeekEventTimeMove && !!meId && ev.createdBy === meId;
+                    if (creatorCanDragWeek) {
+                      return (
+                        <WeekTimedEventDraggable
+                          key={segKey}
+                          ev={ev}
+                          columnDay={day}
+                          weekDays={weekDays}
+                          top={top}
+                          height={height}
+                          leftPct={leftPct}
+                          widthPct={wPct}
+                          columnStride={weekColumnStrideResolved}
+                          timelineHeight={TIMELINE_HEIGHT}
+                          colors={{ label: p.label, dot: p.dot, text: p.text }}
+                          canDrag
+                          movePending={weekEventMovePendingId === ev.id}
+                          onPress={() => onSelectEvent(ev)}
+                          onMoveCommit={(start, end) => {
+                            void onWeekEventTimeMove!(ev, start, end);
+                          }}
+                          onDragActiveChange={(active) => {
+                            setWeekDragSourceDayKey(active ? dateKey(day) : null);
+                          }}
+                        />
+                      );
+                    }
+                    return (
+                      <TouchableOpacity
+                        key={segKey}
+                        onPress={() => onSelectEvent(ev)}
+                        style={[
+                          styles.timedEventBlock,
+                          {
+                            top,
+                            height,
+                            left: `${leftPct}%`,
+                            width: `${wPct}%`,
+                            backgroundColor: p.label,
+                            borderLeftColor: p.dot,
+                          },
+                        ]}
+                        activeOpacity={0.85}
+                      >
+                        <Text style={[styles.timedEventTitle, { color: p.text }]} numberOfLines={2}>
+                          {ev.title}
+                        </Text>
+                        <Text
+                          style={[styles.timedEventTime, { color: p.text, opacity: 0.75 }]}
+                          numberOfLines={1}
+                        >
+                          {new Date(ev.start).toLocaleTimeString('default', {
+                            hour: 'numeric',
+                            minute: '2-digit',
+                          })}
+                          {' – '}
+                          {new Date(ev.end).toLocaleTimeString('default', {
+                            hour: 'numeric',
+                            minute: '2-digit',
+                          })}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      </>
+      );
+    },
+    [
+      weekDays,
+      focusDate,
+      weekNeedsHorizontalScroll,
+      dayColWidthResolved,
+      events,
+      groupsMap,
+      groupColors,
+      maxAllDayBandHeight,
+      onWeekCreateEvent,
+      weekSlotDraft,
+      onWeekEventTimeMove,
+      weekEventMovePendingId,
+      meId,
+      onSelectEvent,
+      setFocusDate,
+      nowLineTop,
+      weekColumnStrideResolved,
+      setWeekSlotDraft,
+      weekDragSourceDayKey,
+    ]
+  );
 
   return (
-    <ScrollView showsVerticalScrollIndicator={false}>
-      {/* Month nav */}
+    <ScrollView showsVerticalScrollIndicator={false} nestedScrollEnabled>
+      <View style={styles.toolbarRow}>
+        <TouchableOpacity onPress={goToToday} style={styles.todayBtn} activeOpacity={0.75}>
+          <Text style={styles.todayBtnText}>Today</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => setScopeMenuOpen(true)}
+          style={styles.scopeDropdown}
+          activeOpacity={0.75}
+        >
+          <Text style={styles.scopeDropdownText}>{scopeLabel}</Text>
+          <Ionicons name="chevron-down" size={16} color={Colors.text} />
+        </TouchableOpacity>
+      </View>
+
+      <Modal visible={scopeMenuOpen} transparent animationType="fade" onRequestClose={() => setScopeMenuOpen(false)}>
+        <View style={styles.modalRoot}>
+          <Pressable style={styles.modalBackdrop} onPress={() => setScopeMenuOpen(false)} />
+          <View style={styles.modalMenuWrap} pointerEvents="box-none">
+            <View style={styles.scopeMenu}>
+              {SCOPE_OPTIONS.map(({ key, label }, i) => (
+                <TouchableOpacity
+                  key={key}
+                  style={[
+                    styles.scopeMenuItem,
+                    i === SCOPE_OPTIONS.length - 1 && styles.scopeMenuItemLast,
+                    scopeMode === key && styles.scopeMenuItemActive,
+                  ]}
+                  onPress={() => {
+                    setScopeMode(key);
+                    setScopeMenuOpen(false);
+                  }}
+                >
+                  <Text style={[styles.scopeMenuItemText, scopeMode === key && styles.scopeMenuItemTextActive]}>
+                    {label}
+                  </Text>
+                  {scopeMode === key ? (
+                    <Ionicons name="checkmark" size={18} color={Colors.accentFg} />
+                  ) : null}
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <View style={styles.monthNav}>
-        <TouchableOpacity onPress={prevMonth} style={styles.navBtn}>
+        <TouchableOpacity onPress={prevNav} style={styles.navBtn}>
           <Text style={styles.navBtnText}>‹</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={goToToday} style={styles.monthLabel}>
-          <Text style={styles.monthLabelText}>{monthLabel}</Text>
-          <Text style={styles.todayLink}>Today</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={nextMonth} style={styles.navBtn}>
+        <View style={styles.monthLabel}>
+          <Text style={styles.monthLabelText}>{navCenterLabel}</Text>
+        </View>
+        <TouchableOpacity onPress={nextNav} style={styles.navBtn}>
           <Text style={styles.navBtnText}>›</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Weekday headers */}
-      <View style={styles.weekdayRow}>
-        {WEEKDAYS.map(d => (
-          <Text key={d} style={styles.weekdayCell}>{d}</Text>
-        ))}
-      </View>
+      {scopeMode === 'week' && (
+        <View style={styles.weekTimelineOuter}>
+          <View style={styles.weekTimelineWithFrozenGutter}>
+            <View style={[styles.weekFrozenGutter, { width: TIME_GUTTER_W }]}>
+              <View style={{ height: WEEK_HEADER_ROW_HEIGHT }} />
+              <View style={{ height: maxAllDayBandHeight }} />
+              <View style={[styles.timeGutter, styles.weekFrozenTimeGutter]}>
+                {Array.from({ length: 24 }, (_, h) => (
+                  <View key={h} style={[styles.timeGutterHour, { height: HOUR_HEIGHT }]}>
+                    <Text style={styles.timeGutterLabel}>{formatHourLabel(h)}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+            {weekNeedsHorizontalScroll ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator
+                nestedScrollEnabled
+                style={styles.weekScrollableDays}
+                contentContainerStyle={{ width: weekScrollContentWidth }}
+              >
+                <View style={{ width: weekScrollContentWidth }}>{weekDaysHeaderAndBody}</View>
+              </ScrollView>
+            ) : (
+              <View
+                style={styles.weekScrollableDays}
+                onLayout={(e) => {
+                  const w = e.nativeEvent.layout.width;
+                  if (w > 0) setWeekDaysStripMeasuredW(w);
+                }}
+              >
+                <View style={styles.weekDaysInnerStretch}>{weekDaysHeaderAndBody}</View>
+              </View>
+            )}
+          </View>
+        </View>
+      )}
 
-      {/* Calendar grid */}
-      <View style={styles.grid}>
-        {grid.map((row, ri) => (
-          <View key={ri} style={styles.gridRow}>
-            {row.map((cell, ci) => {
-              if (!cell) return <View key={ci} style={styles.cell} />;
-              const key = `${cell.getFullYear()}-${cell.getMonth()}-${cell.getDate()}`;
-              const dayEvents = eventsByDate.get(key) ?? [];
-              const selected = isSameDay(cell, focusDate);
-              const today = isToday(cell);
-              return (
-                <TouchableOpacity
-                  key={ci}
-                  style={[
-                    styles.cell,
-                    selected && styles.cellSelected,
-                    today && !selected && styles.cellToday,
-                  ]}
-                  onPress={() => setFocusDate(cell)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[
-                    styles.cellText,
-                    selected && styles.cellTextSelected,
-                    today && !selected && styles.cellTextToday,
-                  ]}>
-                    {cell.getDate()}
-                  </Text>
-                  {dayEvents.length > 0 && (
-                    <View style={styles.dotWrap}>
-                      {dayEvents.slice(0, 2).map(ev => {
-                        const group = groupsMap[ev.groupId];
-                        const userColorHex = groupColors[ev.groupId] || (group ? getDefaultGroupThemeFromName(group.name) : '#EC4899');
-                        const p = getGroupColor(userColorHex);
+      {scopeMode === 'month' && (
+        <>
+          <View style={styles.weekdayRow}>
+            {WEEKDAYS.map((d) => (
+              <Text key={d} style={styles.weekdayCell}>
+                {d}
+              </Text>
+            ))}
+          </View>
+
+          <View style={styles.grid}>
+            {grid.map((row, ri) => (
+              <View key={ri} style={styles.gridRow}>
+                {row.map((cell, ci) => {
+                  if (!cell) return <View key={ci} style={styles.cell} />;
+                  const key = `${cell.getFullYear()}-${cell.getMonth()}-${cell.getDate()}`;
+                  const dayEvents = eventsByDate.get(key) ?? [];
+                  const selected = isSameDay(cell, focusDate);
+                  const today = isToday(cell);
+                  return (
+                    <TouchableOpacity
+                      key={ci}
+                      style={[
+                        styles.cell,
+                        selected && styles.cellSelected,
+                        today && !selected && styles.cellToday,
+                      ]}
+                      onPress={() => setFocusDate(cell)}
+                      activeOpacity={0.7}
+                    >
+                      <Text
+                        style={[
+                          styles.cellText,
+                          selected && styles.cellTextSelected,
+                          today && !selected && styles.cellTextToday,
+                        ]}
+                      >
+                        {cell.getDate()}
+                      </Text>
+                      {dayEvents.length > 0 && (
+                        <View style={styles.dotWrap}>
+                          {dayEvents.slice(0, 2).map((ev) => {
+                            const group = groupsMap[ev.groupId];
+                            const userColorHex =
+                              groupColors[ev.groupId] ||
+                              (group ? getDefaultGroupThemeFromName(group.name) : '#EC4899');
+                            const p = getGroupColor(userColorHex);
+                            return (
+                              <View
+                                key={ev.id}
+                                style={[
+                                  styles.dot,
+                                  selected && styles.dotSelected,
+                                  { backgroundColor: p.dot },
+                                ]}
+                              />
+                            );
+                          })}
+                          {dayEvents.length > 2 && (
+                            <Text style={[styles.dotMore, selected && styles.dotMoreSelected]}>
+                              +{dayEvents.length - 2}
+                            </Text>
+                          )}
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            ))}
+          </View>
+        </>
+      )}
+
+      {scopeMode === 'year' && (
+        <View style={styles.yearGrid}>
+          {Array.from({ length: 12 }, (_, m) => {
+            const monthStart = new Date(year, m, 1);
+            const monthGrid = getMonthGrid(year, m);
+            const monthHighlighted = sameCalendarMonth(focusDate, monthStart);
+            const dayNumSize = Math.max(8, Math.min(11, Math.floor(yearMiniCellSize * 0.58)));
+            /** Taller than wide so day label and event dots stay separated on narrow screens. */
+            const yearMiniCellHeight = Math.max(26, yearMiniCellSize + 12);
+            const cellBox = { width: yearMiniCellSize, height: yearMiniCellHeight };
+            const colStride = yearMiniCellSize + 1;
+            return (
+              <View
+                key={m}
+                style={[styles.yearMiniMonthCard, monthHighlighted && styles.yearMiniMonthCardSelected]}
+              >
+                <Text style={styles.yearMiniMonthTitle} numberOfLines={1}>
+                  {monthStart.toLocaleString('default', { month: 'short' })}
+                </Text>
+                <View style={styles.yearMiniWeekdayRow}>
+                  {WEEKDAYS.map((d) => (
+                    <View key={d} style={{ width: colStride, alignItems: 'center' }}>
+                      <Text style={styles.yearMiniWeekdayCell}>{d.slice(0, 1)}</Text>
+                    </View>
+                  ))}
+                </View>
+                <View style={styles.yearMiniGrid}>
+                  {monthGrid.map((row, ri) => (
+                    <View key={ri} style={styles.yearMiniGridRow}>
+                      {row.map((cell, ci) => {
+                        if (!cell) {
+                          return <View key={ci} style={[styles.yearMiniCellEmpty, cellBox]} />;
+                        }
+                        const key = `${cell.getFullYear()}-${cell.getMonth()}-${cell.getDate()}`;
+                        const dayEvents = eventsByDate.get(key) ?? [];
+                        const selected = isSameDay(cell, focusDate);
+                        const today = isToday(cell);
                         return (
-                          <View
-                            key={ev.id}
+                          <TouchableOpacity
+                            key={ci}
                             style={[
-                              styles.dot,
-                              selected && styles.dotSelected,
-                              { backgroundColor: p.dot },
+                              styles.yearMiniCell,
+                              cellBox,
+                              selected && styles.yearMiniCellSelected,
+                              today && !selected && styles.yearMiniCellToday,
                             ]}
-                          />
+                            onPress={() => setFocusDate(cell)}
+                            activeOpacity={0.7}
+                          >
+                            <Text
+                              style={[
+                                styles.yearMiniCellText,
+                                { fontSize: dayNumSize },
+                                selected && styles.yearMiniCellTextSelected,
+                                today && !selected && styles.yearMiniCellTextToday,
+                              ]}
+                            >
+                              {cell.getDate()}
+                            </Text>
+                            {dayEvents.length > 0 ? (
+                              <View style={styles.yearMiniDotWrap}>
+                                {dayEvents.slice(0, 2).map((ev) => {
+                                  const group = groupsMap[ev.groupId];
+                                  const userColorHex =
+                                    groupColors[ev.groupId] ||
+                                    (group ? getDefaultGroupThemeFromName(group.name) : '#EC4899');
+                                  const p = getGroupColor(userColorHex);
+                                  return (
+                                    <View
+                                      key={ev.id}
+                                      style={[
+                                        styles.yearMiniDot,
+                                        selected && styles.yearMiniDotSelected,
+                                        { backgroundColor: p.dot },
+                                      ]}
+                                    />
+                                  );
+                                })}
+                                {dayEvents.length > 2 ? (
+                                  <Text
+                                    style={[styles.yearMiniDotMore, selected && styles.yearMiniDotMoreSelected]}
+                                  >
+                                    +{dayEvents.length - 2}
+                                  </Text>
+                                ) : null}
+                              </View>
+                            ) : null}
+                          </TouchableOpacity>
                         );
                       })}
-                      {dayEvents.length > 2 && (
-                        <Text style={[styles.dotMore, selected && styles.dotMoreSelected]}>
-                          +{dayEvents.length - 2}
-                        </Text>
-                      )}
                     </View>
-                  )}
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        ))}
-      </View>
+                  ))}
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      )}
 
-      {/* Events for selected day */}
       <View style={styles.eventsSection}>
         <Text style={styles.eventsSectionTitle}>
-          {focusDate.toLocaleDateString('default', { weekday: 'long', month: 'short', day: 'numeric' })}
+          {scopeMode === 'year'
+            ? focusDate.toLocaleDateString('default', { month: 'long', year: 'numeric' })
+            : focusDate.toLocaleDateString('default', {
+                weekday: 'long',
+                month: 'short',
+                day: 'numeric',
+              })}
         </Text>
-        {selectedEvents.length === 0 ? (
-          <Text style={styles.noEvents}>No events this day</Text>
+        {listEvents.length === 0 ? (
+          <Text style={styles.noEvents}>{listEmptyLabel}</Text>
         ) : (
           <View style={styles.eventList}>
-            {selectedEvents
-              .sort((a, b) => {
-                const sa = new Date(a.start);
-                const sb = new Date(b.start);
-                return sa.getTime() - sb.getTime();
-              })
-              .map(ev => {
-                const group = groupsMap[ev.groupId];
-                const userColorHex = groupColors[ev.groupId];
-                return (
-                  <View key={ev.id} style={styles.cardWrapper}>
-                    <EventRow
-                      ev={ev}
-                      group={group}
-                      groupColorHex={userColorHex}
-                      onPress={() => onSelectEvent(ev)}
-                      onGroupPress={onSelectGroup}
-                      isLast={false}
-                      showGroup
-                      meId={meId ?? undefined}
-                      users={allUsers}
-                    />
-                  </View>
-                );
-              })}
+            {listEvents.map((ev) => {
+              const group = groupsMap[ev.groupId];
+              const userColorHex = groupColors[ev.groupId];
+              return (
+                <View key={ev.id} style={styles.cardWrapper}>
+                  <EventRow
+                    ev={ev}
+                    group={group}
+                    groupColorHex={userColorHex}
+                    onPress={() => onSelectEvent(ev)}
+                    onGroupPress={onSelectGroup}
+                    isLast={false}
+                    showGroup
+                    meId={meId ?? undefined}
+                    users={allUsers}
+                  />
+                </View>
+              );
+            })}
           </View>
         )}
       </View>
@@ -200,6 +964,94 @@ export function CalendarView({ events, groups, groupColors = {}, onSelectEvent, 
 }
 
 const styles = StyleSheet.create({
+  toolbarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingTop: 4,
+    paddingBottom: 8,
+  },
+  todayBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+  },
+  todayBtnText: {
+    fontSize: 14,
+    fontFamily: Fonts.semiBold,
+    color: Colors.text,
+  },
+  scopeDropdown: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+  },
+  scopeDropdownText: {
+    fontSize: 14,
+    fontFamily: Fonts.semiBold,
+    color: Colors.text,
+  },
+  modalRoot: {
+    flex: 1,
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: Colors.overlay,
+  },
+  modalMenuWrap: {
+    position: 'absolute',
+    top: 52,
+    left: 12,
+    zIndex: 10,
+  },
+  scopeMenu: {
+    minWidth: 168,
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  scopeMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.border,
+  },
+  scopeMenuItemLast: {
+    borderBottomWidth: 0,
+  },
+  scopeMenuItemActive: {
+    backgroundColor: Colors.accent,
+  },
+  scopeMenuItemText: {
+    fontSize: 15,
+    fontFamily: Fonts.medium,
+    color: Colors.text,
+  },
+  scopeMenuItemTextActive: {
+    color: Colors.accentFg,
+    fontFamily: Fonts.bold,
+  },
   monthNav: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -214,9 +1066,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   navBtnText: { fontSize: 24, color: Colors.text, fontFamily: Fonts.medium },
-  monthLabel: { alignItems: 'center' },
-  monthLabelText: { fontSize: 17, fontFamily: Fonts.bold, color: Colors.text },
-  todayLink: { fontSize: 12, color: Colors.textSub, marginTop: 2 },
+  monthLabel: { alignItems: 'center', flex: 1 },
+  monthLabelText: { fontSize: 17, fontFamily: Fonts.bold, color: Colors.text, textAlign: 'center' },
   weekdayRow: {
     flexDirection: 'row',
     paddingVertical: 8,
@@ -227,6 +1078,160 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: Fonts.semiBold,
     color: Colors.textMuted,
+  },
+  weekTimelineOuter: {
+    paddingBottom: 12,
+    paddingHorizontal: 4,
+  },
+  weekTimelineWithFrozenGutter: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  weekFrozenGutter: {
+    flexShrink: 0,
+    backgroundColor: Colors.bg,
+    zIndex: 1,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderRightColor: Colors.border,
+  },
+  weekFrozenTimeGutter: {
+    paddingRight: 4,
+  },
+  weekScrollableDays: {
+    flex: 1,
+    minWidth: 0,
+  },
+  weekDaysInnerStretch: {
+    width: '100%',
+    alignSelf: 'stretch',
+  },
+  weekDayHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+    paddingBottom: 8,
+  },
+  weekDayHeaderCell: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    borderRadius: Radius.md,
+    marginHorizontal: 2,
+  },
+  weekDayHeaderCellSelected: {
+    backgroundColor: Colors.accent,
+  },
+  weekDayHeaderDow: {
+    fontSize: 11,
+    fontFamily: Fonts.semiBold,
+    color: Colors.textMuted,
+  },
+  weekDayHeaderDom: {
+    fontSize: 18,
+    fontFamily: Fonts.bold,
+    color: Colors.text,
+    marginTop: 2,
+  },
+  weekDayHeaderDomToday: {
+    color: Colors.todayRed,
+  },
+  weekDayHeaderTextSelected: {
+    color: Colors.accentFg,
+  },
+  weekTimelineBody: {
+    flexDirection: 'row',
+    marginTop: 4,
+    overflow: 'visible',
+  },
+  timeGutter: {
+    paddingRight: 4,
+  },
+  timeGutterHour: {
+    justifyContent: 'flex-start',
+    paddingTop: 0,
+  },
+  timeGutterLabel: {
+    fontSize: 10,
+    fontFamily: Fonts.medium,
+    color: Colors.textMuted,
+    textAlign: 'right',
+  },
+  weekDayColumn: {
+    marginHorizontal: 2,
+    overflow: 'visible',
+  },
+  weekDayColumnDragLift: {
+    zIndex: 200,
+    ...(Platform.OS === 'android' ? { elevation: 20 } : {}),
+  },
+  allDayBand: {
+    minHeight: 0,
+    gap: 4,
+    marginBottom: 6,
+    paddingHorizontal: 2,
+  },
+  allDayChip: {
+    borderLeftWidth: 3,
+    borderRadius: Radius.sm,
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+  },
+  allDayChipText: {
+    fontSize: 11,
+    fontFamily: Fonts.semiBold,
+  },
+  hourGrid: {
+    position: 'relative',
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: Radius.sm,
+    overflow: 'visible',
+    backgroundColor: Colors.bg,
+  },
+  hourLine: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.border,
+  },
+  nowLine: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: 2,
+    backgroundColor: Colors.todayRed,
+    zIndex: 10,
+    marginTop: -1,
+  },
+  weekSlotDraft: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    borderRadius: Radius.sm,
+    borderWidth: 1,
+    borderColor: Colors.accent,
+    backgroundColor: 'rgba(24, 24, 27, 0.12)',
+    zIndex: 1,
+  },
+  timedEventBlock: {
+    position: 'absolute',
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    borderRadius: Radius.sm,
+    borderLeftWidth: 3,
+    overflow: 'hidden',
+    zIndex: 2,
+  },
+  timedEventTitle: {
+    fontSize: 10,
+    fontFamily: Fonts.bold,
+  },
+  timedEventTime: {
+    fontSize: 9,
+    fontFamily: Fonts.regular,
+    marginTop: 1,
   },
   grid: { paddingHorizontal: 4 },
   gridRow: { flexDirection: 'row' },
@@ -271,6 +1276,100 @@ const styles = StyleSheet.create({
     lineHeight: 10,
   },
   dotMoreSelected: {
+    color: Colors.accentFg,
+  },
+  yearGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 8,
+    paddingBottom: 8,
+    justifyContent: 'space-between',
+  },
+  yearMiniMonthCard: {
+    width: '31%',
+    marginBottom: 10,
+    borderRadius: Radius.lg,
+    borderWidth: 2,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+    paddingHorizontal: 4,
+    paddingTop: 6,
+    paddingBottom: 4,
+  },
+  yearMiniMonthCardSelected: {
+    borderColor: Colors.accent,
+  },
+  yearMiniMonthTitle: {
+    fontSize: 12,
+    fontFamily: Fonts.bold,
+    color: Colors.text,
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  yearMiniWeekdayRow: {
+    flexDirection: 'row',
+    paddingBottom: 2,
+  },
+  yearMiniWeekdayCell: {
+    textAlign: 'center',
+    fontSize: 8,
+    fontFamily: Fonts.semiBold,
+    color: Colors.textMuted,
+  },
+  yearMiniGrid: { alignItems: 'center' },
+  yearMiniGridRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+  },
+  yearMiniCellEmpty: {
+    margin: 0.5,
+  },
+  yearMiniCell: {
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    paddingTop: 2,
+    borderRadius: 6,
+    margin: 0.5,
+  },
+  yearMiniCellSelected: {
+    backgroundColor: Colors.accent,
+  },
+  yearMiniCellToday: {
+    borderWidth: 1,
+    borderColor: Colors.todayRed,
+  },
+  yearMiniCellText: {
+    fontFamily: Fonts.medium,
+    color: Colors.text,
+  },
+  yearMiniCellTextSelected: {
+    color: Colors.accentFg,
+  },
+  yearMiniCellTextToday: {
+    color: Colors.todayRed,
+  },
+  yearMiniDotWrap: {
+    marginTop: 'auto',
+    marginBottom: 1,
+    minHeight: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 1,
+  },
+  yearMiniDot: {
+    width: 3,
+    height: 3,
+    borderRadius: 1.5,
+  },
+  yearMiniDotSelected: {},
+  yearMiniDotMore: {
+    fontSize: 7,
+    fontFamily: Fonts.semiBold,
+    color: Colors.textMuted,
+    lineHeight: 8,
+  },
+  yearMiniDotMoreSelected: {
     color: Colors.accentFg,
   },
   eventsSection: {

@@ -283,7 +283,8 @@ export class EventService {
   }
 
   /**
-   * Notify users watching this event when location or start/end changes (excludes the editor).
+   * Notify active group members when location or start/end changes (excludes the editor).
+   * Uses the same audience as new-event alerts so calendar drag and form edits all reach the group.
    */
   private async notifyWatchersEventScheduleOrLocation(
     eventId: string,
@@ -299,13 +300,17 @@ export class EventService {
     }
   ): Promise<void> {
     const normLoc = (l: string | null | undefined) => (l ?? '').trim();
-    const watcherIds = (await this.getUserIdsWatchingEvent(eventId)).filter((uid) => uid !== excludeUserId);
-    if (watcherIds.length === 0) return;
+    const members = await prisma.groupMember.findMany({
+      where: { groupId, status: 'active' },
+      select: { userId: true },
+    });
+    const recipientIds = members.map((m) => m.userId).filter((uid) => uid !== excludeUserId);
+    if (recipientIds.length === 0) return;
 
     if (changes.locChanged) {
       const loc = normLoc(changes.location) || 'Updated';
       await notificationService.createForUsers(
-        watcherIds,
+        recipientIds,
         'Location updated',
         `"${title}" — ${loc}`,
         {
@@ -322,7 +327,7 @@ export class EventService {
       const dateStr = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
       const timeStr = startDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
       await notificationService.createForUsers(
-        watcherIds,
+        recipientIds,
         'Event time updated',
         `"${title}" is now ${dateStr} at ${timeStr}`,
         {
