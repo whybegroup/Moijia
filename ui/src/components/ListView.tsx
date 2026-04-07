@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import { View, Text, StyleSheet, FlatList } from 'react-native';
 import { Colors, Fonts, Radius } from '../constants/theme';
 import { EventRow } from './EventRow';

@@ -1,3 +1,5 @@
+import type { NotifPrefs, NotifPrefsPartial } from './NotifPrefs';
+
 /**
  * User model - represents a user in the system
  */
@@ -12,6 +14,8 @@ export interface User {
   avatarSeed?: string | null;
   /** Optional custom avatar image URL */
   thumbnail?: string | null;
+  /** Global in-app notification toggles (applies to all groups, AND with per-group prefs) */
+  notifPrefs?: NotifPrefs;
   /** Timestamp when the user was created */
   createdAt: Date;
   /** Timestamp when the user was last updated */
@@ -37,4 +41,6 @@ export interface UserUpdate {
   displayName?: string;
   avatarSeed?: string | null;
   thumbnail?: string | null;
+  /** Merged into existing global notification preferences */
+  notifPrefs?: NotifPrefsPartial;
 }

@@ -1,9 +1,12 @@
+import { randomUUID } from 'crypto';
 import { PrismaClient } from '@prisma/client';
 import {
   Event,
   EventInput,
   EventUpdate,
   EventDetailed,
+  EventActivityOption,
+  EventTimeSuggestion,
   RSVP,
   RSVPInput,
   Comment,
@@ -11,6 +14,9 @@ import {
   CommentUpdateInput,
   CommentDeleteInput,
   EventWatchInput,
+  EventActivityOptionInput,
+  EventActivityVoteInput,
+  EventTimeSuggestionInput,
 } from '../models';
 import { NotificationService } from './NotificationService';
 import {
@@ -30,6 +36,17 @@ const COMMENT_MENTION_NOTIFICATION_TITLE = 'You were mentioned';
 export const COMMENT_DELETED_BY_ADMIN_TEXT = 'This message was deleted by admin';
 
 export class EventService {
+  /**
+   * Whether two datetimes are the same for schedule notifications (ignores sub-second
+   * jitter from JSON/SQLite round-trips so “save without edits” does not alert).
+   */
+  private static eventInstantUnchanged(a: Date, b: Date): boolean {
+    const ta = new Date(a).getTime();
+    const tb = new Date(b).getTime();
+    if (!Number.isFinite(ta) || !Number.isFinite(tb)) return ta === tb;
+    return Math.floor(ta / 1000) === Math.floor(tb / 1000);
+  }
+
   /**
    * Get all events with optional filtering
    */
@@ -117,6 +134,15 @@ export class EventService {
             createdAt: 'asc',
           },
         },
+        activityOptions: {
+          orderBy: { createdAt: 'asc' },
+          include: {
+            _count: { select: { votes: true } },
+          },
+        },
+        timeSuggestions: {
+          orderBy: { createdAt: 'desc' },
+        },
       },
       orderBy: {
         start: 'asc',
@@ -166,6 +192,31 @@ export class EventService {
     }
   }
 
+  /** Active group member may collaborate on activities, votes, and time suggestions. */
+  private async assertActiveMemberForEventEventRow(
+    event: { groupId: string },
+    actorId: string,
+  ): Promise<void> {
+    const role = await this.getActiveMemberRole(event.groupId, actorId);
+    if (!role) {
+      throw Object.assign(new Error('Must be an active group member'), { status: 403 });
+    }
+  }
+
+  /** Event host (creator) or group admin may resolve time suggestions. */
+  private async assertCanResolveTimeSuggestion(
+    event: { groupId: string; createdBy: string },
+    actorId: string,
+  ): Promise<void> {
+    if (event.createdBy === actorId) return;
+    const role = await this.getActiveMemberRole(event.groupId, actorId);
+    if (role && this.isAdminOrSuperadminRole(role)) return;
+    throw Object.assign(
+      new Error('Only the event host or group admins can accept or reject time suggestions'),
+      { status: 403 },
+    );
+  }
+
   /**
    * Creator may always edit/delete their event (even if no longer a member).
    * Admins and superadmins may edit/delete other members' events while they remain active in the group.
@@ -200,6 +251,15 @@ export class EventService {
             createdAt: 'asc',
           },
         },
+        activityOptions: {
+          orderBy: { createdAt: 'asc' },
+          include: {
+            _count: { select: { votes: true } },
+          },
+        },
+        timeSuggestions: {
+          orderBy: { createdAt: 'desc' },
+        },
       },
     });
 
@@ -209,41 +269,71 @@ export class EventService {
     }
     const detailed = this.mapEventDetailed(event);
     if (userId) {
-      return this.enrichWithViewerWatch(detailed, id, userId);
+      const withWatch = await this.enrichWithViewerWatch(detailed, id, userId);
+      const voteRows = await prisma.eventActivityVote.findMany({
+        where: { eventId: id, userId },
+        select: { optionId: true },
+      });
+      return {
+        ...withWatch,
+        myActivityVoteOptionIds: voteRows.map((r) => r.optionId),
+      };
     }
     return detailed;
   }
 
   /**
-   * Whether this user should receive default event notifications for this event.
-   * Default on for host + Going/Maybe; explicit EventWatch row overrides.
+   * Notify users watching this event when location or start/end changes (excludes the editor).
    */
-  private async shouldReceiveEventNotifications(eventId: string, recipientUserId: string): Promise<boolean> {
-    const event = await prisma.event.findUnique({
-      where: { id: eventId },
-      include: {
-        rsvps: {
-          where: { userId: recipientUserId },
-        },
-      },
-    });
-    if (!event) return false;
-    const rsvp = event.rsvps[0];
-    const defaultWatch =
-      event.createdBy === recipientUserId ||
-      rsvp?.status === 'going' ||
-      rsvp?.status === 'maybe';
+  private async notifyWatchersEventScheduleOrLocation(
+    eventId: string,
+    groupId: string,
+    title: string,
+    excludeUserId: string,
+    changes: {
+      locChanged: boolean;
+      timeChanged: boolean;
+      location: string | null;
+      start: Date;
+      end: Date;
+    }
+  ): Promise<void> {
+    const normLoc = (l: string | null | undefined) => (l ?? '').trim();
+    const watcherIds = (await this.getUserIdsWatchingEvent(eventId)).filter((uid) => uid !== excludeUserId);
+    if (watcherIds.length === 0) return;
 
-    const row = await prisma.eventWatch.findUnique({
-      where: {
-        eventId_userId: {
+    if (changes.locChanged) {
+      const loc = normLoc(changes.location) || 'Updated';
+      await notificationService.createForUsers(
+        watcherIds,
+        'Location updated',
+        `"${title}" — ${loc}`,
+        {
+          type: 'location_changed',
+          icon: '📍',
           eventId,
-          userId: recipientUserId,
-        },
-      },
-    });
-    if (row !== null) return row.watching;
-    return defaultWatch;
+          groupId,
+          dest: 'event',
+        }
+      );
+    }
+    if (changes.timeChanged) {
+      const startDate = new Date(changes.start);
+      const dateStr = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const timeStr = startDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+      await notificationService.createForUsers(
+        watcherIds,
+        'Event time updated',
+        `"${title}" is now ${dateStr} at ${timeStr}`,
+        {
+          type: 'event_time_changed',
+          icon: '🕐',
+          eventId,
+          groupId,
+          dest: 'event',
+        }
+      );
+    }
   }
 
   /** All user IDs that should receive default event notifications for this event. */
@@ -367,9 +457,13 @@ export class EventService {
    * Create a new event
    */
   public async create(input: EventInput): Promise<Event> {
-    const { coverPhotos = [], createdBy, ...eventData } = input;
+    const { coverPhotos = [], createdBy, activityOptionLabels, ...eventData } = input;
 
     await this.assertCanCreateEvent(eventData.groupId, createdBy);
+
+    const labels = (activityOptionLabels ?? [])
+      .map((s) => (typeof s === 'string' ? s.trim() : ''))
+      .filter((s) => s.length > 0);
 
     const event = await prisma.event.create({
       data: {
@@ -382,6 +476,17 @@ export class EventService {
         coverPhotos: {
           create: coverPhotos.map((photoUrl) => ({ photoUrl })),
         },
+        ...(labels.length > 0
+          ? {
+              activityOptions: {
+                create: labels.map((label) => ({
+                  id: randomUUID(),
+                  label,
+                  createdBy,
+                })),
+              },
+            }
+          : {}),
       },
       include: {
         coverPhotos: true,
@@ -403,9 +508,9 @@ export class EventService {
       select: { userId: true },
     });
 
-    // Create notification for each member
+    // Create notification for each member (creator already knows they created it)
     await notificationService.createForUsers(
-      members.map(m => m.userId),
+      members.map((m) => m.userId).filter((uid) => uid !== createdBy),
       'New Event Created',
       `${event.title} on ${dateStr} at ${timeStr}`,
       {
@@ -431,6 +536,10 @@ export class EventService {
       select: {
         groupId: true,
         createdBy: true,
+        title: true,
+        start: true,
+        end: true,
+        location: true,
         coverPhotos: { select: { photoUrl: true } },
       },
     });
@@ -461,8 +570,24 @@ export class EventService {
 
     // Update event data
     const updateData: any = { ...eventData, updatedBy };
-    if (updateData.start) updateData.start = new Date(updateData.start);
-    if (updateData.end) updateData.end = new Date(updateData.end);
+    if (updateData.start !== undefined) updateData.start = new Date(updateData.start);
+    if (updateData.end !== undefined) updateData.end = new Date(updateData.end);
+    if (updateData.location !== undefined) {
+      const s = updateData.location;
+      updateData.location =
+        s == null || (typeof s === 'string' && s.trim() === '') ? null : String(s).trim();
+    }
+    if (updateData.description !== undefined) {
+      const s = updateData.description;
+      updateData.description =
+        s == null || (typeof s === 'string' && s.trim() === '') ? null : String(s).trim();
+    }
+    const nextStart = eventData.start !== undefined ? new Date(eventData.start) : null;
+    const nextEnd = eventData.end !== undefined ? new Date(eventData.end) : null;
+    const startChanged =
+      nextStart !== null && !EventService.eventInstantUnchanged(existing.start, nextStart);
+    const endChanged = nextEnd !== null && !EventService.eventInstantUnchanged(existing.end, nextEnd);
+    const timeChanged = startChanged || endChanged;
 
     const event = await prisma.event.update({
       where: { id },
@@ -471,6 +596,21 @@ export class EventService {
         coverPhotos: true,
       },
     });
+
+    const normLoc = (l: string | null | undefined) => (l ?? '').trim();
+    const locTouched = eventData.location !== undefined;
+    const locChanged =
+      locTouched && normLoc(existing.location) !== normLoc(event.location ?? '');
+
+    if (locChanged || timeChanged) {
+      void this.notifyWatchersEventScheduleOrLocation(
+        id,
+        event.groupId,
+        event.title,
+        updatedBy,
+        { locChanged, timeChanged, location: event.location, start: event.start, end: event.end }
+      ).catch(() => undefined);
+    }
 
     return this.mapEventWithPhotos(event);
   }
@@ -933,6 +1073,282 @@ export class EventService {
     throw { status: 403, message: 'Not allowed to delete this comment' };
   }
 
+  public async addActivityOption(
+    eventId: string,
+    input: EventActivityOptionInput,
+  ): Promise<EventActivityOption> {
+    const event = await prisma.event.findUnique({
+      where: { id: eventId },
+      select: { groupId: true, createdBy: true },
+    });
+    if (!event) {
+      throw Object.assign(new Error('Event not found'), { status: 404 });
+    }
+    await this.assertActiveMemberForEventEventRow(event, input.userId);
+    const label = (input.label || '').trim();
+    if (!label) {
+      throw Object.assign(new Error('Activity label is required'), { status: 400 });
+    }
+    const row = await prisma.eventActivityOption.create({
+      data: {
+        id: input.id,
+        eventId,
+        label,
+        createdBy: input.userId,
+      },
+      include: {
+        _count: { select: { votes: true } },
+      },
+    });
+    return {
+      id: row.id,
+      label: row.label,
+      createdBy: row.createdBy,
+      voteCount: row._count.votes,
+      createdAt: row.createdAt,
+    };
+  }
+
+  public async deleteActivityOption(
+    eventId: string,
+    optionId: string,
+    actorId: string,
+  ): Promise<void> {
+    const option = await prisma.eventActivityOption.findFirst({
+      where: { id: optionId, eventId },
+      include: {
+        event: { select: { groupId: true, createdBy: true } },
+      },
+    });
+    if (!option) {
+      throw Object.assign(new Error('Activity option not found'), { status: 404 });
+    }
+    const isAuthor = option.createdBy === actorId;
+    const isHost = option.event.createdBy === actorId;
+    let isAdmin = false;
+    if (!isAuthor && !isHost) {
+      const role = await this.getActiveMemberRole(option.event.groupId, actorId);
+      isAdmin = !!role && this.isAdminOrSuperadminRole(role);
+    }
+    if (!isAuthor && !isHost && !isAdmin) {
+      throw Object.assign(
+        new Error('Only the option author, event host, or group admins can remove this option'),
+        { status: 403 },
+      );
+    }
+    await prisma.eventActivityOption.delete({ where: { id: optionId } });
+  }
+
+  public async setActivityVote(eventId: string, input: EventActivityVoteInput): Promise<void> {
+    const event = await prisma.event.findUnique({
+      where: { id: eventId },
+      select: { groupId: true },
+    });
+    if (!event) {
+      throw Object.assign(new Error('Event not found'), { status: 404 });
+    }
+    await this.assertActiveMemberForEventEventRow(event, input.userId);
+    const opt = await prisma.eventActivityOption.findFirst({
+      where: { id: input.optionId, eventId },
+    });
+    if (!opt) {
+      throw Object.assign(new Error('Activity option not found'), { status: 404 });
+    }
+    const existing = await prisma.eventActivityVote.findUnique({
+      where: {
+        eventId_userId_optionId: {
+          eventId,
+          userId: input.userId,
+          optionId: input.optionId,
+        },
+      },
+    });
+    if (existing) {
+      await prisma.eventActivityVote.delete({
+        where: { id: existing.id },
+      });
+    } else {
+      await prisma.eventActivityVote.create({
+        data: {
+          id: randomUUID(),
+          eventId,
+          optionId: input.optionId,
+          userId: input.userId,
+        },
+      });
+    }
+  }
+
+  public async clearActivityVote(eventId: string, userId: string): Promise<void> {
+    const event = await prisma.event.findUnique({
+      where: { id: eventId },
+      select: { groupId: true },
+    });
+    if (!event) {
+      throw Object.assign(new Error('Event not found'), { status: 404 });
+    }
+    await this.assertActiveMemberForEventEventRow(event, userId);
+    await prisma.eventActivityVote.deleteMany({
+      where: { eventId, userId },
+    });
+  }
+
+  public async createTimeSuggestion(
+    eventId: string,
+    input: EventTimeSuggestionInput,
+  ): Promise<EventTimeSuggestion> {
+    const event = await prisma.event.findUnique({
+      where: { id: eventId },
+      select: { groupId: true, createdBy: true, title: true },
+    });
+    if (!event) {
+      throw Object.assign(new Error('Event not found'), { status: 404 });
+    }
+    await this.assertActiveMemberForEventEventRow(event, input.userId);
+    const start = new Date(input.start);
+    const end = new Date(input.end);
+    if (!(start.getTime() < end.getTime())) {
+      throw Object.assign(new Error('End time must be after start time'), { status: 400 });
+    }
+    const row = await prisma.eventTimeSuggestion.create({
+      data: {
+        id: input.id,
+        eventId,
+        suggestedBy: input.userId,
+        start,
+        end,
+      },
+    });
+    if (event.createdBy !== input.userId) {
+      const suggester = await prisma.user.findUnique({ where: { id: input.userId } });
+      if (suggester) {
+        const startStr = start.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+        void notificationService
+          .createForUser(
+            event.createdBy,
+            'Suggested time change',
+            `${suggester.displayName} suggested ${startStr} for "${event.title}"`,
+            {
+              type: 'time_suggestion',
+              icon: '🕐',
+              eventId,
+              groupId: event.groupId,
+              dest: 'event',
+            },
+          )
+          .catch(() => undefined);
+      }
+    }
+    return {
+      id: row.id,
+      suggestedBy: row.suggestedBy,
+      start: row.start,
+      end: row.end,
+      status: row.status as EventTimeSuggestion['status'],
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  public async acceptTimeSuggestion(
+    eventId: string,
+    suggestionId: string,
+    actorId: string,
+  ): Promise<Event> {
+    const suggestion = await prisma.eventTimeSuggestion.findFirst({
+      where: { id: suggestionId, eventId },
+      include: {
+        event: true,
+      },
+    });
+    if (!suggestion) {
+      throw Object.assign(new Error('Time suggestion not found'), { status: 404 });
+    }
+    if (suggestion.status !== 'pending') {
+      throw Object.assign(new Error('This suggestion is no longer pending'), { status: 400 });
+    }
+    await this.assertCanResolveTimeSuggestion(suggestion.event, actorId);
+
+    const updated = await prisma.$transaction(async (tx) => {
+      await tx.event.update({
+        where: { id: eventId },
+        data: {
+          start: suggestion.start,
+          end: suggestion.end,
+          updatedBy: actorId,
+        },
+      });
+      await tx.eventTimeSuggestion.update({
+        where: { id: suggestionId },
+        data: { status: 'accepted' },
+      });
+      await tx.eventTimeSuggestion.updateMany({
+        where: {
+          eventId,
+          id: { not: suggestionId },
+          status: 'pending',
+        },
+        data: { status: 'rejected' },
+      });
+      return tx.event.findUnique({
+        where: { id: eventId },
+        include: { coverPhotos: true },
+      });
+    });
+    if (!updated) {
+      throw Object.assign(new Error('Event not found'), { status: 404 });
+    }
+
+    void this.notifyWatchersEventScheduleOrLocation(
+      eventId,
+      updated.groupId,
+      updated.title,
+      actorId,
+      {
+        locChanged: false,
+        timeChanged: true,
+        location: updated.location,
+        start: updated.start,
+        end: updated.end,
+      }
+    ).catch(() => undefined);
+
+    return this.mapEventWithPhotos(updated);
+  }
+
+  public async rejectTimeSuggestion(
+    eventId: string,
+    suggestionId: string,
+    actorId: string,
+  ): Promise<EventTimeSuggestion> {
+    const suggestion = await prisma.eventTimeSuggestion.findFirst({
+      where: { id: suggestionId, eventId },
+      include: {
+        event: { select: { groupId: true, createdBy: true } },
+      },
+    });
+    if (!suggestion) {
+      throw Object.assign(new Error('Time suggestion not found'), { status: 404 });
+    }
+    if (suggestion.status !== 'pending') {
+      throw Object.assign(new Error('This suggestion is no longer pending'), { status: 400 });
+    }
+    await this.assertCanResolveTimeSuggestion(suggestion.event, actorId);
+    const row = await prisma.eventTimeSuggestion.update({
+      where: { id: suggestionId },
+      data: { status: 'rejected' },
+    });
+    return {
+      id: row.id,
+      suggestedBy: row.suggestedBy,
+      start: row.start,
+      end: row.end,
+      status: row.status as EventTimeSuggestion['status'],
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  }
+
   /**
    * Map Prisma event with photos to Event model
    */
@@ -943,7 +1359,6 @@ export class EventService {
       createdBy: event.createdBy,
       updatedBy: event.updatedBy,
       title: event.title,
-      subtitle: event.subtitle,
       description: event.description,
       coverPhotos: event.coverPhotos.map((p: any) => p.photoUrl),
       start: event.start,
@@ -963,6 +1378,22 @@ export class EventService {
    * Map Prisma event with all details to EventDetailed model
    */
   private mapEventDetailed(event: any): EventDetailed {
+    const activityOptions: EventActivityOption[] = (event.activityOptions ?? []).map((o: any) => ({
+      id: o.id,
+      label: o.label,
+      createdBy: o.createdBy,
+      voteCount: o._count?.votes ?? 0,
+      createdAt: o.createdAt,
+    }));
+    const timeSuggestions: EventTimeSuggestion[] = (event.timeSuggestions ?? []).map((s: any) => ({
+      id: s.id,
+      suggestedBy: s.suggestedBy,
+      start: s.start,
+      end: s.end,
+      status: s.status as EventTimeSuggestion['status'],
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt,
+    }));
     return {
       ...this.mapEventWithPhotos(event),
       rsvps: event.rsvps.map((r: any) => ({
@@ -973,6 +1404,8 @@ export class EventService {
         updatedAt: r.updatedAt,
       })),
       comments: event.comments.map((c: any) => this.mapCommentWithPhotos(c)),
+      activityOptions,
+      timeSuggestions,
     };
   }
 

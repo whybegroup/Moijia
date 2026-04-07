@@ -5,6 +5,7 @@ CREATE TABLE "users" (
     "displayName" TEXT NOT NULL,
     "avatarSeed" TEXT,
     "thumbnail" TEXT,
+    "notifPrefsJson" TEXT,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL
 );
@@ -44,6 +45,7 @@ CREATE TABLE "group_members" (
     "role" TEXT NOT NULL DEFAULT 'member',
     "status" TEXT NOT NULL DEFAULT 'active',
     "colorHex" TEXT,
+    "notifPrefsJson" TEXT,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
     CONSTRAINT "group_members_groupId_fkey" FOREIGN KEY ("groupId") REFERENCES "groups" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
@@ -57,7 +59,6 @@ CREATE TABLE "events" (
     "createdBy" TEXT NOT NULL,
     "updatedBy" TEXT NOT NULL,
     "title" TEXT NOT NULL,
-    "subtitle" TEXT,
     "description" TEXT,
     "start" DATETIME NOT NULL,
     "end" DATETIME NOT NULL,
@@ -71,6 +72,43 @@ CREATE TABLE "events" (
     "updatedAt" DATETIME NOT NULL,
     CONSTRAINT "events_groupId_fkey" FOREIGN KEY ("groupId") REFERENCES "groups" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "events_createdBy_fkey" FOREIGN KEY ("createdBy") REFERENCES "users" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "event_activity_options" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "eventId" TEXT NOT NULL,
+    "label" TEXT NOT NULL,
+    "createdBy" TEXT NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "event_activity_options_eventId_fkey" FOREIGN KEY ("eventId") REFERENCES "events" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "event_activity_options_createdBy_fkey" FOREIGN KEY ("createdBy") REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "event_activity_votes" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "eventId" TEXT NOT NULL,
+    "optionId" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "event_activity_votes_eventId_fkey" FOREIGN KEY ("eventId") REFERENCES "events" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "event_activity_votes_optionId_fkey" FOREIGN KEY ("optionId") REFERENCES "event_activity_options" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "event_activity_votes_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "event_time_suggestions" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "eventId" TEXT NOT NULL,
+    "suggestedBy" TEXT NOT NULL,
+    "start" DATETIME NOT NULL,
+    "end" DATETIME NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'pending',
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "event_time_suggestions_eventId_fkey" FOREIGN KEY ("eventId") REFERENCES "events" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "event_time_suggestions_suggestedBy_fkey" FOREIGN KEY ("suggestedBy") REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
@@ -153,6 +191,9 @@ CREATE UNIQUE INDEX "groups_inviteCode_key" ON "groups"("inviteCode");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "group_members_groupId_userId_key" ON "group_members"("groupId", "userId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "event_activity_votes_eventId_userId_optionId_key" ON "event_activity_votes"("eventId", "userId", "optionId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "rsvps_eventId_userId_key" ON "rsvps"("eventId", "userId");

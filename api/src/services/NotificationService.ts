@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { Notification, NotificationInput } from '../models';
+import { notifTypeToPrefKey, parseNotifPrefsJson } from '../utils/notifPrefsCore';
 
 const prisma = new PrismaClient();
 
@@ -103,7 +104,9 @@ export class NotificationService {
       eventId?: string;
       dest?: 'group' | 'event';
     }
-  ): Promise<Notification> {
+  ): Promise<Notification | null> {
+    const ok = await this.shouldDeliverNotification(userId, options?.groupId, options?.type);
+    if (!ok) return null;
     return this.create({
       id: `notif_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       userId,
@@ -134,9 +137,41 @@ export class NotificationService {
     }
   ): Promise<Notification[]> {
     const notifications = await Promise.all(
-      userIds.map(userId => this.createForUser(userId, title, body, options))
+      userIds.map((userId) => this.createForUser(userId, title, body, options))
     );
-    return notifications;
+    return notifications.filter((n): n is Notification => n !== null);
+  }
+
+  /**
+   * Global prefs AND (when groupId set) active member per-group prefs must allow this type.
+   */
+  private async shouldDeliverNotification(
+    userId: string,
+    groupId: string | undefined,
+    notificationType: string | undefined
+  ): Promise<boolean> {
+    const key = notifTypeToPrefKey(notificationType);
+    if (key === null) return true;
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { notifPrefsJson: true },
+    });
+    const globalPrefs = parseNotifPrefsJson(user?.notifPrefsJson);
+    if (!globalPrefs[key]) return false;
+
+    if (!groupId) return true;
+
+    const member = await prisma.groupMember.findUnique({
+      where: {
+        groupId_userId: { groupId, userId },
+      },
+      select: { status: true, notifPrefsJson: true },
+    });
+    if (!member || member.status !== 'active') return false;
+
+    const groupPrefs = parseNotifPrefsJson(member.notifPrefsJson);
+    return !!groupPrefs[key];
   }
 
   /**

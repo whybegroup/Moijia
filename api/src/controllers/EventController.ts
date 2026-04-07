@@ -16,6 +16,8 @@ import {
   EventInput,
   EventUpdate,
   EventDetailed,
+  EventActivityOption,
+  EventTimeSuggestion,
   RSVPInput,
   RSVP,
   Comment,
@@ -23,6 +25,9 @@ import {
   CommentUpdateInput,
   CommentDeleteInput,
   EventWatchInput,
+  EventActivityOptionInput,
+  EventActivityVoteInput,
+  EventTimeSuggestionInput,
 } from '../models';
 import { EventService } from '../services/EventService';
 
@@ -198,6 +203,136 @@ export class EventController extends Controller {
   ): Promise<Comment> {
     this.setStatus(201);
     return this.eventService.createComment(id, body);
+  }
+
+  /**
+   * Add an activity option (any active group member).
+   */
+  @Post('{id}/activity-options')
+  @SuccessResponse('201', 'Created')
+  public async addActivityOption(
+    @Path() id: string,
+    @Query() userId: string,
+    @Body() body: EventActivityOptionInput,
+  ): Promise<EventActivityOption> {
+    if (!userId) {
+      this.setStatus(400);
+      throw new Error('userId is required');
+    }
+    if (body.userId !== userId) {
+      this.setStatus(403);
+      throw new Error('userId in body must match authenticated user');
+    }
+    this.setStatus(201);
+    return this.eventService.addActivityOption(id, body);
+  }
+
+  /**
+   * Remove an activity option (author, host, or group admin).
+   */
+  @Delete('{id}/activity-options/{optionId}')
+  @SuccessResponse('204', 'No Content')
+  public async deleteActivityOption(
+    @Path() id: string,
+    @Path() optionId: string,
+    @Query() userId: string,
+  ): Promise<void> {
+    if (!userId) {
+      this.setStatus(400);
+      throw new Error('userId is required');
+    }
+    await this.eventService.deleteActivityOption(id, optionId, userId);
+    this.setStatus(204);
+  }
+
+  /**
+   * Toggle vote for an activity (users may vote for multiple options; same request removes vote).
+   */
+  @Put('{id}/activity-vote')
+  @SuccessResponse('204', 'No Content')
+  public async setActivityVote(
+    @Path() id: string,
+    @Query() userId: string,
+    @Body() body: EventActivityVoteInput,
+  ): Promise<void> {
+    if (!userId) {
+      this.setStatus(400);
+      throw new Error('userId is required');
+    }
+    if (body.userId !== userId) {
+      this.setStatus(403);
+      throw new Error('userId in body must match authenticated user');
+    }
+    await this.eventService.setActivityVote(id, body);
+    this.setStatus(204);
+  }
+
+  /**
+   * Clear the current user's activity vote.
+   */
+  @Delete('{id}/activity-vote')
+  @SuccessResponse('204', 'No Content')
+  public async clearActivityVote(@Path() id: string, @Query() userId: string): Promise<void> {
+    if (!userId) {
+      this.setStatus(400);
+      throw new Error('userId is required');
+    }
+    await this.eventService.clearActivityVote(id, userId);
+    this.setStatus(204);
+  }
+
+  /**
+   * Suggest a new start/end time for the event.
+   */
+  @Post('{id}/time-suggestions')
+  @SuccessResponse('201', 'Created')
+  public async createTimeSuggestion(
+    @Path() id: string,
+    @Query() userId: string,
+    @Body() body: EventTimeSuggestionInput,
+  ): Promise<EventTimeSuggestion> {
+    if (!userId) {
+      this.setStatus(400);
+      throw new Error('userId is required');
+    }
+    if (body.userId !== userId) {
+      this.setStatus(403);
+      throw new Error('userId in body must match authenticated user');
+    }
+    this.setStatus(201);
+    return this.eventService.createTimeSuggestion(id, body);
+  }
+
+  /**
+   * Host or group admin: apply a suggested time to the event.
+   */
+  @Post('{id}/time-suggestions/{suggestionId}/accept')
+  public async acceptTimeSuggestion(
+    @Path() id: string,
+    @Path() suggestionId: string,
+    @Query() userId: string,
+  ): Promise<Event> {
+    if (!userId) {
+      this.setStatus(400);
+      throw new Error('userId is required');
+    }
+    return this.eventService.acceptTimeSuggestion(id, suggestionId, userId);
+  }
+
+  /**
+   * Host or group admin: reject a time suggestion.
+   */
+  @Post('{id}/time-suggestions/{suggestionId}/reject')
+  public async rejectTimeSuggestion(
+    @Path() id: string,
+    @Path() suggestionId: string,
+    @Query() userId: string,
+  ): Promise<EventTimeSuggestion> {
+    if (!userId) {
+      this.setStatus(400);
+      throw new Error('userId is required');
+    }
+    return this.eventService.rejectTimeSuggestion(id, suggestionId, userId);
   }
 }
 

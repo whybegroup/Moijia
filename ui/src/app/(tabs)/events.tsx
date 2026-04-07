@@ -1,8 +1,5 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import {
-  View, Text, ScrollView, TouchableOpacity,
-  StyleSheet, TextInput, Platform, Alert,
-} from 'react-native';
+import { useState, useMemo, useEffect } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -34,18 +31,16 @@ import { useCurrentUserContext } from '../../contexts/CurrentUserContext';
 import { EventsCalendarGlyph } from '../../components/TabScreenIcons';
 import { CreateOrJoinButton } from '../../components/CreateOrJoinButton';
 
-export default function FeedScreen() {
+export default function EventsScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { userId: currentUserId, user: me } = useCurrentUserContext();
+  const { userId: currentUserId } = useCurrentUserContext();
   
-  const { data: events = [], isLoading: eventsLoading } = useEvents({ userId: currentUserId ?? '', groupId: undefined });
-  const { data: allGroups = [], isLoading: groupsLoading } = useGroups(currentUserId ?? '');
+  const { data: events = [] } = useEvents({ userId: currentUserId ?? '', groupId: undefined });
+  const { data: allGroups = [] } = useGroups(currentUserId ?? '');
   const { data: notifs = [], isLoading: notifsLoading } = useNotifications(currentUserId || '');
-  const { data: groupColors = {}, isLoading: colorsLoading } = useAllGroupMemberColors(currentUserId || '');
+  const { data: groupColors = {} } = useAllGroupMemberColors(currentUserId || '');
   const groups = allGroups.filter(g => g.membershipStatus === 'member' || g.membershipStatus === 'admin');
-  
-  const loading = eventsLoading || groupsLoading || notifsLoading || colorsLoading;
   
   // Manual polling for notifications every 5 seconds
   useEffect(() => {
@@ -82,15 +77,9 @@ export default function FeedScreen() {
   const [endDateText,   setEndDateText]   = useState<string>(defaultEndSpecificText);
   const [startMode,     setStartMode]     = useState<'specific' | 'now' | 'allTime'>('now');
   const [endMode,       setEndMode]       = useState<'specific' | 'now' | 'allTime'>('allTime');
-  const [showDateEditor, setShowDateEditor] = useState(false);
-  const [dateButtonLayout, setDateButtonLayout] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [showEndPicker,   setShowEndPicker]   = useState(false);
   const [activeDateField, setActiveDateField] = useState<'from' | 'to' | null>(null);
-  const [showRsvpDropdown, setShowRsvpDropdown] = useState(false);
-  const [rsvpButtonLayout, setRsvpButtonLayout] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
-  const [rsvpDropdownLayout, setRsvpDropdownLayout] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
-  const [dateDropdownLayout, setDateDropdownLayout] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
 
   const RSVP_OPTIONS = [
     ['going', 'Going'],
@@ -121,15 +110,11 @@ export default function FeedScreen() {
     if (Number.isNaN(dt.getTime())) return null;
     return dt;
   };
-  const [showPast,    setShowPast]    = useState(false);
   const [showNotifs, setShowNotifs] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
   const unread = notifs.filter(n => !n.read).length;
 
   const filtered = useMemo(() => {
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
     const parseBound = (txt: string): Date | null => {
       const t = txt.trim();
       if (!t) return null;
@@ -197,11 +182,20 @@ export default function FeedScreen() {
       if (filterNeeds && !(ev.minAttendees && rsvps.filter(r => r.status === 'going').length < ev.minAttendees)) return false;
       return true;
     });
-  }, [groups, selectedGroupIds, filterRsvp, filterNeeds, startDateText, endDateText, startMode, endMode, events]);
+  }, [
+    groups,
+    selectedGroupIds,
+    filterRsvp,
+    filterNeeds,
+    startDateText,
+    endDateText,
+    startMode,
+    endMode,
+    events,
+    currentUserId,
+  ]);
 
   const hasFilters = !!(selectedGroupIds.length || filterRsvp.length || filterNeeds);
-
-  // Removed loading state - show empty UI instead
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -563,7 +557,7 @@ export default function FeedScreen() {
       </View>
 
       {/* Events */}
-      <View style={styles.feedContent}>
+      <View style={styles.eventsContent}>
         {filtered.length === 0 ? (
           <View style={styles.emptyState}>
             <Ionicons name="calendar-outline" size={56} color={Colors.textMuted} style={styles.emptyGlyph} />
@@ -663,7 +657,7 @@ const styles = StyleSheet.create({
   iconBtnActive:{ backgroundColor: Colors.bg, borderColor: Colors.accent },
   bellDot:     { position: 'absolute', top: 1, right: 1, width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.notGoing, borderWidth: 2, borderColor: Colors.surface },
   pillsRow:    { flexGrow: 0, paddingLeft: 20, paddingVertical: 8 },
-  feedContent:   { flex: 1, paddingHorizontal: 16, paddingTop: 8, zIndex: 0 },
+  eventsContent: { flex: 1, paddingHorizontal: 16, paddingTop: 8, zIndex: 0 },
   filterIconBtn:{ width: 28, height: 28, borderRadius: 14, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surface, alignItems: 'center', justifyContent: 'center' },
   dateFilterBetween: {
     paddingVertical: 8,

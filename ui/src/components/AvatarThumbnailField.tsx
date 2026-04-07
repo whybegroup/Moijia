@@ -1,4 +1,4 @@
-import React, { useState, useRef, type MutableRefObject, type ChangeEvent } from 'react';
+import { useState, useRef, type MutableRefObject, type ChangeEvent } from 'react';
 import {
   View,
   Text,

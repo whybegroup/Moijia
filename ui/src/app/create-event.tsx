@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useRef, type ChangeEvent } from 'react';
+import { useState, useEffect, useRef, type ChangeEvent } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, Alert, Platform, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter } from 'expo-router';
 import { Colors, Fonts, Radius } from '../constants/theme';
-import { getGroupColor, getDefaultGroupThemeFromName } from '../utils/helpers';
+import { getGroupColor, getDefaultGroupThemeFromName, formatLocalDateInput } from '../utils/helpers';
 import { NavBar, Field, Toggle, formSectionTitleStyle } from '../components/ui';
 import { useGroups, useCreateEvent, useAllGroupMemberColors } from '../hooks/api';
 import { uid } from '../utils/api-helpers';
@@ -23,17 +23,18 @@ import {
 export default function CreateEventScreen() {
   const router = useRouter();
   const { userId: currentUserId } = useCurrentUserContext();
-  const today  = new Date().toISOString().slice(0, 10);
-  const { data: groups = [], isLoading: loading } = useGroups(currentUserId ?? '');
+  const today = formatLocalDateInput(new Date());
+  const { data: groups = [] } = useGroups(currentUserId ?? '');
   const { data: groupColors = {} } = useAllGroupMemberColors(currentUserId || '');
   const createEventMutation = useCreateEvent(currentUserId ?? '');
 
   const [form, setForm] = useState({
-    title: '', subtitle: '', groupId: '',
+    title: '', description: '', groupId: '',
     startDate: today, startTime: '19:00', startAllDay: false,
     endDate: today, endTime: '21:00', endAllDay: false,
     location: '', minAttendees: '1', maxAttendees: '',
-    allowMaybe: false, enableWaitlist: false, description: '', coverPhotoDrafts: [] as CoverPhotoDraft[],
+    allowMaybe: false, enableWaitlist: false, coverPhotoDrafts: [] as CoverPhotoDraft[],
+    activityOptionDrafts: [''] as string[],
   });
   const [errors, setErrors] = useState({
     startDate: '',
@@ -137,12 +138,15 @@ export default function CreateEventScreen() {
         }
       }
       
+      const activityOptionLabels = form.activityOptionDrafts
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+
       const newEvent = {
         id: uid(),
         groupId: form.groupId,
         createdBy: currentUserId,
         title: form.title.trim(),
-        subtitle: form.subtitle.trim() || undefined,
         description: form.description.trim() || undefined,
         coverPhotos,
         start: start.toISOString(),
@@ -153,10 +157,11 @@ export default function CreateEventScreen() {
         maxAttendees: form.maxAttendees.trim() ? parseInt(form.maxAttendees, 10) : undefined,
         enableWaitlist: form.maxAttendees.trim() ? form.enableWaitlist : undefined,
         allowMaybe: form.allowMaybe,
+        ...(activityOptionLabels.length > 0 ? { activityOptionLabels } : {}),
       };
       
       await createEventMutation.mutateAsync(newEvent);
-      router.replace('/(tabs)/feed');
+      router.replace('/(tabs)/events');
     } catch {
       Alert.alert('Error', 'Failed to create event');
     }
@@ -193,32 +198,6 @@ export default function CreateEventScreen() {
     const minTime = new Date();
     minTime.setHours(h, m + 1, 0, 0);
     return minTime;
-  };
-
-  const generateTimeSuggestions = (currentTime: string) => {
-    const suggestions: string[] = [];
-    
-    for (let h = 0; h < 24; h++) {
-      for (let m = 0; m < 60; m += 30) {
-        const timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-        suggestions.push(timeStr);
-      }
-    }
-    
-    return suggestions;
-  };
-
-  const formatTimeDisplay = (time24: string) => {
-    const [h, m] = time24.split(':').map(Number);
-    const period = h >= 12 ? 'PM' : 'AM';
-    const hour12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
-    return `${hour12}:${String(m).padStart(2, '0')} ${period}`;
-  };
-
-  const formatDateDisplay = (dateStr: string) => {
-    if (!dateStr) return '';
-    const date = new Date(dateStr);
-    return date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
   };
 
   const validateStartDate = (dateStr: string) => {
@@ -301,12 +280,12 @@ export default function CreateEventScreen() {
     }
   };
 
-  const handleStartDateChange = (event: any, selectedDate?: Date) => {
+  const handleStartDateChange = (_event: unknown, selectedDate?: Date) => {
     if (Platform.OS === 'android') {
       setShowStartDatePicker(false);
     }
     if (selectedDate) {
-      const dateStr = selectedDate.toISOString().slice(0, 10);
+      const dateStr = formatLocalDateInput(selectedDate);
       set('startDate', dateStr);
       validateStartDate(dateStr);
       validateStartTime(form.startTime, dateStr);
@@ -315,12 +294,12 @@ export default function CreateEventScreen() {
     }
   };
 
-  const handleEndDateChange = (event: any, selectedDate?: Date) => {
+  const handleEndDateChange = (_event: unknown, selectedDate?: Date) => {
     if (Platform.OS === 'android') {
       setShowEndDatePicker(false);
     }
     if (selectedDate) {
-      const dateStr = selectedDate.toISOString().slice(0, 10);
+      const dateStr = formatLocalDateInput(selectedDate);
       set('endDate', dateStr);
       validateEndDate(dateStr, form.startDate);
       validateEndTime(form.endTime, form.startTime, dateStr, form.startDate);
@@ -340,7 +319,7 @@ export default function CreateEventScreen() {
     validateEndTime(form.endTime, form.startTime, dateStr, form.startDate);
   };
 
-  const handleStartTimeChange = (event: any, selectedTime?: Date) => {
+  const handleStartTimeChange = (_event: unknown, selectedTime?: Date) => {
     if (Platform.OS === 'android') {
       setShowStartTimePicker(false);
     }
@@ -360,7 +339,7 @@ export default function CreateEventScreen() {
     validateEndTime(form.endTime, timeStr, form.endDate, form.startDate);
   };
 
-  const handleEndTimeChange = (event: any, selectedTime?: Date) => {
+  const handleEndTimeChange = (_event: unknown, selectedTime?: Date) => {
     if (Platform.OS === 'android') {
       setShowEndTimePicker(false);
     }
@@ -380,7 +359,7 @@ export default function CreateEventScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <NavBar title="New Event" onBack={() => router.replace('/(tabs)/feed')}
+      <NavBar title="New Event" onBack={() => router.replace('/(tabs)/events')}
         right={
           <TouchableOpacity onPress={submit} style={[styles.headerBtn, !ok && styles.headerBtnDis]}>
             <Text style={[styles.headerBtnText, !ok && { color: Colors.textMuted }]} numberOfLines={1}>
@@ -411,9 +390,66 @@ export default function CreateEventScreen() {
           <TextInput value={form.title} onChangeText={v => set('title', v)} placeholder="e.g. Game Night" placeholderTextColor={Colors.textMuted} style={styles.input} />
         </Field>
 
-        <Field label="Subtitle">
-          <TextInput value={form.subtitle} onChangeText={v => set('subtitle', v)} placeholder="e.g. Bring your favorite board games" placeholderTextColor={Colors.textMuted} style={styles.input} />
+        <Field label="Event description">
+          <View style={styles.descBox}>
+            <TextInput
+              value={form.description}
+              onChangeText={(v) => set('description', v)}
+              placeholder="Add notes, directions, agenda, or a helpful link"
+              placeholderTextColor={Colors.textMuted}
+              multiline
+              numberOfLines={5}
+              maxLength={500}
+              style={styles.descInput}
+            />
+            <View style={styles.descToolbar}>
+              <Text style={{ fontSize: 11, color: Colors.textMuted }}>{form.description.length}/500</Text>
+            </View>
+          </View>
         </Field>
+
+        <View style={{ marginBottom: 8 }}>
+          <Text style={formSectionTitleStyle}>Activity ideas (optional)</Text>
+          <Text style={{ fontSize: 13, color: Colors.textMuted, fontFamily: Fonts.regular, marginBottom: 10 }}>
+            Add options for what to do; members can add more and vote on the event page.
+          </Text>
+          {form.activityOptionDrafts.map((line, i) => (
+            <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <TextInput
+                value={line}
+                onChangeText={(v) =>
+                  setForm((p) => ({
+                    ...p,
+                    activityOptionDrafts: p.activityOptionDrafts.map((x, j) => (j === i ? v : x)),
+                  }))
+                }
+                placeholder={`Option ${i + 1}`}
+                placeholderTextColor={Colors.textMuted}
+                style={[styles.input, { flex: 1 }]}
+              />
+              {form.activityOptionDrafts.length > 1 ? (
+                <TouchableOpacity
+                  onPress={() =>
+                    setForm((p) => ({
+                      ...p,
+                      activityOptionDrafts: p.activityOptionDrafts.filter((_, j) => j !== i),
+                    }))
+                  }
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Ionicons name="close-circle-outline" size={22} color={Colors.textMuted} />
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          ))}
+          <TouchableOpacity
+            onPress={() => setForm((prev) => ({ ...prev, activityOptionDrafts: [...prev.activityOptionDrafts, ''] }))}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4 }}
+          >
+            <Ionicons name="add-circle-outline" size={20} color={Colors.textSub} />
+            <Text style={{ fontSize: 14, color: Colors.text, fontFamily: Fonts.medium }}>Add another option</Text>
+          </TouchableOpacity>
+        </View>
 
         <View style={styles.dateTimeSection}>
           <View style={styles.sectionHeader}>
@@ -707,18 +743,6 @@ export default function CreateEventScreen() {
             </Field>
           </View>
         </View>
-
-        <Field label="Description">
-          <View style={styles.descBox}>
-            <TextInput value={form.description} onChangeText={v => set('description', v)}
-              placeholder={'Add notes, directions, agenda, or a helpful link'}
-              placeholderTextColor={Colors.textMuted}
-              multiline numberOfLines={5} style={styles.descInput} />
-            <View style={styles.descToolbar}>
-              <Text style={{ fontSize: 11, color: Colors.textMuted }}>{form.description.length}/500</Text>
-            </View>
-          </View>
-        </Field>
 
         <View style={styles.photosSection}>
           {Platform.OS === 'web' && (

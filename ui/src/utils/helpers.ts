@@ -1,4 +1,14 @@
 // ── Date formatting ───────────────────────────────────────────────────────────
+
+/** `YYYY-MM-DD` in the user's local calendar (for `<input type="date">` and `new Date(\`\${date}T\${time}\`)`). */
+export function formatLocalDateInput(d: Date | string): string {
+  const x = typeof d === 'string' ? new Date(d) : d;
+  const y = x.getFullYear();
+  const m = String(x.getMonth() + 1).padStart(2, '0');
+  const day = String(x.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 const DAYS_SHORT  = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const DAYS_FULL   = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 const MONTHS_S    = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];

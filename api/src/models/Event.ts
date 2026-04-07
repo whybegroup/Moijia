@@ -12,9 +12,7 @@ export interface Event {
   updatedBy: string;
   /** Event title */
   title: string;
-  /** Event subtitle */
-  subtitle?: string | null;
-  /** Event description */
+  /** Event description (multiline) */
   description?: string | null;
   /** Array of cover photo URLs */
   coverPhotos: string[];
@@ -40,6 +38,26 @@ export interface Event {
   updatedAt: Date;
 }
 
+/** Proposed activity for an event; members vote for one. */
+export interface EventActivityOption {
+  id: string;
+  label: string;
+  createdBy: string;
+  voteCount: number;
+  createdAt: Date;
+}
+
+/** Alternate schedule proposed by a member; host may accept to update the event. */
+export interface EventTimeSuggestion {
+  id: string;
+  suggestedBy: string;
+  start: Date;
+  end: Date;
+  status: 'pending' | 'accepted' | 'rejected';
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 /**
  * Event with RSVPs and comments (detailed view)
  */
@@ -48,6 +66,12 @@ export interface EventDetailed extends Event {
   rsvps: RSVP[];
   /** Array of comments on this event */
   comments: Comment[];
+  /** Activity choices; members add options and vote */
+  activityOptions: EventActivityOption[];
+  /** When the request included viewer `userId`: option ids this user voted for */
+  myActivityVoteOptionIds?: string[];
+  /** Suggested time changes */
+  timeSuggestions: EventTimeSuggestion[];
   /**
    * When loaded with a viewer `userId`: whether they are watching for default event notifications.
    * Default on for host + Going/Maybe; others off until they opt in (or override).
@@ -70,7 +94,7 @@ export interface EventInput {
   groupId: string;
   createdBy: string;
   title: string;
-  subtitle?: string;
+  /** Event description (multiline) */
   description?: string;
   coverPhotos?: string[];
   start: Date | string;
@@ -81,6 +105,8 @@ export interface EventInput {
   maxAttendees?: number;
   enableWaitlist?: boolean;
   allowMaybe?: boolean;
+  /** Initial activity options (labels); creator is recorded as author */
+  activityOptionLabels?: string[];
 }
 
 /**
@@ -88,7 +114,7 @@ export interface EventInput {
  */
 export interface EventUpdate {
   title?: string;
-  subtitle?: string;
+  /** Event description (multiline) */
   description?: string;
   coverPhotos?: string[];
   start?: Date | string;
@@ -166,4 +192,25 @@ export interface CommentUpdateInput {
 /** Input for deleting a comment */
 export interface CommentDeleteInput {
   actorId: string;
+}
+
+/** Add an activity option to an event */
+export interface EventActivityOptionInput {
+  id: string;
+  userId: string;
+  label: string;
+}
+
+/** Cast or change vote for an activity option */
+export interface EventActivityVoteInput {
+  userId: string;
+  optionId: string;
+}
+
+/** Propose a new start/end time for the event */
+export interface EventTimeSuggestionInput {
+  id: string;
+  userId: string;
+  start: Date | string;
+  end: Date | string;
 }

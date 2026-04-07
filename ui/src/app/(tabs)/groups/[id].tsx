@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Modal, TextInput, Alert, ActivityIndicator, Platform } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -365,6 +365,60 @@ export default function GroupDetailScreen() {
     }
   };
 
+  const groupPhotosSection = showGroupCoverSection ? (
+    <View style={styles.photosSectionLower}>
+      <Text style={formSectionTitleStyle}>
+        Photos{coverPhotosForDisplay.length > 0 ? ` · ${coverPhotosForDisplay.length}` : ''}
+      </Text>
+      <View style={[styles.card, styles.photosCard]}>
+        {coverPhotosForDisplay.length > 0 && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={{ borderBottomWidth: isAdmin && !isPending ? 1 : 0, borderBottomColor: Colors.border }}
+            contentContainerStyle={{ gap: 4, padding: 10 }}
+          >
+            {coverPhotosForDisplay.map((uri, i) => (
+              <View key={`${uri}-${i}`} style={{ position: 'relative' }}>
+                <ResolvableImage
+                  storedUrl={uri}
+                  style={{ width: 80, height: 80, borderRadius: Radius.lg }}
+                  resizeMode="cover"
+                />
+                {isAdmin && !isPending && (
+                  <TouchableOpacity
+                    onPress={() => void removeCoverPhotoAt(i)}
+                    style={styles.coverRemoveThumb}
+                  >
+                    <Ionicons name="close" size={11} color="#fff" />
+                  </TouchableOpacity>
+                )}
+              </View>
+            ))}
+          </ScrollView>
+        )}
+        {isAdmin && !isPending && (
+          <View style={[styles.coverToolbar, coverPhotosForDisplay.length === 0 && { borderTopWidth: 0 }]}>
+            <TouchableOpacity
+              onPress={() => void addCoverPhotoFromPicker()}
+              style={styles.coverPhotoBtn}
+              disabled={coverPhotoBusy}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                {coverPhotoBusy ? (
+                  <ActivityIndicator size="small" color={Colors.textSub} />
+                ) : (
+                  <Ionicons name="camera-outline" size={16} color={Colors.textSub} />
+                )}
+                <Text style={{ fontSize: 12, color: Colors.textSub, fontFamily: Fonts.medium }}>Add photo</Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+    </View>
+  ) : null;
+
   return (
     <SafeAreaView style={styles.safe}>
       <NavBar
@@ -453,6 +507,8 @@ export default function GroupDetailScreen() {
             readOnly={!isAdmin}
           />
 
+          {groupPhotosSection}
+
           {(!isPending && inviteCode) || (isAdmin || isSuperAdmin) ? (
             <View style={styles.inviteSection}>
               {(isAdmin || isSuperAdmin) && (
@@ -520,60 +576,6 @@ export default function GroupDetailScreen() {
             </View>
           ) : null}
         </View>
-
-        {showGroupCoverSection ? (
-          <View style={styles.photosSection}>
-            <Text style={formSectionTitleStyle}>
-              Photos{coverPhotosForDisplay.length > 0 ? ` · ${coverPhotosForDisplay.length}` : ''}
-            </Text>
-            <View style={[styles.card, styles.photosCard]}>
-              {coverPhotosForDisplay.length > 0 && (
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  style={{ borderBottomWidth: isAdmin && !isPending ? 1 : 0, borderBottomColor: Colors.border }}
-                  contentContainerStyle={{ gap: 4, padding: 10 }}
-                >
-                  {coverPhotosForDisplay.map((uri, i) => (
-                    <View key={`${uri}-${i}`} style={{ position: 'relative' }}>
-                      <ResolvableImage
-                        storedUrl={uri}
-                        style={{ width: 80, height: 80, borderRadius: Radius.lg }}
-                        resizeMode="cover"
-                      />
-                      {isAdmin && !isPending && (
-                        <TouchableOpacity
-                          onPress={() => void removeCoverPhotoAt(i)}
-                          style={styles.coverRemoveThumb}
-                        >
-                          <Ionicons name="close" size={11} color="#fff" />
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                  ))}
-                </ScrollView>
-              )}
-              {isAdmin && !isPending && (
-                <View style={[styles.coverToolbar, coverPhotosForDisplay.length === 0 && { borderTopWidth: 0 }]}>
-                  <TouchableOpacity
-                    onPress={() => void addCoverPhotoFromPicker()}
-                    style={styles.coverPhotoBtn}
-                    disabled={coverPhotoBusy}
-                  >
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                      {coverPhotoBusy ? (
-                        <ActivityIndicator size="small" color={Colors.textSub} />
-                      ) : (
-                        <Ionicons name="camera-outline" size={16} color={Colors.textSub} />
-                      )}
-                      <Text style={{ fontSize: 12, color: Colors.textSub, fontFamily: Fonts.medium }}>Add photo</Text>
-                    </View>
-                  </TouchableOpacity>
-                </View>
-              )}
-            </View>
-          </View>
-        ) : null}
 
         {isPending ? (
           <View style={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 100 }}>
@@ -922,7 +924,14 @@ const styles = StyleSheet.create({
     ...(Platform.OS === 'web' ? ({ outlineStyle: 'none', outlineWidth: 0 } as any) : null),
   },
   nameInputSlot:    { flex: 1, minWidth: 0 },
-  photosSection:    { paddingHorizontal: 20, marginTop: 0, marginBottom: 18 },
+  /** No horizontal padding — parent ScrollView column already uses paddingHorizontal: 20 */
+  photosSectionLower: {
+    marginTop: 22,
+    paddingTop: 22,
+    marginBottom: 18,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.border,
+  },
   photosCard:       { overflow: 'hidden' },
   coverToolbar:     { flexDirection: 'row', alignItems: 'center', padding: 8, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: Colors.border },
   coverPhotoBtn:    { paddingHorizontal: 10, paddingVertical: 5, borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.bg },

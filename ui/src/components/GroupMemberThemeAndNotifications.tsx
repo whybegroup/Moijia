@@ -1,13 +1,19 @@
-import React, { useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
+import { useState } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Fonts, Radius } from '../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName } from '../utils/helpers';
 import { Toggle } from './ui';
-import { useGroupMemberColor, useUpdateGroupMemberColor } from '../hooks/api';
+import type { Partial_NotifPrefs_ } from '@moija/client';
+import {
+  useGroupMemberColor,
+  useUpdateGroupMemberColor,
+  useGroupMemberNotifPrefs,
+  useUpdateGroupMemberNotifPrefs,
+} from '../hooks/api';
 import ColorPicker, { Panel1, HueSlider, OpacitySlider } from 'reanimated-color-picker';
 
-const REMINDER_OPTIONS = ['Never', '1 hour before', '1 day before', '1 week before'];
+const REMINDER_OPTIONS = ['Never', '1 hour before', '1 day before', '1 week before'] as const;
 
 type Props = {
   groupId: string;
@@ -18,36 +24,25 @@ type Props = {
 export function GroupMemberThemeAndNotifications({ groupId, userId, groupName }: Props) {
   const { data: memberColorData } = useGroupMemberColor(groupId, userId);
   const updateMemberColor = useUpdateGroupMemberColor(groupId, userId);
+  const { data: notifPrefs, isPending: notifPrefsLoading } = useGroupMemberNotifPrefs(groupId, userId);
+  const updateMemberNotifPrefs = useUpdateGroupMemberNotifPrefs(groupId, userId);
 
   const userColorHex = memberColorData?.colorHex || getDefaultGroupThemeFromName(groupName);
   const p = getGroupColor(userColorHex);
 
   const [themeExpanded, setThemeExpanded] = useState(false);
 
-  const [notifSettings, setNotifSettings] = useState({
-    newEvent: true,
-    minAttendees: true,
-    onLocation: false,
-    onTime: true,
-    onRsvp: false,
-    reminder: '1 hour before',
-  });
-
-  const selectColor = async (colorHex: string) => {
+  const patchNotif = async (patch: Partial_NotifPrefs_) => {
     try {
-      await updateMemberColor.mutateAsync(colorHex);
+      await updateMemberNotifPrefs.mutateAsync(patch);
     } catch {
       /* unchanged */
     }
   };
 
-  const updateSetting = (key: string, value: boolean | string) => {
-    setNotifSettings((s) => ({ ...s, [key]: value }));
-  };
-
   return (
     <>
-      <Text style={styles.sectionLabel}>THEME COLOR</Text>
+      <Text style={styles.sectionLabel}>GROUP THEME COLOR (ONLY FOR ME)</Text>
       <View style={[styles.card, { marginBottom: 20 }]}>
         <TouchableOpacity
           style={styles.themeHeader}
@@ -66,7 +61,7 @@ export function GroupMemberThemeAndNotifications({ groupId, userId, groupName }:
         </TouchableOpacity>
         {themeExpanded ? (
           <View style={styles.colorPickerWrap}>
-            <ColorPicker style={{ width: '100%' }} value={userColorHex} onCompleteJS={({ hex }) => void selectColor(hex)}>
+            <ColorPicker style={{ width: '100%' }} value={userColorHex} onCompleteJS={({ hex }) => void updateMemberColor.mutateAsync(hex)}>
               <Panel1 />
               <HueSlider />
               <OpacitySlider />
@@ -76,29 +71,67 @@ export function GroupMemberThemeAndNotifications({ groupId, userId, groupName }:
         ) : null}
       </View>
 
-      <Text style={styles.sectionLabel}>NOTIFICATIONS</Text>
+      <Text style={styles.sectionLabel}>NOTIFICATION SETTINGS FOR THIS GROUP</Text>
+      <Text style={styles.sectionHint}>Each type must be on here and in Profile → Notifications to deliver.</Text>
       <View style={[styles.card, { marginBottom: 20 }]}>
         <View style={styles.notifSection}>
-          <Toggle value={notifSettings.newEvent} onChange={(v) => updateSetting('newEvent', v)} label="New event alerts" />
-          <Toggle value={notifSettings.minAttendees} onChange={(v) => updateSetting('minAttendees', v)} label="Min attendees alerts" />
-          <Toggle value={notifSettings.onLocation} onChange={(v) => updateSetting('onLocation', v)} label="Location changes" />
-          <Toggle value={notifSettings.onTime} onChange={(v) => updateSetting('onTime', v)} label="Time changes" />
-          <Toggle value={notifSettings.onRsvp} onChange={(v) => updateSetting('onRsvp', v)} label="RSVP updates" />
+          {notifPrefsLoading ? (
+            <View style={{ alignItems: 'center', paddingVertical: 24 }}>
+              <ActivityIndicator color={Colors.accent} />
+            </View>
+          ) : notifPrefs ? (
+            <>
+              <Toggle
+                value={notifPrefs.newEvent}
+                onChange={(v) => void patchNotif({ newEvent: v })}
+                label="New event alerts"
+              />
+              <Toggle
+                value={notifPrefs.minAttendees}
+                onChange={(v) => void patchNotif({ minAttendees: v })}
+                label="Event min attendees / waitlist"
+              />
+              <Toggle
+                value={notifPrefs.onLocation}
+                onChange={(v) => void patchNotif({ onLocation: v })}
+                label="Event location changes"
+              />
+              <Toggle value={notifPrefs.onTime} onChange={(v) => void patchNotif({ onTime: v })} label="Event time changes" />
+              <Toggle value={notifPrefs.onRsvp} onChange={(v) => void patchNotif({ onRsvp: v })} label="Event RSVP updates" />
+              <Toggle value={notifPrefs.comments} onChange={(v) => void patchNotif({ comments: v })} label="Event comments" />
+              <Toggle value={notifPrefs.mentions} onChange={(v) => void patchNotif({ mentions: v })} label="Event comment mentions" />
+              <Toggle
+                value={notifPrefs.groupMembership}
+                onChange={(v) => void patchNotif({ groupMembership: v })}
+                label="Group membership updates (e.g. approvals)"
+              />
 
-          <View style={styles.reminderRow}>
-            <Text style={styles.reminderLabel}>Event reminder</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
-              {REMINDER_OPTIONS.map((opt) => (
-                <TouchableOpacity
-                  key={opt}
-                  onPress={() => updateSetting('reminder', opt)}
-                  style={[styles.reminderChip, notifSettings.reminder === opt && styles.reminderChipActive]}
-                >
-                  <Text style={[styles.reminderChipText, notifSettings.reminder === opt && styles.reminderChipTextActive]}>{opt}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
+              <View style={styles.reminderRow}>
+                <Text style={styles.reminderLabel}>Event reminder</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                  {REMINDER_OPTIONS.map((opt) => (
+                    <TouchableOpacity
+                      key={opt}
+                      onPress={() => void patchNotif({ eventReminder: opt })}
+                      style={[
+                        styles.reminderChip,
+                        notifPrefs.eventReminder === opt && styles.reminderChipActive,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.reminderChipText,
+                          notifPrefs.eventReminder === opt && styles.reminderChipTextActive,
+                        ]}
+                      >
+                        {opt}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            </>
+          ) : null}
         </View>
       </View>
     </>
@@ -107,6 +140,7 @@ export function GroupMemberThemeAndNotifications({ groupId, userId, groupName }:
 
 const styles = StyleSheet.create({
   sectionLabel: { fontSize: 11, fontFamily: Fonts.semiBold, color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 10 },
+  sectionHint: { fontSize: 12, fontFamily: Fonts.regular, color: Colors.textMuted, marginTop: -6, marginBottom: 10, lineHeight: 17 },
   card: { backgroundColor: Colors.surface, borderRadius: 16, borderWidth: 1, borderColor: Colors.border, overflow: 'hidden' },
   themeHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16 },
   themeHeaderText: { flex: 1, minWidth: 0 },

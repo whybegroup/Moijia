@@ -1,7 +1,16 @@
-import React, { useState, useRef, useMemo, useCallback, useEffect, type ChangeEvent } from 'react';
+import {
+  useState,
+  useRef,
+  useMemo,
+  useCallback,
+  useEffect,
+  createRef,
+  type ChangeEvent,
+  type RefObject,
+} from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput,
-  StyleSheet, Image, Modal, Linking, Alert, FlatList,
+  StyleSheet, Modal, Linking, Alert, FlatList,
   useWindowDimensions,
   type StyleProp,
   type TextStyle,
@@ -14,7 +23,16 @@ import Swipeable, { type SwipeableMethods } from 'react-native-gesture-handler/R
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { Colors, Fonts, Radius, Shadows } from '../../constants/theme';
-import { getGroupColor, getDefaultGroupThemeFromName, fmtTime, fmtDateFull, timeAgo, dDiff, getMyWaitlistPosition } from '../../utils/helpers';
+import {
+  getGroupColor,
+  getDefaultGroupThemeFromName,
+  fmtTime,
+  fmtDateFull,
+  timeAgo,
+  dDiff,
+  getMyWaitlistPosition,
+  formatLocalDateInput,
+} from '../../utils/helpers';
 import { computeMentionUserIdsForPost, type MentionMemberRow } from '../../utils/mentionUtils';
 import { Avatar, Sheet, formSectionTitleStyle } from '../../components/ui';
 import { CommentMentionInput } from '../../components/CommentMentionInput';
@@ -33,10 +51,17 @@ import {
   useDeleteEvent,
   useSetEventWatch,
   useUpdateEvent,
+  useAddActivityOption,
+  useDeleteActivityOption,
+  useSetActivityVote,
+  useCreateTimeSuggestion,
+  useAcceptTimeSuggestion,
+  useRejectTimeSuggestion,
 } from '../../hooks/api';
 import { uid, getNoResponseIds } from '../../utils/api-helpers';
 import type { CommentInput, EventDetailed, GroupScoped, RSVP, User } from '@moija/client';
-import { RSVPInput } from '@moija/client';
+import { RSVPInput, MembershipStatus } from '@moija/client';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useCurrentUserContext } from '../../contexts/CurrentUserContext';
 import { ResolvableImage } from '../../components/ResolvableImage';
 import {
@@ -261,11 +286,11 @@ export default function EventDetailScreen() {
 
   const eventId = Array.isArray(id) ? id[0] : id;
 
-  const { data: ev, isLoading: eventLoading, refetch: refetchEvent } = useEvent(
+  const { data: ev, refetch: refetchEvent } = useEvent(
     eventId || '',
     currentUserId ?? ''
   );
-  const { data: group, isLoading: groupLoading, refetch: refetchGroup } = useGroup(
+  const { data: group, refetch: refetchGroup } = useGroup(
     ev?.groupId || '',
     currentUserId ?? ''
   );
@@ -286,6 +311,12 @@ export default function EventDetailScreen() {
   const deleteEventMutation = useDeleteEvent(currentUserId ?? '');
   const setWatchMutation = useSetEventWatch(eventId || '', currentUserId ?? undefined);
   const updateEventMutation = useUpdateEvent(eventId || '', currentUserId ?? '');
+  const addActivityOptionMutation = useAddActivityOption(eventId || '', currentUserId ?? '');
+  const deleteActivityOptionMutation = useDeleteActivityOption(eventId || '', currentUserId ?? '');
+  const setActivityVoteMutation = useSetActivityVote(eventId || '', currentUserId ?? '');
+  const createTimeSuggestionMutation = useCreateTimeSuggestion(eventId || '', currentUserId ?? '');
+  const acceptTimeSuggestionMutation = useAcceptTimeSuggestion(eventId || '', currentUserId ?? '');
+  const rejectTimeSuggestionMutation = useRejectTimeSuggestion(eventId || '', currentUserId ?? '');
 
   const [localCoverPhotos, setLocalCoverPhotos] = useState<string[]>([]);
   const [coverPhotoBusy, setCoverPhotoBusy] = useState(false);
@@ -348,13 +379,23 @@ export default function EventDetailScreen() {
   const [lightbox,    setLightbox]    = useState<{ url: string; name: string; ts: Date } | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [commentPostBusy, setCommentPostBusy] = useState(false);
+  const [newActivityLabel, setNewActivityLabel] = useState('');
+  const [showTimeSuggestModal, setShowTimeSuggestModal] = useState(false);
+  const [suggestStartDate, setSuggestStartDate] = useState('');
+  const [suggestStartTime, setSuggestStartTime] = useState('19:00');
+  const [suggestEndDate, setSuggestEndDate] = useState('');
+  const [suggestEndTime, setSuggestEndTime] = useState('21:00');
+  const [showSuggestStartDatePicker, setShowSuggestStartDatePicker] = useState(false);
+  const [showSuggestEndDatePicker, setShowSuggestEndDatePicker] = useState(false);
+  const [showSuggestStartTimePicker, setShowSuggestStartTimePicker] = useState(false);
+  const [showSuggestEndTimePicker, setShowSuggestEndTimePicker] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
-  const commentSwipeRefById = useRef(new Map<string, React.RefObject<SwipeableMethods | null>>());
+  const commentSwipeRefById = useRef(new Map<string, RefObject<SwipeableMethods | null>>());
 
   const refForCommentSwipe = useCallback((commentId: string) => {
     let r = commentSwipeRefById.current.get(commentId);
     if (!r) {
-      r = React.createRef<SwipeableMethods | null>();
+      r = createRef<SwipeableMethods | null>();
       commentSwipeRefById.current.set(commentId, r);
     }
     return r;
@@ -421,6 +462,17 @@ export default function EventDetailScreen() {
     }
   }, [currentUserId, pickCommentPhotoNative]);
 
+  useEffect(() => {
+    if (!showTimeSuggestModal || !ev?.start || !ev?.end) return;
+    const s = new Date(ev.start as string);
+    const e = new Date(ev.end as string);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    setSuggestStartDate(formatLocalDateInput(s));
+    setSuggestEndDate(formatLocalDateInput(e));
+    setSuggestStartTime(`${pad(s.getHours())}:${pad(s.getMinutes())}`);
+    setSuggestEndTime(`${pad(e.getHours())}:${pad(e.getMinutes())}`);
+  }, [showTimeSuggestModal, ev?.id, ev?.start, ev?.end]);
+
   if (!eventId) {
     return (
       <SafeAreaView style={styles.container}>
@@ -431,7 +483,6 @@ export default function EventDetailScreen() {
     );
   }
 
-  const loading = eventLoading || groupLoading;
   const eventDetailed = ev as EventDetailed | undefined;
   
   const comments = (eventDetailed?.comments || [])
@@ -496,6 +547,95 @@ export default function EventDetailScreen() {
   const canEdit = ev.createdBy === currentUserId || 
                   group.superAdminId === currentUserId || 
                   (group.adminIds ?? []).includes(currentUserId);
+  const gScoped = group as GroupScoped;
+  const canCollaborateActivities =
+    !!currentUserId &&
+    (gScoped.membershipStatus === MembershipStatus.MEMBER ||
+      gScoped.membershipStatus === MembershipStatus.ADMIN);
+  const activityOptions = ev.activityOptions ?? [];
+  const timeSuggestions = ev.timeSuggestions ?? [];
+  const myActivityVoteOptionIds = ev.myActivityVoteOptionIds ?? [];
+  const canResolveTimeSuggestions = canEdit;
+  const pendingTimeSuggestions = timeSuggestions.filter((s) => s.status === 'pending');
+
+  const submitNewActivityOption = async () => {
+    const label = newActivityLabel.trim();
+    if (!label || !currentUserId) return;
+    try {
+      await addActivityOptionMutation.mutateAsync({
+        id: uid(),
+        userId: currentUserId,
+        label,
+      });
+      setNewActivityLabel('');
+    } catch {
+      Alert.alert('Error', 'Could not add activity option');
+    }
+  };
+
+  const onPressActivityOption = async (optionId: string) => {
+    if (!currentUserId || !canCollaborateActivities) return;
+    try {
+      await setActivityVoteMutation.mutateAsync({ userId: currentUserId, optionId });
+    } catch {
+      Alert.alert('Error', 'Could not update vote');
+    }
+  };
+
+  const removeActivityOption = (optionId: string) => {
+    Alert.alert('Remove option', 'Remove this activity?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await deleteActivityOptionMutation.mutateAsync(optionId);
+          } catch {
+            Alert.alert('Error', 'Could not remove option');
+          }
+        },
+      },
+    ]);
+  };
+
+  const submitTimeSuggestion = async () => {
+    if (!currentUserId || !suggestStartDate || !suggestEndDate) return;
+    const [sh, sm] = suggestStartTime.split(':').map(Number);
+    const [eh, em] = suggestEndTime.split(':').map(Number);
+    const start = new Date(
+      suggestStartDate +
+        'T' +
+        String(sh).padStart(2, '0') +
+        ':' +
+        String(sm || 0).padStart(2, '0') +
+        ':00',
+    );
+    const end = new Date(
+      suggestEndDate +
+        'T' +
+        String(eh).padStart(2, '0') +
+        ':' +
+        String(em || 0).padStart(2, '0') +
+        ':00',
+    );
+    if (!(start.getTime() < end.getTime())) {
+      Alert.alert('Check times', 'End must be after start.');
+      return;
+    }
+    try {
+      await createTimeSuggestionMutation.mutateAsync({
+        id: uid(),
+        userId: currentUserId,
+        start: start.toISOString(),
+        end: end.toISOString(),
+      });
+      setShowTimeSuggestModal(false);
+    } catch {
+      Alert.alert('Error', 'Could not submit time suggestion');
+    }
+  };
+
   const coverPhotosForDisplay = canEdit ? localCoverPhotos : (ev.coverPhotos ?? []);
   const showEventPhotosSection = coverPhotosForDisplay.length > 0 || canEdit;
 
@@ -574,7 +714,7 @@ export default function EventDetailScreen() {
     setShowDeleteConfirm(false);
     try {
       await deleteEventMutation.mutateAsync(eventId || '');
-      router.push('/(tabs)/feed');
+      router.push('/(tabs)/events');
     } catch {
       Alert.alert('Error', 'Failed to delete event');
     }
@@ -757,7 +897,7 @@ export default function EventDetailScreen() {
       {/* Nav */}
       <View style={styles.nav}>
         <TouchableOpacity
-          onPress={() => router.replace('/(tabs)/feed')}
+          onPress={() => router.replace('/(tabs)/events')}
           style={styles.navBack}
         >
           <Text style={styles.navBackText}>← Back</Text>
@@ -862,12 +1002,18 @@ export default function EventDetailScreen() {
 
           <View style={{ paddingHorizontal: 20, paddingTop: hasBanners ? 12 : 20 }}>
             <Text style={styles.eventTitle}>{ev.title}</Text>
-            {ev.subtitle ? <Text style={styles.eventSubtitle}>{ev.subtitle}</Text> : null}
+            {ev.description ? (
+              <View style={[styles.descBox, { marginTop: 10 }]}>
+                <Text style={styles.descText}>
+                  <DescText text={ev.description} />
+                </Text>
+              </View>
+            ) : null}
           </View>
 
           {/* Photos */}
           {showEventPhotosSection ? (
-            <View style={{ marginTop: ev.subtitle ? 4 : 10 }}>
+            <View style={{ marginTop: ev.description ? 4 : 10 }}>
               <View style={{ paddingHorizontal: 20 }}>
                 <Text style={formSectionTitleStyle}>
                   Photos{coverPhotosForDisplay.length > 0 ? ` · ${coverPhotosForDisplay.length}` : ''}
@@ -934,14 +1080,40 @@ export default function EventDetailScreen() {
                       </Text>
                     </View>
                   </View>
+                  {canCollaborateActivities && !isPast && ev.createdBy !== currentUserId ? (
+                    <TouchableOpacity
+                      onPress={() => setShowTimeSuggestModal(true)}
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2, marginLeft: 32 }}
+                    >
+                      <Ionicons name="time-outline" size={18} color={Colors.textMuted} />
+                      <Text style={{ fontSize: 14, color: Colors.textMuted, fontFamily: Fonts.semiBold }}>
+                        Suggest a different time
+                      </Text>
+                    </TouchableOpacity>
+                  ) : null}
                 </View>
               ) : (
-                <InfoRow ionicon="calendar-outline">
-                  {fmtDateFull(evStart)}
-                  {ev.isAllDay ? ' · All day' : ` · ${fmtTime(evStart)} – ${fmtTime(evEnd)}`}
-                </InfoRow>
+                <View style={{ gap: 6 }}>
+                  <InfoRow ionicon="calendar-outline">
+                    {fmtDateFull(evStart)}
+                    {ev.isAllDay ? ' · All day' : ` · ${fmtTime(evStart)} – ${fmtTime(evEnd)}`}
+                  </InfoRow>
+                  {canCollaborateActivities && !isPast && ev.createdBy !== currentUserId ? (
+                    <TouchableOpacity
+                      onPress={() => setShowTimeSuggestModal(true)}
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginLeft: 32 }}
+                    >
+                      <Ionicons name="time-outline" size={18} color={Colors.textMuted} />
+                      <Text style={{ fontSize: 14, color: Colors.textMuted, fontFamily: Fonts.semiBold }}>
+                        Suggest a different time
+                      </Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
               )}
-              {ev.location && <InfoRow ionicon="location-outline">{ev.location}</InfoRow>}
+              <InfoRow ionicon="location-outline">
+                {ev.location?.trim() ? ev.location.trim() : <Text style={{ color: Colors.textMuted }}>None</Text>}
+              </InfoRow>
               {((ev.minAttendees || 0) > 0 || (ev.maxAttendees || 0) > 0) && (
                 <InfoRow ionicon="people-outline">
                   {(ev.minAttendees || 0) > 0 && `Min ${ev.minAttendees}`}
@@ -953,10 +1125,62 @@ export default function EventDetailScreen() {
               <InfoRow ionicon="person-outline">Created by {getUserSafe(ev.createdBy).displayName}</InfoRow>
             </View>
 
-            {/* Description */}
-            {ev.description ? (
-              <View style={styles.descBox}>
-                <Text style={styles.descText}><DescText text={ev.description} /></Text>
+            {pendingTimeSuggestions.length > 0 ? (
+              <View style={{ marginBottom: 16, gap: 10 }}>
+                <Text style={formSectionTitleStyle}>Pending time changes</Text>
+                {pendingTimeSuggestions.map((sug) => {
+                  const ss = new Date(sug.start as string);
+                  const se = new Date(sug.end as string);
+                  return (
+                    <View
+                      key={sug.id}
+                      style={{
+                        borderWidth: 1,
+                        borderColor: Colors.border,
+                        borderRadius: Radius.md,
+                        padding: 12,
+                        backgroundColor: Colors.bg,
+                      }}
+                    >
+                      <Text style={{ fontSize: 13, color: Colors.textMuted, marginBottom: 4 }}>
+                        {getUserSafe(sug.suggestedBy).displayName} suggests
+                      </Text>
+                      <Text style={{ fontSize: 14, fontFamily: Fonts.medium, color: Colors.text }}>
+                        {fmtDateFull(ss)}
+                        {ev.isAllDay ? '' : ` · ${fmtTime(ss)}`} – {fmtDateFull(se)}
+                        {ev.isAllDay ? '' : ` · ${fmtTime(se)}`}
+                      </Text>
+                      {canResolveTimeSuggestions ? (
+                        <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
+                          <TouchableOpacity
+                            onPress={async () => {
+                              try {
+                                await acceptTimeSuggestionMutation.mutateAsync(sug.id);
+                              } catch {
+                                Alert.alert('Error', 'Could not accept suggestion');
+                              }
+                            }}
+                            style={[styles.smallActionBtn, { backgroundColor: p.dot }]}
+                          >
+                            <Text style={styles.smallActionBtnText}>Accept</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            onPress={async () => {
+                              try {
+                                await rejectTimeSuggestionMutation.mutateAsync(sug.id);
+                              } catch {
+                                Alert.alert('Error', 'Could not reject suggestion');
+                              }
+                            }}
+                            style={[styles.smallActionBtn, { borderWidth: 1, borderColor: Colors.border }]}
+                          >
+                            <Text style={[styles.smallActionBtnText, { color: Colors.text }]}>Decline</Text>
+                          </TouchableOpacity>
+                        </View>
+                      ) : null}
+                    </View>
+                  );
+                })}
               </View>
             ) : null}
           </View>
@@ -1000,6 +1224,83 @@ export default function EventDetailScreen() {
               </View>
               <Text style={{ color: Colors.textMuted, fontSize: 16 }}>›</Text>
             </TouchableOpacity>
+
+            {activityOptions.length > 0 || canCollaborateActivities ? (
+              <View style={styles.activitiesSection}>
+                <Text style={formSectionTitleStyle}>Activities</Text>
+                {canCollaborateActivities ? (
+                  <Text style={{ fontSize: 13, color: Colors.textMuted, marginBottom: 10, fontFamily: Fonts.regular }}>
+                    Tap to vote for any options you like. Tap again on an option to remove your vote.
+                  </Text>
+                ) : (
+                  <Text style={{ fontSize: 13, color: Colors.textMuted, marginBottom: 10, fontFamily: Fonts.regular }}>
+                    What the group might do (voting is for members).
+                  </Text>
+                )}
+                {activityOptions.map((opt) => {
+                  const selected = myActivityVoteOptionIds.includes(opt.id);
+                  const canRemoveOpt = opt.createdBy === currentUserId || canEdit;
+                  return (
+                    <View
+                      key={opt.id}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        paddingVertical: 10,
+                        paddingHorizontal: 12,
+                        borderRadius: Radius.md,
+                        borderWidth: 1,
+                        borderColor: selected ? p.dot : Colors.border,
+                        backgroundColor: selected ? p.row : Colors.bg,
+                        marginBottom: 8,
+                        gap: 8,
+                      }}
+                    >
+                      <TouchableOpacity
+                        style={{ flex: 1 }}
+                        onPress={() => void onPressActivityOption(opt.id)}
+                        disabled={!canCollaborateActivities || isPast}
+                        activeOpacity={0.75}
+                      >
+                        <Text style={{ fontSize: 15, fontFamily: Fonts.medium, color: Colors.text }}>{opt.label}</Text>
+                        <Text style={{ fontSize: 12, color: Colors.textMuted, marginTop: 2, fontFamily: Fonts.regular }}>
+                          {opt.voteCount} vote{opt.voteCount === 1 ? '' : 's'} · suggested by{' '}
+                          {getUserSafe(opt.createdBy).displayName}
+                        </Text>
+                      </TouchableOpacity>
+                      {selected ? <Ionicons name="checkmark-circle" size={22} color={p.dot} /> : null}
+                      {canRemoveOpt && !isPast ? (
+                        <TouchableOpacity
+                          onPress={() => removeActivityOption(opt.id)}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        >
+                          <Ionicons name="trash-outline" size={18} color={Colors.textMuted} />
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                  );
+                })}
+                {canCollaborateActivities && !isPast ? (
+                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 4, alignItems: 'center' }}>
+                    <TextInput
+                      value={newActivityLabel}
+                      onChangeText={setNewActivityLabel}
+                      placeholder="Add an activity idea"
+                      placeholderTextColor={Colors.textMuted}
+                      style={[styles.commentInput, { flex: 1 }]}
+                      onSubmitEditing={() => void submitNewActivityOption()}
+                    />
+                    <TouchableOpacity
+                      onPress={() => void submitNewActivityOption()}
+                      style={[styles.postBtn, !newActivityLabel.trim() && styles.postBtnDisabled]}
+                      disabled={!newActivityLabel.trim()}
+                    >
+                      <Text style={styles.postBtnText}>Add</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
           </View>
         </View>
 
@@ -1024,6 +1325,11 @@ export default function EventDetailScreen() {
 
         {/* Comments */}
         <View style={styles.commentsBlock}>
+          <View style={styles.commentsSectionHeader}>
+            <Text style={formSectionTitleStyle}>
+              Comments{comments.length > 0 ? ` · ${comments.length}` : ''}
+            </Text>
+          </View>
           {comments.length === 0 && (
             <View style={{ padding: 28, alignItems: 'center', gap: 8 }}>
               {isPast ? (
@@ -1310,6 +1616,181 @@ export default function EventDetailScreen() {
           </View>
         </View>
       </Modal>
+
+      <Modal
+        visible={showTimeSuggestModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowTimeSuggestModal(false)}
+      >
+        <View style={styles.deleteOverlay}>
+          <View style={[styles.deleteBox, { maxWidth: 400 }]}>
+            <Text style={styles.deleteTitle}>Suggest a time</Text>
+            <Text style={[styles.deleteMessage, { marginBottom: 12 }]}>
+              Propose new start and end. The host can accept to update the event.
+            </Text>
+            {Platform.OS === 'web' ? (
+              <View style={{ gap: 10, marginBottom: 16 }}>
+                <Text style={{ fontSize: 12, fontFamily: Fonts.semiBold, color: Colors.textMuted }}>Start</Text>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <input
+                    type="date"
+                    value={suggestStartDate}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSuggestStartDate(e.target.value)}
+                    style={{
+                      flex: 1,
+                      padding: '10px 12px',
+                      borderRadius: 10,
+                      border: `1px solid ${Colors.border}`,
+                      fontSize: 14,
+                      fontFamily: 'DMSans_400Regular',
+                    }}
+                  />
+                  <input
+                    type="time"
+                    value={suggestStartTime}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSuggestStartTime(e.target.value)}
+                    style={{
+                      flex: 1,
+                      padding: '10px 12px',
+                      borderRadius: 10,
+                      border: `1px solid ${Colors.border}`,
+                      fontSize: 14,
+                      fontFamily: 'DMSans_400Regular',
+                    }}
+                  />
+                </View>
+                <Text style={{ fontSize: 12, fontFamily: Fonts.semiBold, color: Colors.textMuted }}>End</Text>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <input
+                    type="date"
+                    value={suggestEndDate}
+                    min={suggestStartDate}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSuggestEndDate(e.target.value)}
+                    style={{
+                      flex: 1,
+                      padding: '10px 12px',
+                      borderRadius: 10,
+                      border: `1px solid ${Colors.border}`,
+                      fontSize: 14,
+                      fontFamily: 'DMSans_400Regular',
+                    }}
+                  />
+                  <input
+                    type="time"
+                    value={suggestEndTime}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSuggestEndTime(e.target.value)}
+                    style={{
+                      flex: 1,
+                      padding: '10px 12px',
+                      borderRadius: 10,
+                      border: `1px solid ${Colors.border}`,
+                      fontSize: 14,
+                      fontFamily: 'DMSans_400Regular',
+                    }}
+                  />
+                </View>
+              </View>
+            ) : (
+              <ScrollView style={{ maxHeight: 320, marginBottom: 12 }} keyboardShouldPersistTaps="handled">
+                <Text style={{ fontSize: 12, fontFamily: Fonts.semiBold, color: Colors.textMuted, marginBottom: 6 }}>Start date</Text>
+                <TouchableOpacity onPress={() => setShowSuggestStartDatePicker(true)} style={{ marginBottom: 12 }}>
+                  <TextInput
+                    value={suggestStartDate}
+                    editable={false}
+                    style={styles.commentInput}
+                    placeholder="Date"
+                  />
+                </TouchableOpacity>
+                <Text style={{ fontSize: 12, fontFamily: Fonts.semiBold, color: Colors.textMuted, marginBottom: 6 }}>Start time</Text>
+                <TouchableOpacity onPress={() => setShowSuggestStartTimePicker(true)} style={{ marginBottom: 12 }}>
+                  <TextInput value={suggestStartTime} editable={false} style={styles.commentInput} />
+                </TouchableOpacity>
+                <Text style={{ fontSize: 12, fontFamily: Fonts.semiBold, color: Colors.textMuted, marginBottom: 6 }}>End date</Text>
+                <TouchableOpacity onPress={() => setShowSuggestEndDatePicker(true)} style={{ marginBottom: 12 }}>
+                  <TextInput value={suggestEndDate} editable={false} style={styles.commentInput} />
+                </TouchableOpacity>
+                <Text style={{ fontSize: 12, fontFamily: Fonts.semiBold, color: Colors.textMuted, marginBottom: 6 }}>End time</Text>
+                <TouchableOpacity onPress={() => setShowSuggestEndTimePicker(true)} style={{ marginBottom: 8 }}>
+                  <TextInput value={suggestEndTime} editable={false} style={styles.commentInput} />
+                </TouchableOpacity>
+                {showSuggestStartDatePicker ? (
+                  <DateTimePicker
+                    value={suggestStartDate ? new Date(suggestStartDate) : new Date()}
+                    mode="date"
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    onChange={(_, d) => {
+                      if (Platform.OS === 'android') setShowSuggestStartDatePicker(false);
+                      if (d) setSuggestStartDate(formatLocalDateInput(d));
+                    }}
+                  />
+                ) : null}
+                {showSuggestEndDatePicker ? (
+                  <DateTimePicker
+                    value={suggestEndDate ? new Date(suggestEndDate) : new Date()}
+                    mode="date"
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    minimumDate={suggestStartDate ? new Date(suggestStartDate) : undefined}
+                    onChange={(_, d) => {
+                      if (Platform.OS === 'android') setShowSuggestEndDatePicker(false);
+                      if (d) setSuggestEndDate(formatLocalDateInput(d));
+                    }}
+                  />
+                ) : null}
+                {showSuggestStartTimePicker ? (
+                  <DateTimePicker
+                    value={(() => {
+                      const [h, m] = suggestStartTime.split(':').map(Number);
+                      const x = new Date();
+                      x.setHours(h || 0, m || 0, 0, 0);
+                      return x;
+                    })()}
+                    mode="time"
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    onChange={(_, d) => {
+                      if (Platform.OS === 'android') setShowSuggestStartTimePicker(false);
+                      if (d) {
+                        const pad = (n: number) => String(n).padStart(2, '0');
+                        setSuggestStartTime(`${pad(d.getHours())}:${pad(d.getMinutes())}`);
+                      }
+                    }}
+                  />
+                ) : null}
+                {showSuggestEndTimePicker ? (
+                  <DateTimePicker
+                    value={(() => {
+                      const [h, m] = suggestEndTime.split(':').map(Number);
+                      const x = new Date();
+                      x.setHours(h || 0, m || 0, 0, 0);
+                      return x;
+                    })()}
+                    mode="time"
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    onChange={(_, d) => {
+                      if (Platform.OS === 'android') setShowSuggestEndTimePicker(false);
+                      if (d) {
+                        const pad = (n: number) => String(n).padStart(2, '0');
+                        setSuggestEndTime(`${pad(d.getHours())}:${pad(d.getMinutes())}`);
+                      }
+                    }}
+                  />
+                ) : null}
+              </ScrollView>
+            )}
+            <View style={styles.deleteActions}>
+              <TouchableOpacity
+                onPress={() => setShowTimeSuggestModal(false)}
+                style={styles.deleteCancelBtn}
+              >
+                <Text style={styles.deleteCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => void submitTimeSuggestion()} style={styles.deleteConfirmBtn}>
+                <Text style={styles.deleteConfirmText}>Submit</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1564,7 +2045,6 @@ const styles = StyleSheet.create({
     height: '80%',
   },
   eventTitle:       { fontSize: 21, fontFamily: Fonts.extraBold, color: Colors.text, lineHeight: 28, marginBottom: 4 },
-  eventSubtitle:    { fontSize: 14, color: Colors.textMuted, fontFamily: Fonts.regular, marginBottom: 16 },
   carouselRemoveThumb: {
     position: 'absolute',
     top: 8,
@@ -1606,6 +2086,13 @@ const styles = StyleSheet.create({
   galleryGrid:      { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
   galleryThumb:     { width: '31.5%', aspectRatio: 1, borderRadius: Radius.md, overflow: 'hidden', backgroundColor: Colors.border },
   commentsBlock:    { backgroundColor: Colors.surface, marginTop: 8 },
+  commentsSectionHeader: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.border,
+  },
   commentRow:       { flexDirection: 'row', gap: 12, padding: 14, paddingHorizontal: 20 },
   commentAdminRemovedRow: {
     paddingVertical: 12,
@@ -1666,4 +2153,13 @@ const styles = StyleSheet.create({
   deleteCancelText: { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.text },
   deleteConfirmBtn: { flex: 1, paddingVertical: 12, borderRadius: Radius.lg, backgroundColor: '#EF4444', alignItems: 'center' },
   deleteConfirmText:{ fontSize: 14, fontFamily: Fonts.semiBold, color: '#fff' },
+  smallActionBtn: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: Radius.md, alignItems: 'center', justifyContent: 'center' },
+  smallActionBtnText: { fontSize: 13, fontFamily: Fonts.semiBold, color: '#fff' },
+  activitiesSection: {
+    marginTop: 22,
+    paddingTop: 22,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.border,
+    marginBottom: 4,
+  },
 });

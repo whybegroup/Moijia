@@ -1,5 +1,16 @@
 import { PrismaClient } from '@prisma/client';
-import { Group, GroupScoped, GroupInput, GroupUpdate, GroupRole, MembershipRequestAction, User } from '../models';
+import {
+  Group,
+  GroupScoped,
+  GroupInput,
+  GroupUpdate,
+  GroupRole,
+  MembershipRequestAction,
+  User,
+  NotifPrefs,
+  NotifPrefsPartial,
+} from '../models';
+import { mergeNotifPrefs, parseNotifPrefsJson } from '../utils/notifPrefsCore';
 import { NotificationService } from './NotificationService';
 import { LocalUploadService } from './LocalUploadService';
 
@@ -954,6 +965,46 @@ export class GroupService {
     });
 
     return colors;
+  }
+
+  /**
+   * Update current user's per-group notification preferences (merged into existing JSON).
+   */
+  public async updateMemberNotifPrefs(
+    groupId: string,
+    userId: string,
+    prefs: NotifPrefsPartial
+  ): Promise<void> {
+    const member = await prisma.groupMember.findUnique({
+      where: {
+        groupId_userId: { groupId, userId },
+      },
+      select: { notifPrefsJson: true },
+    });
+    const merged = mergeNotifPrefs(parseNotifPrefsJson(member?.notifPrefsJson), prefs);
+    await prisma.groupMember.updateMany({
+      where: {
+        groupId,
+        userId,
+        status: 'active',
+      },
+      data: {
+        notifPrefsJson: JSON.stringify(merged),
+      },
+    });
+  }
+
+  /**
+   * Resolved per-group notification preferences (defaults applied).
+   */
+  public async getMemberNotifPrefs(groupId: string, userId: string): Promise<NotifPrefs> {
+    const member = await prisma.groupMember.findUnique({
+      where: {
+        groupId_userId: { groupId, userId },
+      },
+      select: { notifPrefsJson: true },
+    });
+    return parseNotifPrefsJson(member?.notifPrefsJson);
   }
 
   /**

@@ -1,4 +1,3 @@
-import React from 'react';
 import Svg, { Path, Rect, Line, Circle } from 'react-native-svg';
 
 /** Calendar — used for Events tab + Events screen header */

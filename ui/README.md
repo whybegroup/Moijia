@@ -23,9 +23,8 @@ ui/
 │   ├── _layout.tsx          # Root layout (fonts, navigation)
 │   ├── (tabs)/
 │   │   ├── _layout.tsx      # Bottom tab bar
-│   │   ├── feed.tsx         # Main feed
+│   │   ├── events.tsx       # Events tab
 │   │   ├── groups.tsx       # My groups list
-│   │   ├── explore.tsx      # Search & join
 │   │   └── profile.tsx      # Profile & notifications
 │   ├── event/[id].tsx       # Event detail
 │   ├── group/[id].tsx       # Group detail

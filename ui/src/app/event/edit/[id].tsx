@@ -1,12 +1,12 @@
-import React, { useState, useRef, useMemo, type ChangeEvent } from 'react';
+import { useState, useRef, useMemo, useEffect, type ChangeEvent } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, Alert, Modal, Platform, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Colors, Fonts, Radius } from '../../../constants/theme';
-import { getGroupColor, getDefaultGroupThemeFromName } from '../../../utils/helpers';
-import { useEvent, useGroup, useUpdateEvent, useAllGroupMemberColors, useDeleteEvent } from '../../../hooks/api';
+import { formatLocalDateInput } from '../../../utils/helpers';
+import { useEvent, useGroup, useUpdateEvent, useDeleteEvent } from '../../../hooks/api';
 import { NavBar, Field, Toggle, formSectionTitleStyle } from '../../../components/ui';
 import { useCurrentUserContext } from '../../../contexts/CurrentUserContext';
 import { ResolvableImage } from '../../../components/ResolvableImage';
@@ -32,15 +32,9 @@ export default function EditEventScreen() {
     existingEvent?.groupId || '',
     currentUserId ?? '',
   );
-  const { data: groupColors = {} } = useAllGroupMemberColors(currentUserId);
   const updateEventMutation = useUpdateEvent(eventId || '', currentUserId ?? '');
   const deleteEventMutation = useDeleteEvent(currentUserId ?? '');
 
-  // Format date and times from existing event
-  const formatDate = (date: Date | string) => {
-    const d = typeof date === 'string' ? new Date(date) : date;
-    return d.toISOString().slice(0, 10);
-  };
   const formatTime = (date: Date | string) => {
     const d = typeof date === 'string' ? new Date(date) : date;
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
@@ -48,12 +42,12 @@ export default function EditEventScreen() {
 
   const formFromEvent = (e: EventDetailed) => ({
     title: e.title || '',
-    subtitle: e.subtitle || '',
+    description: e.description || '',
     groupId: e.groupId || '',
-    startDate: formatDate(e.start),
+    startDate: formatLocalDateInput(e.start),
     startTime: formatTime(e.start),
     startAllDay: e.isAllDay || false,
-    endDate: formatDate(e.end),
+    endDate: formatLocalDateInput(e.end),
     endTime: formatTime(e.end),
     endAllDay: e.isAllDay || false,
     location: e.location || '',
@@ -61,18 +55,17 @@ export default function EditEventScreen() {
     maxAttendees: e.maxAttendees ? String(e.maxAttendees) : '',
     allowMaybe: e.allowMaybe || false,
     enableWaitlist: e.enableWaitlist || false,
-    description: e.description || '',
     coverPhotoDrafts: (e.coverPhotos || []).map((url) => ({ kind: 'remote' as const, url })),
   });
 
   const [form, setForm] = useState({
     title: existingEvent?.title || '',
-    subtitle: existingEvent?.subtitle || '',
+    description: existingEvent?.description || '',
     groupId: existingEvent?.groupId || '',
-    startDate: existingEvent ? formatDate(existingEvent.start) : '',
+    startDate: existingEvent ? formatLocalDateInput(existingEvent.start) : '',
     startTime: existingEvent ? formatTime(existingEvent.start) : '',
     startAllDay: existingEvent?.isAllDay || false,
-    endDate: existingEvent ? formatDate(existingEvent.end) : '',
+    endDate: existingEvent ? formatLocalDateInput(existingEvent.end) : '',
     endTime: existingEvent ? formatTime(existingEvent.end) : '',
     endAllDay: existingEvent?.isAllDay || false,
     location: existingEvent?.location || '',
@@ -80,15 +73,9 @@ export default function EditEventScreen() {
     maxAttendees: existingEvent?.maxAttendees ? String(existingEvent.maxAttendees) : '',
     allowMaybe: existingEvent?.allowMaybe || false,
     enableWaitlist: existingEvent?.enableWaitlist || false,
-    description: existingEvent?.description || '',
     coverPhotoDrafts: [] as CoverPhotoDraft[],
   });
-  const [errors, setErrors] = useState({
-    startDate: '',
-    startTime: '',
-    endDate: '',
-    endTime: '',
-  });
+  const errors = { startDate: '', startTime: '', endDate: '', endTime: '' };
   const [showStartDatePicker, setShowStartDatePicker] = useState(false);
   const [showStartTimePicker, setShowStartTimePicker] = useState(false);
   const [showEndDatePicker, setShowEndDatePicker] = useState(false);
@@ -99,7 +86,7 @@ export default function EditEventScreen() {
   const hydratedEventIdRef = useRef<string | null>(null);
 
   // Update form when event loads
-  React.useEffect(() => {
+  useEffect(() => {
     if (!existingEvent) return;
     if (hydratedEventIdRef.current === existingEvent.id) return;
     hydratedEventIdRef.current = existingEvent.id;
@@ -110,7 +97,7 @@ export default function EditEventScreen() {
     !!existingEvent && !!currentUserId && existingEvent.createdBy !== currentUserId;
   const loading = eventLoading || (needGroupForPermission && eventGroupLoading);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (!eventId || !existingEvent || !currentUserId) return;
     if (loading) return;
     if (existingEvent.createdBy === currentUserId) return;
@@ -134,7 +121,7 @@ export default function EditEventScreen() {
     }
     return (
       form.title.trim() !== b.title.trim() ||
-      form.subtitle.trim() !== b.subtitle.trim() ||
+      form.description.trim() !== b.description.trim() ||
       form.startDate !== b.startDate ||
       form.startTime !== b.startTime ||
       form.endDate !== b.endDate ||
@@ -145,8 +132,7 @@ export default function EditEventScreen() {
       form.minAttendees !== b.minAttendees ||
       form.maxAttendees !== b.maxAttendees ||
       form.allowMaybe !== b.allowMaybe ||
-      form.enableWaitlist !== b.enableWaitlist ||
-      form.description.trim() !== b.description.trim()
+      form.enableWaitlist !== b.enableWaitlist
     );
   }, [existingEvent, form]);
 
@@ -244,13 +230,12 @@ export default function EditEventScreen() {
       
       await updateEventMutation.mutateAsync({
         title: form.title.trim(),
-        subtitle: form.subtitle.trim() || undefined,
         description: form.description.trim() || undefined,
         coverPhotos,
         start: start.toISOString(),
         end: end.toISOString(),
         isAllDay: isAllDay || undefined,
-        location: form.location.trim() || undefined,
+        location: form.location.trim(),
         minAttendees: form.minAttendees.trim() ? parseInt(form.minAttendees, 10) : undefined,
         maxAttendees: form.maxAttendees.trim() ? parseInt(form.maxAttendees, 10) : undefined,
         enableWaitlist: form.maxAttendees.trim() ? form.enableWaitlist : undefined,
@@ -268,7 +253,7 @@ export default function EditEventScreen() {
     setShowDeleteConfirm(false);
     try {
       await deleteEventMutation.mutateAsync(eventId || '');
-      router.push('/(tabs)/feed');
+      router.push('/(tabs)/events');
     } catch {
       Alert.alert('Error', 'Failed to delete event');
     }
@@ -302,27 +287,25 @@ export default function EditEventScreen() {
     return minTime;
   };
 
-  const handleStartDateChange = (event: any, selectedDate?: Date) => {
+  const handleStartDateChange = (_event: unknown, selectedDate?: Date) => {
     if (Platform.OS === 'android') {
       setShowStartDatePicker(false);
     }
     if (selectedDate) {
-      const dateStr = selectedDate.toISOString().slice(0, 10);
-      set('startDate', dateStr);
+      set('startDate', formatLocalDateInput(selectedDate));
     }
   };
 
-  const handleEndDateChange = (event: any, selectedDate?: Date) => {
+  const handleEndDateChange = (_event: unknown, selectedDate?: Date) => {
     if (Platform.OS === 'android') {
       setShowEndDatePicker(false);
     }
     if (selectedDate) {
-      const dateStr = selectedDate.toISOString().slice(0, 10);
-      set('endDate', dateStr);
+      set('endDate', formatLocalDateInput(selectedDate));
     }
   };
 
-  const handleStartTimeChange = (event: any, selectedTime?: Date) => {
+  const handleStartTimeChange = (_event: unknown, selectedTime?: Date) => {
     if (Platform.OS === 'android') {
       setShowStartTimePicker(false);
     }
@@ -334,7 +317,7 @@ export default function EditEventScreen() {
     }
   };
 
-  const handleEndTimeChange = (event: any, selectedTime?: Date) => {
+  const handleEndTimeChange = (_event: unknown, selectedTime?: Date) => {
     if (Platform.OS === 'android') {
       setShowEndTimePicker(false);
     }
@@ -344,10 +327,6 @@ export default function EditEventScreen() {
       const timeStr = `${hours}:${minutes}`;
       set('endTime', timeStr);
     }
-  };
-
-  const handleEndTimeInputChange = (timeStr: string) => {
-    set('endTime', timeStr);
   };
 
   const handleBack = () => {
@@ -402,8 +381,22 @@ export default function EditEventScreen() {
           <TextInput value={form.title} onChangeText={v => set('title', v)} placeholder="e.g. Game Night" placeholderTextColor={Colors.textMuted} style={styles.input} />
         </Field>
 
-        <Field label="Subtitle">
-          <TextInput value={form.subtitle} onChangeText={v => set('subtitle', v)} placeholder="e.g. Bring your favorite board games" placeholderTextColor={Colors.textMuted} style={styles.input} />
+        <Field label="Event description">
+          <View style={styles.descBox}>
+            <TextInput
+              value={form.description}
+              onChangeText={(v) => set('description', v)}
+              placeholder="Add notes, directions, agenda, or a helpful link"
+              placeholderTextColor={Colors.textMuted}
+              multiline
+              numberOfLines={5}
+              maxLength={500}
+              style={styles.descInput}
+            />
+            <View style={styles.descToolbar}>
+              <Text style={{ fontSize: 11, color: Colors.textMuted }}>{form.description.length}/500</Text>
+            </View>
+          </View>
         </Field>
 
         <View style={styles.dateTimeSection}>
@@ -431,7 +424,7 @@ export default function EditEventScreen() {
                   <input
                     type="date"
                     value={form.startDate}
-                    min={new Date().toISOString().slice(0, 10)}
+                    min={formatLocalDateInput(new Date())}
                     onChange={(e: any) => set('startDate', e.target.value)}
                     style={{
                       padding: '10px 14px',
@@ -698,18 +691,6 @@ export default function EditEventScreen() {
             </Field>
           </View>
         </View>
-
-        <Field label="Description">
-          <View style={styles.descBox}>
-            <TextInput value={form.description} onChangeText={v => set('description', v)}
-              placeholder={'Add notes, directions, agenda, or a helpful link'}
-              placeholderTextColor={Colors.textMuted}
-              multiline numberOfLines={5} style={styles.descInput} />
-            <View style={styles.descToolbar}>
-              <Text style={{ fontSize: 11, color: Colors.textMuted }}>{form.description.length}/500</Text>
-            </View>
-          </View>
-        </Field>
 
         <View style={styles.photosSection}>
           {Platform.OS === 'web' && (

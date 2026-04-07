@@ -150,17 +150,50 @@ interface NavBarProps {
   title?: string;
   onBack?: () => void;
   right?: React.ReactNode;
+  /**
+   * When true, title is centered on the full bar width; left and right slots use equal flex so
+   * back + actions stay aligned without shifting the title.
+   */
+  centerTitle?: boolean;
 }
-export function NavBar({ title = '', onBack, right }: NavBarProps) {
+export function NavBar({ title = '', onBack, right, centerTitle }: NavBarProps) {
+  if (centerTitle) {
+    return (
+      <View style={styles.navBar}>
+        <View style={styles.navBarSide}>
+          {onBack ? (
+            <TouchableOpacity onPress={onBack} style={styles.navBack}>
+              <Text style={styles.navBackText}>← Back</Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={{ width: 70 }} />
+          )}
+        </View>
+        {title ? (
+          <View style={styles.navTitleOverlay} pointerEvents="none">
+            <Text style={styles.navTitleCentered} numberOfLines={1}>
+              {title}
+            </Text>
+          </View>
+        ) : null}
+        <View style={[styles.navBarSide, styles.navBarSideEnd]}>{right}</View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.navBar}>
       {onBack ? (
         <TouchableOpacity onPress={onBack} style={styles.navBack}>
           <Text style={styles.navBackText}>← Back</Text>
         </TouchableOpacity>
-      ) : <View style={{ width: 70 }} />}
+      ) : (
+        <View style={{ width: 70 }} />
+      )}
       {title ? (
-        <Text style={styles.navTitle} numberOfLines={1}>{title}</Text>
+        <Text style={styles.navTitle} numberOfLines={1}>
+          {title}
+        </Text>
       ) : (
         <View style={styles.navTitleSpacer} />
       )}
@@ -306,6 +339,31 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
+    position: 'relative',
+  },
+  navBarSide: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    minWidth: 0,
+    zIndex: 1,
+  },
+  navBarSideEnd: {
+    justifyContent: 'flex-end',
+  },
+  navTitleOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 96,
+  },
+  navTitleCentered: {
+    fontSize: 16,
+    fontFamily: Fonts.bold,
+    color: Colors.text,
+    textAlign: 'center',
+    maxWidth: '100%',
   },
   navBack: { width: 70, flexShrink: 0 },
   navBackText: { fontSize: 14, color: Colors.textSub, fontFamily: Fonts.medium },

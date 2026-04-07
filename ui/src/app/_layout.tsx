@@ -17,7 +17,6 @@ import { Provider as ReduxProvider } from 'react-redux';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { store } from '../store';
 import { queryClient } from '../config/queryClient';
-import { Colors } from '../constants/theme';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import { CurrentUserProvider } from '../contexts/CurrentUserContext';
 
@@ -40,7 +39,7 @@ function RootLayoutNav() {
       if (!user && !inAuthGroup) {
         router.replace('/login');
       } else if (user && inAuthGroup) {
-        router.replace('/(tabs)/feed');
+        router.replace('/(tabs)/events');
       }
     }, 100);
 

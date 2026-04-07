@@ -1,4 +1,4 @@
-import React from 'react';
+import type { ReactNode } from 'react';
 import { Tabs } from 'expo-router';
 import { View, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -35,7 +35,7 @@ function TabBarGlyph({
   user,
 }: {
   focused: boolean;
-  iconNode?: React.ReactNode;
+  iconNode?: ReactNode;
   isAvatar?: boolean;
   user?: { name: string; displayName?: string; thumbnail?: string | null; avatarSeed?: string | null } | null;
 }) {
@@ -93,7 +93,7 @@ export default function TabLayout() {
       }}
     >
       <Tabs.Screen
-        name="feed"
+        name="events"
         options={{
           title: 'Events',
           tabBarIcon: ({ focused }) => (

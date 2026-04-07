@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Image, View, StyleProp, ViewStyle } from 'react-native';
 import { avatarColor } from '../utils/helpers';
 import { InitialsAvatar } from './Avatar';

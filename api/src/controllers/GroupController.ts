@@ -11,7 +11,16 @@ import {
   Tags,
   SuccessResponse,
 } from 'tsoa';
-import { Group, GroupScoped, GroupInput, GroupUpdate, User, MembershipRequestAction } from '../models';
+import {
+  Group,
+  GroupScoped,
+  GroupInput,
+  GroupUpdate,
+  User,
+  MembershipRequestAction,
+  NotifPrefs,
+  NotifPrefsPartial,
+} from '../models';
 import { GroupService } from '../services/GroupService';
 
 @Route('groups')
@@ -491,6 +500,41 @@ export class GroupController extends Controller {
     }
     const colorHex = await this.groupService.getMemberColor(id, userId);
     return { colorHex };
+  }
+
+  /**
+   * Update user's in-app notification preferences for a group
+   * @summary Merges into stored per-group prefs; delivery also requires matching global user prefs.
+   */
+  @Put('{id}/members/{userId}/notification-preferences')
+  public async updateMemberNotifPrefs(
+    @Path() id: string,
+    @Path() userId: string,
+    @Body() body: NotifPrefsPartial
+  ): Promise<void> {
+    const group = await this.groupService.getById(id);
+    if (!group) {
+      this.setStatus(404);
+      throw new Error('Group not found');
+    }
+    await this.groupService.updateMemberNotifPrefs(id, userId, body);
+    this.setStatus(200);
+  }
+
+  /**
+   * Get user's resolved notification preferences for a group
+   */
+  @Get('{id}/members/{userId}/notification-preferences')
+  public async getMemberNotifPrefs(
+    @Path() id: string,
+    @Path() userId: string
+  ): Promise<NotifPrefs> {
+    const group = await this.groupService.getById(id);
+    if (!group) {
+      this.setStatus(404);
+      throw new Error('Group not found');
+    }
+    return this.groupService.getMemberNotifPrefs(id, userId);
   }
 
   /**

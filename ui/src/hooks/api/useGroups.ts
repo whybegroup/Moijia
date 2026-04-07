@@ -12,6 +12,7 @@ import {
   type GroupUpdate,
   type GroupScoped,
   type MembershipRequestAction,
+  type Partial_NotifPrefs_,
 } from '@moija/client';
 import { queryKeys } from '../../config/queryClient';
 
@@ -65,7 +66,7 @@ export function useGroupMembers(id: string, userId: string, opts?: { enabled?: b
   });
 }
 
-export function useCreateGroup(userId: string) {
+export function useCreateGroup() {
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -274,6 +275,25 @@ export function useUpdateGroupMemberColor(groupId: string, userId: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.groups.memberColor(groupId, userId) });
       queryClient.invalidateQueries({ queryKey: queryKeys.groups.allMemberColors(userId) });
+    },
+  });
+}
+
+export function useGroupMemberNotifPrefs(groupId: string, userId: string) {
+  return useQuery({
+    queryKey: queryKeys.groups.memberNotifPrefs(groupId, userId),
+    queryFn: () => GroupsService.getMemberNotifPrefs(groupId, userId),
+    enabled: !!groupId && !!userId,
+  });
+}
+
+export function useUpdateGroupMemberNotifPrefs(groupId: string, userId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: Partial_NotifPrefs_) =>
+      GroupsService.updateMemberNotifPrefs(groupId, userId, patch),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.groups.memberNotifPrefs(groupId, userId) });
     },
   });
 }

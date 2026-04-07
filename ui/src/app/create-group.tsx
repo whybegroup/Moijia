@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import { useState, useRef } from 'react';
 import * as Crypto from 'expo-crypto';
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput,
@@ -25,7 +25,7 @@ const AVATAR_SIZE = 56;
 export default function CreateGroupScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const createGroup = useCreateGroup(user?.uid ?? '');
+  const createGroup = useCreateGroup();
   const [groupId] = useState(() => Crypto.randomUUID());
 
   const [draftName, setDraftName] = useState('');
@@ -110,7 +110,27 @@ export default function CreateGroupScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <NavBar title="New Group" onBack={handleBack} />
+      <NavBar
+        title="New Group"
+        onBack={handleBack}
+        centerTitle
+        right={
+          <TouchableOpacity
+            onPress={() => void handleCreate()}
+            disabled={!valid || createGroup.isPending}
+            style={[styles.navCreateBtn, (!valid || createGroup.isPending) && styles.navCreateBtnDisabled]}
+            activeOpacity={0.8}
+          >
+            {createGroup.isPending ? (
+              <ActivityIndicator size="small" color={Colors.textMuted} />
+            ) : (
+              <Text style={[styles.navCreateBtnText, !valid && { color: Colors.textMuted }]} numberOfLines={1}>
+                Create
+              </Text>
+            )}
+          </TouchableOpacity>
+        }
+      />
 
       <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
         <View style={[styles.headerBlock, { borderBottomColor: Colors.border }]}>
@@ -171,10 +191,11 @@ export default function CreateGroupScreen() {
           </Field>
         </View>
 
-        <View style={styles.photosSection}>
+        <View style={styles.photosSectionLower}>
           <Text style={formSectionTitleStyle}>
             Photos{draftCoverPhotos.length > 0 ? ` · ${draftCoverPhotos.length}` : ''}
           </Text>
+          <Text style={styles.photosHint}>Optional — saved when you create the group.</Text>
           <View style={styles.photosCard}>
             {draftCoverPhotos.length > 0 && (
               <ScrollView
@@ -219,20 +240,7 @@ export default function CreateGroupScreen() {
           </View>
         </View>
 
-        <View style={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 100 }}>
-          <TouchableOpacity
-            onPress={handleCreate}
-            disabled={!valid || createGroup.isPending}
-            style={[styles.saveBtn, (!valid || createGroup.isPending) && styles.saveBtnDisabled]}
-            activeOpacity={0.8}
-          >
-            {createGroup.isPending ? (
-              <ActivityIndicator size="small" color={Colors.textMuted} />
-            ) : (
-              <Text style={[styles.saveBtnText, !valid && { color: Colors.textMuted }]}>Create</Text>
-            )}
-          </TouchableOpacity>
-        </View>
+        <View style={{ height: 100 }} />
       </ScrollView>
 
       <AvatarPickerModal
@@ -273,12 +281,41 @@ const styles = StyleSheet.create({
   descBox:         { backgroundColor: Colors.surface, borderRadius: Radius.xl, borderWidth: 1.5, borderColor: Colors.border, overflow: 'hidden' },
   descInput:       { padding: 12, paddingHorizontal: 14, fontSize: 14, color: Colors.text, fontFamily: Fonts.regular, minHeight: 100, textAlignVertical: 'top' },
   descToolbar:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', padding: 8, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: Colors.border },
-  photosSection:   { paddingHorizontal: 20, marginTop: 0, marginBottom: 18 },
+  navCreateBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: Radius.lg,
+    backgroundColor: Colors.accent,
+    flexShrink: 0,
+    minWidth: 72,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  navCreateBtnDisabled: {
+    backgroundColor: Colors.border,
+  },
+  navCreateBtnText: {
+    fontSize: 13,
+    fontFamily: Fonts.semiBold,
+    color: Colors.accentFg,
+  },
+  photosSectionLower: {
+    paddingHorizontal: 20,
+    marginTop: 14,
+    paddingTop: 22,
+    paddingBottom: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.border,
+  },
+  photosHint: {
+    fontSize: 13,
+    color: Colors.textMuted,
+    fontFamily: Fonts.regular,
+    marginBottom: 10,
+    lineHeight: 18,
+  },
   photosCard:      { backgroundColor: Colors.surface, borderRadius: 16, borderWidth: 1, borderColor: Colors.border, overflow: 'hidden' },
   photosToolbar:   { flexDirection: 'row', alignItems: 'center', padding: 8, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: Colors.border },
   photoBtn:        { paddingHorizontal: 10, paddingVertical: 5, borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.bg },
   removeThumb:     { position: 'absolute', top: -5, right: -5, width: 18, height: 18, borderRadius: 9, backgroundColor: Colors.text, borderWidth: 2, borderColor: Colors.surface, alignItems: 'center', justifyContent: 'center' },
-  saveBtn:         { paddingVertical: 12, borderRadius: Radius.lg, backgroundColor: Colors.accent, alignItems: 'center' },
-  saveBtnDisabled: { backgroundColor: Colors.border },
-  saveBtnText:     { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.accentFg },
 });

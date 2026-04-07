@@ -1,8 +1,5 @@
-import React, { useState } from 'react';
-import {
-  View, Text, ScrollView, TouchableOpacity,
-  StyleSheet, TextInput, Share, Linking,
-} from 'react-native';
+import { useState } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, TextInput, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
@@ -23,7 +20,7 @@ export default function GroupInviteScreen() {
     return null;
   }
 
-  const { data: group, isLoading } = useGroup(groupId, currentUserId || '');
+  const { data: group } = useGroup(groupId, currentUserId || '');
 
   const [copied,    setCopied]    = useState(false);
   const [newMember, setNewMember] = useState('');

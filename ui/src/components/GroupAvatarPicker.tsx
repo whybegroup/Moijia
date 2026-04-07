@@ -1,10 +1,10 @@
-import React, { type MutableRefObject } from 'react';
+import { type MutableRefObject } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, useWindowDimensions } from 'react-native';
 import { Colors, Fonts, Radius } from '../constants/theme';
 import { GroupAvatar } from './GroupAvatar';
-import { getGroupColor, getDefaultGroupThemeFromName, groupAvatarBorderRadius, avatarColor } from '../utils/helpers';
-import { IconsAvatar, InitialsAvatar } from './Avatar';
-import { ICON_OPTIONS, BOTTT_PRESETS } from '../utils/avatar';
+import { getGroupColor, getDefaultGroupThemeFromName, groupAvatarBorderRadius } from '../utils/helpers';
+import { IconsAvatar } from './Avatar';
+import { ICON_OPTIONS } from '../utils/avatar';
 import type { PendingAvatarFile } from '../services/pickAndUploadImage';
 import { AvatarThumbnailField } from './AvatarThumbnailField';
 

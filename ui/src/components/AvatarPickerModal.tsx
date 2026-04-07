@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, type MutableRefObject } from 'react';
+import { useRef, useEffect, useState, type MutableRefObject } from 'react';
 import {
   View,
   Text,

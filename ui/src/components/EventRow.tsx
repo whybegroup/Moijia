@@ -1,8 +1,7 @@
-import React from 'react';
 import { View, Text, TouchableOpacity, Pressable, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Fonts, Radius, Shadows } from '../constants/theme';
-import { getGroupColor, getDefaultGroupThemeFromName, fmtTime, fmtMonthShort, dDiff, isToday as checkToday, getMyWaitlistPosition } from '../utils/helpers';
+import { getGroupColor, getDefaultGroupThemeFromName, fmtTime, fmtMonthShort, dDiff, getMyWaitlistPosition } from '../utils/helpers';
 import type { EventDetailed, GroupScoped, User } from '@moija/client';
 import { UserAvatarStack } from './UserAvatarStack';
 
@@ -116,9 +115,19 @@ export function EventRow({ ev, group, groupColorHex, onPress, onGroupPress, isLa
             <Text style={[styles.groupName, onGroupPress && { color: p.dot }]} numberOfLines={1}>{group.name}</Text>
           </Pressable>
         )}
-        <Text style={styles.meta} numberOfLines={1}>{metaParts}</Text>
+        <View style={styles.metaRow}>
+          <Ionicons name="time-outline" size={14} color={Colors.textMuted} style={styles.metaIcon} />
+          <Text style={styles.meta} numberOfLines={2}>
+            {metaParts}
+          </Text>
+        </View>
         {ev.location ? (
-          <Text style={styles.location} numberOfLines={1}>{ev.location}</Text>
+          <View style={styles.locationRow}>
+            <Ionicons name="location-outline" size={14} color={Colors.textMuted} style={styles.metaIcon} />
+            <Text style={styles.location} numberOfLines={1}>
+              {ev.location}
+            </Text>
+          </View>
         ) : null}
         {(minN > 0 || maxN > 0) && !isPast && (
           <View style={styles.minAttendeesRow}>
@@ -219,8 +228,26 @@ const styles = StyleSheet.create({
   groupName: {
     fontSize: 12, fontFamily: Fonts.regular, color: Colors.textMuted,
   },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 5,
+    marginTop: 1,
+  },
+  metaIcon: {
+    marginTop: 1,
+  },
   meta: {
-    fontSize: 12, fontFamily: Fonts.regular, color: Colors.textMuted,
+    flex: 1,
+    fontSize: 12,
+    fontFamily: Fonts.regular,
+    color: Colors.textMuted,
+  },
+  locationRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 5,
+    marginTop: 3,
   },
   needsTextWrap: {
     flexDirection: 'row',
@@ -256,7 +283,10 @@ const styles = StyleSheet.create({
     fontSize: 12, fontFamily: Fonts.medium, color: '#92400E',
   },
   location: {
-    fontSize: 12, fontFamily: Fonts.regular, color: Colors.textMuted, marginTop: 1,
+    flex: 1,
+    fontSize: 12,
+    fontFamily: Fonts.regular,
+    color: Colors.textMuted,
   },
   minAttendeesRow: {
     flexDirection: 'row',

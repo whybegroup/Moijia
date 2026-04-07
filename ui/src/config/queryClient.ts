@@ -28,6 +28,8 @@ export const queryKeys = {
     members: (id: string) => ['groups', id, 'members'] as const,
     pendingRequests: (id: string) => ['groups', id, 'requests', 'pending'] as const,
     memberColor: (groupId: string, userId: string) => ['groups', groupId, 'members', userId, 'color'] as const,
+    memberNotifPrefs: (groupId: string, userId: string) =>
+      ['groups', groupId, 'members', userId, 'notification-preferences'] as const,
     allMemberColors: (userId: string) => ['groups', 'members', userId, 'colors'] as const,
   },
   events: {

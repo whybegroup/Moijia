@@ -1,4 +1,4 @@
-import React, { type MutableRefObject } from 'react';
+import { type MutableRefObject } from 'react';
 import { View, Text, useWindowDimensions } from 'react-native';
 import { Colors, Fonts } from '../constants/theme';
 import { UserAvatar } from './UserAvatar';

@@ -20,15 +20,20 @@ model User {
   displayName String
   avatarSeed String?  // DiceBear bottts seed for generated avatar
   thumbnail  String?  // Optional custom avatar image URL
+  /// JSON: global in-app notification toggles (see NotifPrefs in API)
+  notifPrefsJson String?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
   // Relations
-  createdEvents    Event[]
-  groupMemberships GroupMember[]
-  rsvps            RSVP[]
-  comments         Comment[]
-  eventWatches     EventWatch[]
+  createdEvents           Event[]
+  groupMemberships        GroupMember[]
+  rsvps                   RSVP[]
+  comments                Comment[]
+  eventWatches            EventWatch[]
+  eventActivityVotes      EventActivityVote[]
+  authoredTimeSuggestions EventTimeSuggestion[] @relation("TimeSuggestionAuthor")
+  createdActivityOptions  EventActivityOption[] @relation("ActivityOptionAuthor")
 
   @@map("users")
 }
@@ -80,6 +85,8 @@ model GroupMember {
   role      String   @default("member") // member, admin, superadmin
   status    String   @default("active") // pending, active, rejected
   colorHex  String?  // User's custom color for this group
+  /// JSON: per-group notification toggles (AND with user global prefs)
+  notifPrefsJson String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -101,7 +108,6 @@ model Event {
   createdBy    String
   updatedBy    String
   title        String
-  subtitle     String?
   description  String?
   start        DateTime
   end          DateTime
@@ -117,12 +123,61 @@ model Event {
   // Relations
   group       Group        @relation(fields: [groupId], references: [id], onDelete: Cascade)
   creator     User         @relation(fields: [createdBy], references: [id])
-  coverPhotos EventPhoto[]
-  rsvps       RSVP[]
-  comments    Comment[]
-  watches     EventWatch[]
+  coverPhotos       EventPhoto[]
+  rsvps             RSVP[]
+  comments          Comment[]
+  watches           EventWatch[]
+  activityOptions   EventActivityOption[]
+  activityVotes     EventActivityVote[]
+  timeSuggestions   EventTimeSuggestion[]
 
   @@map("events")
+}
+
+model EventActivityOption {
+  id        String   @id @default(uuid())
+  eventId   String
+  label     String
+  createdBy String
+  createdAt DateTime @default(now())
+
+  event   Event               @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  creator User                @relation("ActivityOptionAuthor", fields: [createdBy], references: [id], onDelete: Cascade)
+  votes   EventActivityVote[]
+
+  @@map("event_activity_options")
+}
+
+model EventActivityVote {
+  id        String   @id @default(uuid())
+  eventId   String
+  optionId  String
+  userId    String
+  createdAt DateTime @default(now())
+
+  event  Event               @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  option EventActivityOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  user   User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, userId, optionId])
+  @@map("event_activity_votes")
+}
+
+/// Group member proposes alternate start/end; host (or admin) may accept to update the event.
+model EventTimeSuggestion {
+  id          String   @id @default(uuid())
+  eventId     String
+  suggestedBy String
+  start       DateTime
+  end         DateTime
+  status      String   @default("pending") // pending, accepted, rejected
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  event     Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  suggester User  @relation("TimeSuggestionAuthor", fields: [suggestedBy], references: [id], onDelete: Cascade)
+
+  @@map("event_time_suggestions")
 }
 
 model EventPhoto {
