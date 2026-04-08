@@ -32,6 +32,13 @@ export interface Event {
   enableWaitlist?: boolean | null;
   /** Whether 'maybe' RSVPs are allowed */
   allowMaybe: boolean;
+  /** RFC 5545 RRULE without the RRULE: prefix; null/empty = not recurring */
+  recurrenceRule?: string | null;
+  /**
+   * Occurrence start instants (UTC ms) removed from a recurring series (this occurrence only).
+   * Omitted when empty; same encoding as expanded `Date.getTime()` for each instance.
+   */
+  recurrenceExdates?: number[];
   /** Timestamp when the event was created */
   createdAt: Date;
   /** Timestamp when the event was last updated */
@@ -86,6 +93,12 @@ export interface EventWatchInput {
   watching: boolean;
 }
 
+/** Body for POST /events/:id/recurrence/exclude */
+export interface RecurrenceExcludeOccurrenceInput {
+  /** ISO 8601 start time of the occurrence to remove from the series */
+  occurrenceStart: string;
+}
+
 /**
  * Input for creating a new event
  */
@@ -107,6 +120,7 @@ export interface EventInput {
   allowMaybe?: boolean;
   /** Initial activity options (labels); creator is recorded as author */
   activityOptionLabels?: string[];
+  recurrenceRule?: string | null;
 }
 
 /**
@@ -126,6 +140,8 @@ export interface EventUpdate {
   enableWaitlist?: boolean;
   allowMaybe?: boolean;
   updatedBy: string;
+  /** Set to null to clear recurrence */
+  recurrenceRule?: string | null;
 }
 
 /**

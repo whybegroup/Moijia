@@ -68,6 +68,8 @@ CREATE TABLE "events" (
     "maxAttendees" INTEGER,
     "enableWaitlist" BOOLEAN DEFAULT false,
     "allowMaybe" BOOLEAN NOT NULL DEFAULT true,
+    "recurrenceRule" TEXT,
+    "recurrenceExdates" TEXT,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
     CONSTRAINT "events_groupId_fkey" FOREIGN KEY ("groupId") REFERENCES "groups" ("id") ON DELETE CASCADE ON UPDATE CASCADE,

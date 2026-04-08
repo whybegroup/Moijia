@@ -26,6 +26,8 @@ import {
   type MemberRow,
 } from '../utils/commentMentions';
 import { LocalUploadService } from './LocalUploadService';
+import { normalizeRecurrenceRule } from '../utils/recurrenceRuleValidate';
+import { parseRecurrenceExdatesJson, serializeRecurrenceExdatesJson } from '../utils/recurrenceExdates';
 
 const prisma = new PrismaClient();
 const notificationService = new NotificationService();
@@ -462,9 +464,11 @@ export class EventService {
    * Create a new event
    */
   public async create(input: EventInput): Promise<Event> {
-    const { coverPhotos = [], createdBy, activityOptionLabels, ...eventData } = input;
+    const { coverPhotos = [], createdBy, activityOptionLabels, recurrenceRule: rrIn, ...eventData } =
+      input;
 
     await this.assertCanCreateEvent(eventData.groupId, createdBy);
+    const recurrenceRule = normalizeRecurrenceRule(rrIn ?? null);
 
     const labels = (activityOptionLabels ?? [])
       .map((s) => (typeof s === 'string' ? s.trim() : ''))
@@ -478,6 +482,7 @@ export class EventService {
         start: new Date(eventData.start),
         end: new Date(eventData.end),
         allowMaybe: eventData.allowMaybe ?? true,
+        recurrenceRule,
         coverPhotos: {
           create: coverPhotos.map((photoUrl) => ({ photoUrl })),
         },
@@ -545,6 +550,7 @@ export class EventService {
         start: true,
         end: true,
         location: true,
+        recurrenceRule: true,
         coverPhotos: { select: { photoUrl: true } },
       },
     });
@@ -587,6 +593,14 @@ export class EventService {
       updateData.description =
         s == null || (typeof s === 'string' && s.trim() === '') ? null : String(s).trim();
     }
+    if (eventData.recurrenceRule !== undefined) {
+      updateData.recurrenceRule = normalizeRecurrenceRule(eventData.recurrenceRule);
+      const prevRr = (existing.recurrenceRule ?? null) as string | null;
+      const nextRr = updateData.recurrenceRule ?? null;
+      if (prevRr !== nextRr) {
+        updateData.recurrenceExdates = null;
+      }
+    }
     const nextStart = eventData.start !== undefined ? new Date(eventData.start) : null;
     const nextEnd = eventData.end !== undefined ? new Date(eventData.end) : null;
     const startChanged =
@@ -617,6 +631,47 @@ export class EventService {
       ).catch(() => undefined);
     }
 
+    return this.mapEventWithPhotos(event);
+  }
+
+  /**
+   * Exclude one occurrence from a recurring series (client expansion skips these instants).
+   */
+  public async excludeRecurrenceOccurrence(
+    id: string,
+    actorUserId: string,
+    occurrenceStartIso: string
+  ): Promise<Event> {
+    const existing = await prisma.event.findUnique({
+      where: { id },
+      select: {
+        groupId: true,
+        createdBy: true,
+        recurrenceRule: true,
+        recurrenceExdates: true,
+      },
+    });
+    if (!existing) {
+      throw Object.assign(new Error('Event not found'), { status: 404 });
+    }
+    await this.assertCanMutateEvent(existing, actorUserId);
+    if (!existing.recurrenceRule?.trim()) {
+      throw Object.assign(new Error('Event is not recurring'), { status: 400 });
+    }
+    const ts = new Date(occurrenceStartIso).getTime();
+    if (!Number.isFinite(ts)) {
+      throw Object.assign(new Error('Invalid occurrenceStart'), { status: 400 });
+    }
+    const prev = parseRecurrenceExdatesJson(existing.recurrenceExdates ?? null) ?? [];
+    const next = [...new Set([...prev, ts])].sort((a, b) => a - b);
+    const event = await prisma.event.update({
+      where: { id },
+      data: {
+        recurrenceExdates: serializeRecurrenceExdatesJson(next),
+        updatedBy: actorUserId,
+      },
+      include: { coverPhotos: true },
+    });
     return this.mapEventWithPhotos(event);
   }
 
@@ -1374,6 +1429,11 @@ export class EventService {
       maxAttendees: event.maxAttendees,
       enableWaitlist: event.enableWaitlist,
       allowMaybe: event.allowMaybe,
+      recurrenceRule: event.recurrenceRule ?? null,
+      recurrenceExdates: (() => {
+        const x = parseRecurrenceExdatesJson(event.recurrenceExdates ?? null);
+        return x && x.length > 0 ? x : undefined;
+      })(),
       createdAt: event.createdAt,
       updatedAt: event.updatedAt,
     };

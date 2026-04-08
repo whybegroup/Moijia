@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type ChangeEvent } from 'react';
+import { useState, useEffect, useRef, useMemo, type ChangeEvent } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, Alert, Platform, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -7,6 +7,8 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Colors, Fonts, Radius } from '../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName, formatLocalDateInput } from '../utils/helpers';
 import { NavBar, Field, Toggle, formSectionTitleStyle } from '../components/ui';
+import { RecurrenceField } from '../components/RecurrenceField';
+import { buildRecurrenceRule, defaultRecurrenceFormState, type RecurrenceFormState } from '../utils/recurrence';
 import { useGroups, useCreateEvent, useAllGroupMemberColors } from '../hooks/api';
 import { uid } from '../utils/api-helpers';
 import { useCurrentUserContext } from '../contexts/CurrentUserContext';
@@ -36,6 +38,7 @@ export default function CreateEventScreen() {
     location: '', minAttendees: '1', maxAttendees: '',
     allowMaybe: false, enableWaitlist: false, coverPhotoDrafts: [] as CoverPhotoDraft[],
     activityOptionDrafts: [''] as string[],
+    recurrence: defaultRecurrenceFormState() as RecurrenceFormState,
   });
   const [errors, setErrors] = useState({
     startDate: '',
@@ -107,6 +110,14 @@ export default function CreateEventScreen() {
 
   const ok  = !!form.title.trim() && !!form.startDate && !!form.endDate && !!form.groupId;
 
+  const recurrenceAnchor = useMemo(() => {
+    const [sh, sm] = form.startTime.split(':').map(Number);
+    const d = new Date(
+      `${form.startDate}T${String(sh || 0).padStart(2, '0')}:${String(sm || 0).padStart(2, '0')}:00`
+    );
+    return Number.isNaN(d.getTime()) ? new Date() : d;
+  }, [form.startDate, form.startTime]);
+
   const submit = async () => {
     if (!ok) return;
     try {
@@ -143,6 +154,8 @@ export default function CreateEventScreen() {
         .map((s) => s.trim())
         .filter((s) => s.length > 0);
 
+      const recurrenceRule = buildRecurrenceRule(form.recurrence, start);
+
       const newEvent = {
         id: uid(),
         groupId: form.groupId,
@@ -159,6 +172,7 @@ export default function CreateEventScreen() {
         enableWaitlist: form.maxAttendees.trim() ? form.enableWaitlist : undefined,
         allowMaybe: form.allowMaybe,
         ...(activityOptionLabels.length > 0 ? { activityOptionLabels } : {}),
+        ...(recurrenceRule ? { recurrenceRule } : {}),
       };
       
       await createEventMutation.mutateAsync(newEvent);
@@ -491,7 +505,7 @@ export default function CreateEventScreen() {
 
         <View style={styles.dateTimeSection}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Start</Text>
+            <Text style={[formSectionTitleStyle, styles.dateTimeHeading]}>Start</Text>
             <TouchableOpacity 
               onPress={() => set('startAllDay', !form.startAllDay)}
               style={styles.allDayChip}
@@ -589,7 +603,7 @@ export default function CreateEventScreen() {
 
         <View style={styles.dateTimeSection}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>End</Text>
+            <Text style={[formSectionTitleStyle, styles.dateTimeHeading]}>End</Text>
             <TouchableOpacity 
               onPress={() => set('endAllDay', !form.endAllDay)}
               style={styles.allDayChip}
@@ -751,6 +765,12 @@ export default function CreateEventScreen() {
           </View>
         )}
 
+        <RecurrenceField
+          anchorDate={recurrenceAnchor}
+          value={form.recurrence}
+          onChange={(recurrence) => setForm((p) => ({ ...p, recurrence }))}
+        />
+
         <Field label="Location">
           <TextInput value={form.location} onChangeText={v => set('location', v)} placeholder="e.g. Central Park" placeholderTextColor={Colors.textMuted} style={styles.input} />
         </Field>
@@ -881,13 +901,13 @@ const styles = StyleSheet.create({
   removeThumb:   { position: 'absolute', top: -5, right: -5, width: 18, height: 18, borderRadius: 9, backgroundColor: Colors.text, borderWidth: 2, borderColor: Colors.surface, alignItems: 'center', justifyContent: 'center' },
   submitBtn:     { paddingVertical: 14, paddingHorizontal: 20, borderRadius: Radius.lg, backgroundColor: Colors.accent, alignItems: 'center', justifyContent: 'center', marginTop: 8, minHeight: 48 },
   submitBtnText: { fontSize: 15, fontFamily: Fonts.bold, color: Colors.accentFg, textAlign: 'center' },
-  dateTimeSection: { marginBottom: 16 },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
-  sectionTitle: { fontSize: 15, fontFamily: Fonts.semiBold, color: Colors.text },
-  allDayChip: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6, paddingHorizontal: 12, borderRadius: Radius.full, backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border },
-  allDayChipText: { fontSize: 13, fontFamily: Fonts.medium, color: Colors.textSub },
+  dateTimeSection: { marginBottom: 12 },
+  dateTimeHeading: { marginBottom: 0 },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
+  allDayChip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 3, paddingHorizontal: 9, borderRadius: Radius.full, backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border },
+  allDayChipText: { fontSize: 12, fontFamily: Fonts.medium, color: Colors.textSub },
   allDayChipTextActive: { color: Colors.text },
   allDayCheckbox: { width: 18, height: 18, borderRadius: 4, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.bg, alignItems: 'center', justifyContent: 'center' },
   allDayCheckboxActive: { backgroundColor: Colors.accent, borderColor: Colors.accent },
-  divider: { height: 1, backgroundColor: Colors.border, marginVertical: 8 },
+  divider: { height: 1, backgroundColor: Colors.border, marginVertical: 5 },
 });

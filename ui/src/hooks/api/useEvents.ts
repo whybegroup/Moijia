@@ -132,6 +132,23 @@ export function useDeleteEvent(userId: string) {
   });
 }
 
+export function useExcludeRecurrenceOccurrence(userId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (p: { eventId: string; occurrenceStart: string }) => {
+      if (!userId) throw new Error('Not signed in');
+      return EventsService.excludeRecurrenceOccurrence(p.eventId, userId, {
+        occurrenceStart: p.occurrenceStart,
+      });
+    },
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: ['events'] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.events.detail(vars.eventId, userId) });
+    },
+  });
+}
+
 function invalidateEventQueries(queryClient: ReturnType<typeof useQueryClient>, eventId: string, userId: string) {
   queryClient.invalidateQueries({ queryKey: ['events'] });
   queryClient.invalidateQueries({ queryKey: queryKeys.events.detail(eventId, userId) });

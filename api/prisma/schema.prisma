@@ -117,6 +117,10 @@ model Event {
   maxAttendees   Int?
   enableWaitlist Boolean?  @default(false)
   allowMaybe     Boolean   @default(true)
+  /// iCalendar RRULE line only (e.g. FREQ=WEEKLY;BYDAY=TU). Null = does not repeat.
+  recurrenceRule String?
+  /// JSON array of UTC ms (occurrence start) excluded from a recurring series.
+  recurrenceExdates String?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 

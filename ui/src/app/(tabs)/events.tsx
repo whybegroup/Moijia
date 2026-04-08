@@ -16,7 +16,7 @@ if (Platform.OS === 'web') {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   require('./react-datepicker-overrides.css');
 }
-import { useRouter } from 'expo-router';
+import { useRouter, type Href } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { Colors, Fonts, Layout, Radius } from '../../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName } from '../../utils/helpers';
@@ -43,6 +43,15 @@ import {
   type EventsScreenPersistedV1,
   type CalendarScopeMode,
 } from '../../utils/eventsScreenPrefs';
+import { expandRecurringEventsInRange } from '../../utils/recurrence';
+import type { EventDetailed } from '@moija/client';
+
+function eventDetailHref(ev: EventDetailed & { __occurrenceKey?: number }) {
+  const base = `/event/${ev.id}`;
+  if (!ev.recurrenceRule?.trim()) return base;
+  const start = typeof ev.start === 'string' ? ev.start : new Date(ev.start as string).toISOString();
+  return `${base}?at=${encodeURIComponent(start)}`;
+}
 
 export default function EventsScreen() {
   const router = useRouter();
@@ -228,7 +237,15 @@ export default function EventsScreen() {
           ? parseBound(endDateText)
           : null; // allTime → no upper bound
 
-    return events.filter(ev => {
+    const now = new Date();
+    const expandWinStart =
+      startBound ?? new Date(now.getFullYear() - 2, now.getMonth(), now.getDate());
+    const expandWinEnd =
+      endBound ?? new Date(now.getFullYear() + 3, now.getMonth(), now.getDate());
+
+    const expanded = expandRecurringEventsInRange(events, expandWinStart, expandWinEnd);
+
+    return expanded.filter(ev => {
       if (!groups.some(g => g.id === ev.groupId)) return false;
       if (selectedGroupIds.length > 0 && !selectedGroupIds.includes(ev.groupId)) return false;
 
@@ -647,7 +664,9 @@ export default function EventsScreen() {
             events={filtered}
             groups={groups}
             groupColors={groupColors}
-            onSelect={ev => router.push(`/event/${ev.id}`)}
+            onSelect={(ev) =>
+              router.push(eventDetailHref(ev as EventDetailed & { __occurrenceKey?: number }) as Href)
+            }
             onSelectGroup={groupId => router.push(`/groups/${groupId}`)}
           />
         ) : (
@@ -655,7 +674,9 @@ export default function EventsScreen() {
             events={filtered}
             groups={groups}
             groupColors={groupColors}
-            onSelectEvent={ev => router.push(`/event/${ev.id}`)}
+            onSelectEvent={(ev) =>
+              router.push(eventDetailHref(ev as EventDetailed & { __occurrenceKey?: number }) as Href)
+            }
             onSelectGroup={groupId => router.push(`/groups/${groupId}`)}
             calendarFocusDate={calendarFocusDate}
             onCalendarFocusDateChange={setCalendarFocusDate}

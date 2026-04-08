@@ -80,7 +80,12 @@ export function ListView({
       )) {
         r.push({ key: `past-year-${year}`, type: 'year', year });
         for (const ev of yearEvents) {
-          r.push({ key: `past-${ev.id}`, type: 'event', event: ev, isPast: true });
+          r.push({
+            key: `past-${ev.id}-${new Date(ev.start).getTime()}`,
+            type: 'event',
+            event: ev,
+            isPast: true,
+          });
         }
       }
     }
@@ -89,7 +94,12 @@ export function ListView({
     if (ongoing.length > 0) {
       r.push({ key: 'now-divider', type: 'nowDivider' });
       for (const ev of ongoing) {
-        r.push({ key: `ongoing-${ev.id}`, type: 'event', event: ev, isPast: false });
+        r.push({
+          key: `ongoing-${ev.id}-${new Date(ev.start).getTime()}`,
+          type: 'event',
+          event: ev,
+          isPast: false,
+        });
       }
     }
 
@@ -114,7 +124,12 @@ export function ListView({
           r.push({ key: `upcoming-year-${year}`, type: 'year', year });
         }
         for (const ev of upcomingByYear.get(year)!) {
-          r.push({ key: `upcoming-${ev.id}`, type: 'event', event: ev, isPast: false });
+          r.push({
+            key: `upcoming-${ev.id}-${new Date(ev.start).getTime()}`,
+            type: 'event',
+            event: ev,
+            isPast: false,
+          });
         }
       }
     }

@@ -33,6 +33,7 @@ import {
   getMyWaitlistPosition,
   formatLocalDateInput,
 } from '../../utils/helpers';
+import { formatRecurrenceSummary } from '../../utils/recurrence';
 import { computeMentionUserIdsForPost, type MentionMemberRow } from '../../utils/mentionUtils';
 import { Avatar, Sheet, formSectionTitleStyle } from '../../components/ui';
 import { CommentMentionInput } from '../../components/CommentMentionInput';
@@ -49,6 +50,7 @@ import {
   useUpdateComment,
   useGroupMemberColor,
   useDeleteEvent,
+  useExcludeRecurrenceOccurrence,
   useSetEventWatch,
   useUpdateEvent,
   useAddActivityOption,
@@ -280,11 +282,14 @@ function CommentMentionText({ text, style }: { text: string; style?: StyleProp<T
 }
 
 export default function EventDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
-  const router  = useRouter();
+  const params = useLocalSearchParams<{ id: string; at?: string }>();
+  const router = useRouter();
   const { userId: currentUserId } = useCurrentUserContext();
 
+  const id = params.id;
   const eventId = Array.isArray(id) ? id[0] : id;
+  const atParam = params.at;
+  const occurrenceAtRaw = Array.isArray(atParam) ? atParam[0] : atParam;
 
   const { data: ev, refetch: refetchEvent } = useEvent(
     eventId || '',
@@ -309,6 +314,37 @@ export default function EventDetailScreen() {
   const updateCommentMutation = useUpdateComment(eventId || '');
   const deleteCommentMutation = useDeleteComment(eventId || '');
   const deleteEventMutation = useDeleteEvent(currentUserId ?? '');
+  const excludeOccurrenceMutation = useExcludeRecurrenceOccurrence(currentUserId ?? '');
+
+  const displayTiming = useMemo(() => {
+    if (!ev?.start || !ev?.end) {
+      const t = new Date();
+      return {
+        displayStart: t,
+        displayEnd: t,
+        seriesStart: t,
+        isRecurring: false,
+        occurrenceIso: '',
+      };
+    }
+    const seriesStart = new Date(ev.start as string);
+    const seriesEnd = new Date(ev.end as string);
+    const dur = seriesEnd.getTime() - seriesStart.getTime();
+    const rr = !!(ev as { recurrenceRule?: string | null }).recurrenceRule?.trim();
+    let displayStart = seriesStart;
+    if (occurrenceAtRaw) {
+      const ms = new Date(occurrenceAtRaw).getTime();
+      if (Number.isFinite(ms)) displayStart = new Date(ms);
+    }
+    const displayEnd = new Date(displayStart.getTime() + dur);
+    return {
+      displayStart,
+      displayEnd,
+      seriesStart,
+      isRecurring: rr,
+      occurrenceIso: displayStart.toISOString(),
+    };
+  }, [ev, occurrenceAtRaw]);
   const setWatchMutation = useSetEventWatch(eventId || '', currentUserId ?? undefined);
   const updateEventMutation = useUpdateEvent(eventId || '', currentUserId ?? '');
   const addActivityOptionMutation = useAddActivityOption(eventId || '', currentUserId ?? '');
@@ -464,14 +500,14 @@ export default function EventDetailScreen() {
 
   useEffect(() => {
     if (!showTimeSuggestModal || !ev?.start || !ev?.end) return;
-    const s = new Date(ev.start as string);
-    const e = new Date(ev.end as string);
+    const s = displayTiming.displayStart;
+    const e = displayTiming.displayEnd;
     const pad = (n: number) => String(n).padStart(2, '0');
     setSuggestStartDate(formatLocalDateInput(s));
     setSuggestEndDate(formatLocalDateInput(e));
     setSuggestStartTime(`${pad(s.getHours())}:${pad(s.getMinutes())}`);
     setSuggestEndTime(`${pad(e.getHours())}:${pad(e.getMinutes())}`);
-  }, [showTimeSuggestModal, ev?.id, ev?.start, ev?.end]);
+  }, [showTimeSuggestModal, ev?.id, ev?.start, ev?.end, displayTiming.displayStart, displayTiming.displayEnd]);
 
   if (!eventId) {
     return (
@@ -487,11 +523,11 @@ export default function EventDetailScreen() {
   
   const comments = (eventDetailed?.comments || [])
     .map((c, i) => {
-      const evStart = new Date(eventDetailed?.start || Date.now());
+      const anchor = eventDetailed ? displayTiming.displayStart : new Date();
       return {
         ...c,
         createdAt: new Date(c.createdAt),
-        photos: dDiff(evStart) < 0 && i < 2 && (!c.photos || c.photos.length === 0)
+        photos: dDiff(anchor) < 0 && i < 2 && (!c.photos || c.photos.length === 0)
           ? ['https://placehold.co/400x300/FFF0F6/B5245E/png?text=Photo']
           : c.photos || [],
       };
@@ -526,8 +562,8 @@ export default function EventDetailScreen() {
   const maybe   = rsvps.filter(r => r.status === 'maybe');
   const waitlist= rsvps.filter(r => r.status === 'waitlist');
   const myRsvp  = rsvps.find(r => r.userId === currentUserId);
-  const evStart = typeof ev.start === 'string' ? new Date(ev.start) : ev.start;
-  const evEnd = typeof ev.end === 'string' ? new Date(ev.end) : ev.end;
+  const evStart = displayTiming.displayStart;
+  const evEnd = displayTiming.displayEnd;
   const isMultiDay = evStart.toDateString() !== evEnd.toDateString();
   const diff    = dDiff(evStart);
   const isPast  = diff < 0;
@@ -710,13 +746,27 @@ export default function EventDetailScreen() {
   const canGoGoing = !isAtCapacity || myRsvp?.status === 'going';
   const hasWaitlist = ev.enableWaitlist && maxCapacity > 0;
 
-  const handleDeleteEvent = async () => {
+  const handleDeleteEntireSeries = async () => {
     setShowDeleteConfirm(false);
     try {
       await deleteEventMutation.mutateAsync(eventId || '');
       router.push('/(tabs)/events');
     } catch {
       Alert.alert('Error', 'Failed to delete event');
+    }
+  };
+
+  const handleExcludeThisOccurrence = async () => {
+    setShowDeleteConfirm(false);
+    if (!eventId || !displayTiming.occurrenceIso) return;
+    try {
+      await excludeOccurrenceMutation.mutateAsync({
+        eventId,
+        occurrenceStart: displayTiming.occurrenceIso,
+      });
+      router.push('/(tabs)/events');
+    } catch {
+      Alert.alert('Error', 'Failed to remove this occurrence');
     }
   };
 
@@ -925,7 +975,10 @@ export default function EventDetailScreen() {
         {canEdit && (
           <>
             <TouchableOpacity
-              onPress={() => router.push(`/event/edit/${id}`)}
+              onPress={() => {
+                const q = occurrenceAtRaw ? `?at=${encodeURIComponent(occurrenceAtRaw)}` : '';
+                router.push(`/event/edit/${eventId}${q}`);
+              }}
               style={styles.navIconBtn}
             >
               <Ionicons name="create-outline" size={20} color={Colors.text} />
@@ -1111,6 +1164,14 @@ export default function EventDetailScreen() {
                   ) : null}
                 </View>
               )}
+              {(ev as { recurrenceRule?: string | null }).recurrenceRule?.trim() ? (
+                <InfoRow ionicon="repeat-outline">
+                  {formatRecurrenceSummary(
+                    (ev as { recurrenceRule?: string | null }).recurrenceRule,
+                    displayTiming.seriesStart
+                  )}
+                </InfoRow>
+              ) : null}
               <InfoRow ionicon="location-outline">
                 {ev.location?.trim() ? ev.location.trim() : <Text style={{ color: Colors.textMuted }}>None</Text>}
               </InfoRow>
@@ -1602,17 +1663,52 @@ export default function EventDetailScreen() {
 
       <Modal visible={showDeleteConfirm} transparent animationType="fade" onRequestClose={() => setShowDeleteConfirm(false)}>
         <View style={styles.deleteOverlay}>
-          <View style={styles.deleteBox}>
-            <Text style={styles.deleteTitle}>Delete Event</Text>
-            <Text style={styles.deleteMessage}>Are you sure you want to delete this event? This action cannot be undone.</Text>
-            <View style={styles.deleteActions}>
-              <TouchableOpacity onPress={() => setShowDeleteConfirm(false)} style={styles.deleteCancelBtn}>
-                <Text style={styles.deleteCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={handleDeleteEvent} style={styles.deleteConfirmBtn}>
-                <Text style={styles.deleteConfirmText}>Delete</Text>
-              </TouchableOpacity>
-            </View>
+          <View style={[styles.deleteBox, displayTiming.isRecurring && { maxWidth: 340 }]}>
+            <Text style={styles.deleteTitle}>
+              {displayTiming.isRecurring ? 'Remove repeating event' : 'Delete Event'}
+            </Text>
+            <Text style={styles.deleteMessage}>
+              {displayTiming.isRecurring
+                ? 'Remove only this date from the series, or delete every occurrence.'
+                : 'Are you sure you want to delete this event? This action cannot be undone.'}
+            </Text>
+            {displayTiming.isRecurring ? (
+              <View style={{ gap: 10, marginBottom: 8 }}>
+                <TouchableOpacity
+                  onPress={handleExcludeThisOccurrence}
+                  style={[styles.deleteConfirmBtn, { flex: undefined, width: '100%' }]}
+                  disabled={excludeOccurrenceMutation.isPending}
+                >
+                  <Text style={styles.deleteConfirmText}>
+                    {excludeOccurrenceMutation.isPending ? 'Removing…' : 'This occurrence only'}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={handleDeleteEntireSeries}
+                  style={[styles.deleteConfirmBtn, { flex: undefined, width: '100%', backgroundColor: '#B91C1C' }]}
+                  disabled={deleteEventMutation.isPending}
+                >
+                  <Text style={styles.deleteConfirmText}>
+                    {deleteEventMutation.isPending ? 'Deleting…' : 'Entire series'}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setShowDeleteConfirm(false)}
+                  style={[styles.deleteCancelBtn, { flex: undefined, width: '100%' }]}
+                >
+                  <Text style={styles.deleteCancelText}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={styles.deleteActions}>
+                <TouchableOpacity onPress={() => setShowDeleteConfirm(false)} style={styles.deleteCancelBtn}>
+                  <Text style={styles.deleteCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={handleDeleteEntireSeries} style={styles.deleteConfirmBtn}>
+                  <Text style={styles.deleteConfirmText}>Delete</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         </View>
       </Modal>

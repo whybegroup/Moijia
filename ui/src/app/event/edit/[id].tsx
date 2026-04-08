@@ -1,12 +1,12 @@
-import { useState, useRef, useMemo, useEffect, type ChangeEvent } from 'react';
+import { useState, useRef, useMemo, useEffect, useCallback, type ChangeEvent } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, Alert, Modal, Platform, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams, type Href } from 'expo-router';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Colors, Fonts, Radius } from '../../../constants/theme';
 import { formatLocalDateInput } from '../../../utils/helpers';
-import { useEvent, useGroup, useUpdateEvent, useDeleteEvent } from '../../../hooks/api';
+import { useEvent, useGroup, useUpdateEvent, useDeleteEvent, useExcludeRecurrenceOccurrence } from '../../../hooks/api';
 import { NavBar, Field, Toggle, formSectionTitleStyle } from '../../../components/ui';
 import { useCurrentUserContext } from '../../../contexts/CurrentUserContext';
 import { ResolvableImage } from '../../../components/ResolvableImage';
@@ -19,13 +19,23 @@ import {
   type CoverPhotoDraft,
 } from '../../../services/pickAndUploadImage';
 import type { EventDetailed } from '@moija/client';
+import { RecurrenceField } from '../../../components/RecurrenceField';
+import {
+  buildRecurrenceRule,
+  defaultRecurrenceFormState,
+  parseRecurrenceToForm,
+  type RecurrenceFormState,
+} from '../../../utils/recurrence';
 
 export default function EditEventScreen() {
   const router = useRouter();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const params = useLocalSearchParams<{ id: string; at?: string }>();
   const { userId: currentUserId } = useCurrentUserContext();
-  
+
+  const id = params.id;
   const eventId = Array.isArray(id) ? id[0] : id;
+  const atParam = params.at;
+  const occurrenceAtRaw = Array.isArray(atParam) ? atParam[0] : atParam;
 
   const { data: existingEvent, isLoading: eventLoading } = useEvent(eventId || '', currentUserId ?? '');
   const { data: eventGroup, isLoading: eventGroupLoading } = useGroup(
@@ -34,6 +44,40 @@ export default function EditEventScreen() {
   );
   const updateEventMutation = useUpdateEvent(eventId || '', currentUserId ?? '');
   const deleteEventMutation = useDeleteEvent(currentUserId ?? '');
+  const excludeOccurrenceMutation = useExcludeRecurrenceOccurrence(currentUserId ?? '');
+
+  const eventDetailHrefAfterSave = useCallback((): Href => {
+    const q = occurrenceAtRaw ? `?at=${encodeURIComponent(occurrenceAtRaw)}` : '';
+    return `/event/${eventId}${q}` as Href;
+  }, [eventId, occurrenceAtRaw]);
+
+  const deleteModalTiming = useMemo(() => {
+    if (!existingEvent?.start || !existingEvent?.end) {
+      const t = new Date();
+      return {
+        displayStart: t,
+        displayEnd: t,
+        isRecurring: false,
+        occurrenceIso: '',
+      };
+    }
+    const seriesStart = new Date(existingEvent.start as string);
+    const seriesEnd = new Date(existingEvent.end as string);
+    const dur = seriesEnd.getTime() - seriesStart.getTime();
+    const rr = !!(existingEvent as { recurrenceRule?: string | null }).recurrenceRule?.trim();
+    let displayStart = seriesStart;
+    if (occurrenceAtRaw) {
+      const ms = new Date(occurrenceAtRaw).getTime();
+      if (Number.isFinite(ms)) displayStart = new Date(ms);
+    }
+    const displayEnd = new Date(displayStart.getTime() + dur);
+    return {
+      displayStart,
+      displayEnd,
+      isRecurring: rr,
+      occurrenceIso: displayStart.toISOString(),
+    };
+  }, [existingEvent, occurrenceAtRaw]);
 
   const formatTime = (date: Date | string) => {
     const d = typeof date === 'string' ? new Date(date) : date;
@@ -56,6 +100,10 @@ export default function EditEventScreen() {
     allowMaybe: e.allowMaybe || false,
     enableWaitlist: e.enableWaitlist || false,
     coverPhotoDrafts: (e.coverPhotos || []).map((url) => ({ kind: 'remote' as const, url })),
+    recurrence: parseRecurrenceToForm(
+      (e as EventDetailed & { recurrenceRule?: string | null }).recurrenceRule,
+      new Date(e.start as string)
+    ),
   });
 
   const [form, setForm] = useState({
@@ -74,6 +122,7 @@ export default function EditEventScreen() {
     allowMaybe: existingEvent?.allowMaybe || false,
     enableWaitlist: existingEvent?.enableWaitlist || false,
     coverPhotoDrafts: [] as CoverPhotoDraft[],
+    recurrence: defaultRecurrenceFormState() as RecurrenceFormState,
   });
   const errors = { startDate: '', startTime: '', endDate: '', endTime: '' };
   const [showStartDatePicker, setShowStartDatePicker] = useState(false);
@@ -105,9 +154,9 @@ export default function EditEventScreen() {
       eventGroup?.superAdminId === currentUserId ||
       (eventGroup?.adminIds ?? []).includes(currentUserId);
     if (!isElevated) {
-      router.replace(`/event/${eventId}`);
+      router.replace(eventDetailHrefAfterSave());
     }
-  }, [eventId, existingEvent, currentUserId, eventGroup, loading, router]);
+  }, [eventId, existingEvent, currentUserId, eventGroup, loading, router, eventDetailHrefAfterSave]);
 
   const isDirty = useMemo(() => {
     if (!existingEvent) return false;
@@ -132,7 +181,8 @@ export default function EditEventScreen() {
       form.minAttendees !== b.minAttendees ||
       form.maxAttendees !== b.maxAttendees ||
       form.allowMaybe !== b.allowMaybe ||
-      form.enableWaitlist !== b.enableWaitlist
+      form.enableWaitlist !== b.enableWaitlist ||
+      JSON.stringify(form.recurrence) !== JSON.stringify(b.recurrence)
     );
   }, [existingEvent, form]);
 
@@ -145,6 +195,14 @@ export default function EditEventScreen() {
   };
 
   const coverPhotoFileInputRef = useRef<{ click: () => void } | null>(null);
+
+  const recurrenceAnchor = useMemo(() => {
+    const [sh, sm] = form.startTime.split(':').map(Number);
+    const d = new Date(
+      `${form.startDate}T${String(sh || 0).padStart(2, '0')}:${String(sm || 0).padStart(2, '0')}:00`
+    );
+    return Number.isNaN(d.getTime()) ? new Date() : d;
+  }, [form.startDate, form.startTime]);
 
   if (!eventId || loading || !existingEvent) {
     return null;
@@ -218,6 +276,8 @@ export default function EditEventScreen() {
       
       const isAllDay = form.startAllDay && form.endAllDay && form.startDate === form.endDate;
 
+      const recurrenceRule = buildRecurrenceRule(form.recurrence, start);
+
       let coverPhotos: string[] = [];
       if (form.coverPhotoDrafts.length > 0) {
         try {
@@ -241,21 +301,36 @@ export default function EditEventScreen() {
         enableWaitlist: form.maxAttendees.trim() ? form.enableWaitlist : undefined,
         updatedBy: currentUserId,
         allowMaybe: form.allowMaybe,
+        recurrenceRule: recurrenceRule ?? null,
       });
       
-      router.push(`/event/${eventId}`);
+      router.push(eventDetailHrefAfterSave());
     } catch {
       Alert.alert('Error', 'Failed to update event');
     }
   };
 
-  const handleDeleteEvent = async () => {
+  const handleDeleteEntireSeries = async () => {
     setShowDeleteConfirm(false);
     try {
       await deleteEventMutation.mutateAsync(eventId || '');
       router.push('/(tabs)/events');
     } catch {
       Alert.alert('Error', 'Failed to delete event');
+    }
+  };
+
+  const handleExcludeThisOccurrence = async () => {
+    setShowDeleteConfirm(false);
+    if (!eventId || !deleteModalTiming.occurrenceIso) return;
+    try {
+      await excludeOccurrenceMutation.mutateAsync({
+        eventId,
+        occurrenceStart: deleteModalTiming.occurrenceIso,
+      });
+      router.push('/(tabs)/events');
+    } catch {
+      Alert.alert('Error', 'Failed to remove this occurrence');
     }
   };
 
@@ -333,7 +408,7 @@ export default function EditEventScreen() {
     if (router.canGoBack()) {
       router.back();
     } else {
-      router.push(`/event/${eventId}`);
+      router.push(eventDetailHrefAfterSave());
     }
   };
 
@@ -401,7 +476,7 @@ export default function EditEventScreen() {
 
         <View style={styles.dateTimeSection}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Start</Text>
+            <Text style={[formSectionTitleStyle, styles.dateTimeHeading]}>Start</Text>
             <TouchableOpacity 
               onPress={() => set('startAllDay', !form.startAllDay)}
               style={styles.allDayChip}
@@ -499,7 +574,7 @@ export default function EditEventScreen() {
 
         <View style={styles.dateTimeSection}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>End</Text>
+            <Text style={[formSectionTitleStyle, styles.dateTimeHeading]}>End</Text>
             <TouchableOpacity 
               onPress={() => set('endAllDay', !form.endAllDay)}
               style={styles.allDayChip}
@@ -661,6 +736,12 @@ export default function EditEventScreen() {
           </View>
         )}
 
+        <RecurrenceField
+          anchorDate={recurrenceAnchor}
+          value={form.recurrence}
+          onChange={(recurrence) => setForm((p) => ({ ...p, recurrence }))}
+        />
+
         <Field label="Location">
           <TextInput value={form.location} onChangeText={v => set('location', v)} placeholder="e.g. Central Park" placeholderTextColor={Colors.textMuted} style={styles.input} />
         </Field>
@@ -775,17 +856,52 @@ export default function EditEventScreen() {
 
       <Modal visible={showDeleteConfirm} transparent animationType="fade" onRequestClose={() => setShowDeleteConfirm(false)}>
         <View style={styles.deleteOverlay}>
-          <View style={styles.deleteBox}>
-            <Text style={styles.deleteTitle}>Delete Event</Text>
-            <Text style={styles.deleteMessage}>Are you sure you want to delete this event? This action cannot be undone.</Text>
-            <View style={styles.deleteActions}>
-              <TouchableOpacity onPress={() => setShowDeleteConfirm(false)} style={styles.deleteCancelBtn}>
-                <Text style={styles.deleteCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={handleDeleteEvent} style={styles.deleteConfirmBtn}>
-                <Text style={styles.deleteConfirmText}>Delete</Text>
-              </TouchableOpacity>
-            </View>
+          <View style={[styles.deleteBox, deleteModalTiming.isRecurring && { maxWidth: 340 }]}>
+            <Text style={styles.deleteTitle}>
+              {deleteModalTiming.isRecurring ? 'Remove repeating event' : 'Delete Event'}
+            </Text>
+            <Text style={styles.deleteMessage}>
+              {deleteModalTiming.isRecurring
+                ? 'Remove only this date from the series, or delete every occurrence.'
+                : 'Are you sure you want to delete this event? This action cannot be undone.'}
+            </Text>
+            {deleteModalTiming.isRecurring ? (
+              <View style={{ gap: 10, marginBottom: 8 }}>
+                <TouchableOpacity
+                  onPress={handleExcludeThisOccurrence}
+                  style={[styles.deleteConfirmBtn, { flex: undefined, width: '100%' }]}
+                  disabled={excludeOccurrenceMutation.isPending}
+                >
+                  <Text style={styles.deleteConfirmText}>
+                    {excludeOccurrenceMutation.isPending ? 'Removing…' : 'This occurrence only'}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={handleDeleteEntireSeries}
+                  style={[styles.deleteConfirmBtn, { flex: undefined, width: '100%', backgroundColor: '#B91C1C' }]}
+                  disabled={deleteEventMutation.isPending}
+                >
+                  <Text style={styles.deleteConfirmText}>
+                    {deleteEventMutation.isPending ? 'Deleting…' : 'Entire series'}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setShowDeleteConfirm(false)}
+                  style={[styles.deleteCancelBtn, { flex: undefined, width: '100%' }]}
+                >
+                  <Text style={styles.deleteCancelText}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={styles.deleteActions}>
+                <TouchableOpacity onPress={() => setShowDeleteConfirm(false)} style={styles.deleteCancelBtn}>
+                  <Text style={styles.deleteCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={handleDeleteEntireSeries} style={styles.deleteConfirmBtn}>
+                  <Text style={styles.deleteConfirmText}>Delete</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         </View>
       </Modal>
@@ -834,13 +950,13 @@ const styles = StyleSheet.create({
   deleteCancelText: { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.text },
   deleteConfirmBtn: { flex: 1, paddingVertical: 12, borderRadius: Radius.lg, backgroundColor: '#EF4444', alignItems: 'center' },
   deleteConfirmText: { fontSize: 14, fontFamily: Fonts.semiBold, color: '#fff' },
-  dateTimeSection: { marginBottom: 16 },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
-  sectionTitle: { fontSize: 15, fontFamily: Fonts.semiBold, color: Colors.text },
-  allDayChip: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6, paddingHorizontal: 12, borderRadius: Radius.full, backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border },
-  allDayChipText: { fontSize: 13, fontFamily: Fonts.medium, color: Colors.textSub },
+  dateTimeSection: { marginBottom: 12 },
+  dateTimeHeading: { marginBottom: 0 },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
+  allDayChip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 3, paddingHorizontal: 9, borderRadius: Radius.full, backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border },
+  allDayChipText: { fontSize: 12, fontFamily: Fonts.medium, color: Colors.textSub },
   allDayChipTextActive: { color: Colors.text },
   allDayCheckbox: { width: 18, height: 18, borderRadius: 4, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.bg, alignItems: 'center', justifyContent: 'center' },
   allDayCheckboxActive: { backgroundColor: Colors.accent, borderColor: Colors.accent },
-  divider: { height: 1, backgroundColor: Colors.border, marginVertical: 8 },
+  divider: { height: 1, backgroundColor: Colors.border, marginVertical: 5 },
 });

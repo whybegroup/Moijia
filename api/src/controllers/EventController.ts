@@ -28,6 +28,7 @@ import {
   EventActivityOptionInput,
   EventActivityVoteInput,
   EventTimeSuggestionInput,
+  RecurrenceExcludeOccurrenceInput,
 } from '../models';
 import { EventService } from '../services/EventService';
 
@@ -154,6 +155,22 @@ export class EventController extends Controller {
     }
     await this.eventService.delete(id, userId);
     this.setStatus(204);
+  }
+
+  /**
+   * Remove a single occurrence from a recurring series (other instances unchanged).
+   */
+  @Post('{id}/recurrence/exclude')
+  public async excludeRecurrenceOccurrence(
+    @Path() id: string,
+    @Query() userId: string,
+    @Body() body: RecurrenceExcludeOccurrenceInput
+  ): Promise<Event> {
+    if (!userId) {
+      this.setStatus(400);
+      throw new Error('userId is required');
+    }
+    return this.eventService.excludeRecurrenceOccurrence(id, userId, body.occurrenceStart);
   }
 
   /**
