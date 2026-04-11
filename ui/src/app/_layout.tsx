@@ -6,6 +6,7 @@ import { focusManager } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import Toast from 'react-native-toast-message';
+import { appToastConfig } from '../config/appToastConfig';
 import {
   useFonts,
   DMSans_400Regular,
@@ -136,7 +137,7 @@ export default function RootLayout() {
               <SafeAreaProvider>
                 <StatusBar style="dark" />
                 <RootLayoutNav />
-                <Toast />
+                <Toast config={appToastConfig} />
               </SafeAreaProvider>
             </GestureHandlerRootView>
           </CurrentUserProvider>

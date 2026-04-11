@@ -219,9 +219,12 @@ interface SheetProps {
   visible: boolean;
   onClose: () => void;
   children: React.ReactNode;
+  /** Matches comment / reaction dark panels (`#2c2c2e`, dim backdrop). */
+  variant?: 'light' | 'dark';
 }
-export function Sheet({ visible, onClose, children }: SheetProps) {
+export function Sheet({ visible, onClose, children, variant = 'light' }: SheetProps) {
   const insets = useSafeAreaInsets();
+  const isDark = variant === 'dark';
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <KeyboardAvoidingView
@@ -229,9 +232,19 @@ export function Sheet({ visible, onClose, children }: SheetProps) {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={0}
       >
-        <TouchableOpacity style={styles.sheetOverlay} onPress={onClose} activeOpacity={1}>
-          <TouchableOpacity activeOpacity={1} style={[styles.sheetContainer, { paddingBottom: insets.bottom + 16 }]}>
-            <View style={styles.sheetHandle} />
+        <TouchableOpacity
+          style={isDark ? styles.sheetOverlayDark : styles.sheetOverlay}
+          onPress={onClose}
+          activeOpacity={1}
+        >
+          <TouchableOpacity
+            activeOpacity={1}
+            style={[
+              isDark ? styles.sheetContainerDark : styles.sheetContainer,
+              { paddingBottom: insets.bottom + 16 },
+            ]}
+          >
+            <View style={isDark ? styles.sheetHandleDark : styles.sheetHandle} />
             <ScrollView
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
@@ -370,15 +383,33 @@ const styles = StyleSheet.create({
   navTitleSpacer: { flex: 1, minWidth: 0 },
   navRight: { alignItems: 'flex-end', justifyContent: 'center', flexShrink: 0 },
   sheetOverlay: { flex: 1, backgroundColor: Colors.overlay, justifyContent: 'flex-end' },
+  sheetOverlayDark: { flex: 1, backgroundColor: 'rgba(0,0,0,0.52)', justifyContent: 'flex-end' },
   sheetContainer: {
     backgroundColor: Colors.surface,
     borderTopLeftRadius: 16, borderTopRightRadius: 16,
     maxHeight: '85%', paddingHorizontal: 20,
   },
+  sheetContainerDark: {
+    backgroundColor: '#2c2c2e',
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    maxHeight: '85%',
+    paddingHorizontal: 20,
+    overflow: 'hidden',
+  },
   sheetHandle: {
     width: 32, height: 3, borderRadius: 2,
     backgroundColor: Colors.border, alignSelf: 'center',
     marginTop: 10, marginBottom: 4,
+  },
+  sheetHandleDark: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.28)',
+    marginTop: 8,
+    marginBottom: 10,
   },
   sectionLabel: {
     fontSize: 11, fontFamily: Fonts.semiBold,

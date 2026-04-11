@@ -28,18 +28,19 @@ import {
   Platform,
   ActivityIndicator,
   Dimensions,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { ScrollView as GestureScrollView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { EventFormPopoverChrome } from '../../components/EventFormPopoverChrome';
 import { modalTopBarStyles } from '../../components/modalTopBarStyles';
-import { BlurView } from 'expo-blur';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { useLocalSearchParams, useRouter, usePathname, type Href } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { Colors, Fonts, Radius, Shadows } from '../../constants/theme';
+import { COMMENT_REACTION_EMOJIS } from '../../constants/commentReactionEmojis';
 import {
   getGroupColor,
   getDefaultGroupThemeFromName,
@@ -95,6 +96,7 @@ import {
 } from '../../services/pickAndUploadImage';
 import { useResolvedImageUrls } from '../../hooks/useResolvedImageUrls';
 import { firstSearchParam, parseReturnToParam, withReturnTo } from '../../utils/navigationReturn';
+import Toast from 'react-native-toast-message';
 import {
   formatWallDateFromUtcIso,
   formatWallTimeHmFromUtcIso,
@@ -118,9 +120,9 @@ const COMPOSER_INPUT_MAX_H = 140;
 /** Must match API soft-delete text when an admin removes someone else's comment */
 const COMMENT_DELETED_BY_ADMIN_MSG = 'This message was deleted by admin';
 
+/** Google Chat–style quick reactions in the long-press bar (full library opens from the + control). */
 const COMMENT_QUICK_REACTIONS = ['👍', '🙏', '😮', '✍️', '😂'] as const;
 
-/** Optional shortcode suffix for reaction sheet title (Google Chat–style). */
 /** Color emoji in the comment action menu / chips (custom DM Sans has no color glyph tables on iOS). */
 function commentMenuEmojiTextStyle(fontSize: number): TextStyle {
   if (Platform.OS === 'ios') {
@@ -130,6 +132,21 @@ function commentMenuEmojiTextStyle(fontSize: number): TextStyle {
     return { fontSize: fontSize + 1, lineHeight: fontSize + 8, includeFontPadding: false };
   }
   return { fontSize, lineHeight: fontSize + 4 };
+}
+
+function rsvpSavedToastTitle(status: RSVPInput.status): string {
+  switch (status) {
+    case RSVPInput.status.GOING:
+      return "You're going";
+    case RSVPInput.status.NOT_GOING:
+      return "Can't go — saved";
+    case RSVPInput.status.MAYBE:
+      return 'Maybe — saved';
+    case RSVPInput.status.WAITLIST:
+      return "You're on the waitlist";
+    default:
+      return 'RSVP updated';
+  }
 }
 
 function reactionEmojiShortcode(emoji: string): string {
@@ -528,8 +545,8 @@ export default function EventDetailScreen() {
   } | null>(null);
   const [reactionDetailSheetVisible, setReactionDetailSheetVisible] = useState(false);
   const [commentActionMenu, setCommentActionMenu] = useState<{ commentId: string } | null>(null);
-  const [commentMenuCustomEmoji, setCommentMenuCustomEmoji] = useState('');
-  const commentMenuEmojiInputRef = useRef<TextInput>(null);
+  /** Full emoji grid opened from the smiley+ button (same comment id). */
+  const [commentReactionFullPickerFor, setCommentReactionFullPickerFor] = useState<string | null>(null);
   const [newActivityLabel, setNewActivityLabel] = useState('');
   const [showTimeSuggestModal, setShowTimeSuggestModal] = useState(false);
   const [suggestStartDate, setSuggestStartDate] = useState('');
@@ -661,8 +678,20 @@ export default function EventDetailScreen() {
 
   const dismissCommentActionMenu = useCallback(() => {
     setCommentActionMenu(null);
-    setCommentMenuCustomEmoji('');
+    setCommentReactionFullPickerFor(null);
   }, []);
+
+  const applyCommentReactionAndDismiss = useCallback(
+    async (commentId: string, emoji: string) => {
+      try {
+        await commentReactionMutation.mutateAsync({ commentId, emoji });
+        dismissCommentActionMenu();
+      } catch {
+        /* react-query / global handlers surface errors */
+      }
+    },
+    [commentReactionMutation, dismissCommentActionMenu],
+  );
   const [draftTitle, setDraftTitle] = useState('');
   const [draftDesc, setDraftDesc] = useState('');
   const [draftLocation, setDraftLocation] = useState('');
@@ -1476,32 +1505,58 @@ export default function EventDetailScreen() {
 
   const applyRsvp = async (status: RSVPInput.status, memo?: string) => {
     if (!ev) return;
-    
-    // Check if trying to RSVP "going" when at capacity - join waitlist instead
+
     if (status === RSVPInput.status.GOING && !canGoGoing && hasWaitlist) {
       status = RSVPInput.status.WAITLIST;
     }
-    
-    // If at capacity and no waitlist, don't allow going
+
     if (status === RSVPInput.status.GOING && !canGoGoing && !hasWaitlist) {
-      Alert.alert('Event Full', 'This event has reached maximum capacity.');
+      Toast.show({
+        type: 'info',
+        text1: 'Event is full',
+        text2: 'This event has reached maximum capacity.',
+        visibilityTime: 3200,
+        position: 'top',
+      });
       return;
     }
-    
+
+    /** Explicit memo from MemoSheet; when absent, keep existing note when changing Going ↔ Can't go (etc.). */
+    const resolvedMemo =
+      memo !== undefined ? (memo ?? '') : String(myRsvp?.memo ?? '');
+    const noteSaved = !!(memo && memo.trim());
+
     try {
-      // If clicking the same status and no memo, toggle it off (delete RSVP)
-      // If memo is provided, only update the memo without toggling
       if (myRsvp?.status === status && memo === undefined) {
         await deleteRSVPMutation.mutateAsync(currentUserId);
+        Toast.show({
+          type: 'success',
+          text1: 'Response cleared',
+          visibilityTime: 2200,
+          position: 'top',
+        });
       } else {
         await createOrUpdateRSVPMutation.mutateAsync({
           userId: currentUserId,
-          status: status,
-          memo: memo ?? '',
+          status,
+          memo: resolvedMemo,
+        });
+        Toast.show({
+          type: 'success',
+          text1: rsvpSavedToastTitle(status),
+          ...(noteSaved ? { text2: 'Note saved' } : {}),
+          visibilityTime: noteSaved ? 2800 : 2200,
+          position: 'top',
         });
       }
     } catch {
-      Alert.alert('Error', 'Failed to update RSVP');
+      Toast.show({
+        type: 'error',
+        text1: 'Could not update RSVP',
+        text2: 'Please try again.',
+        visibilityTime: 3200,
+        position: 'top',
+      });
     }
   };
 
@@ -3099,11 +3154,7 @@ export default function EventDetailScreen() {
           statusBarTranslucent
         >
           <View style={styles.commentActionModalRoot}>
-            {Platform.OS === 'web' ? (
-              <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.76)' }]} />
-            ) : (
-              <BlurView intensity={88} tint="dark" style={StyleSheet.absoluteFill} />
-            )}
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: Colors.overlay }]} />
             <Pressable
               style={StyleSheet.absoluteFill}
               onPress={dismissCommentActionMenu}
@@ -3123,11 +3174,16 @@ export default function EventDetailScreen() {
                   const mc = commentMenuTarget;
                   const menuRemoved = mc.text === COMMENT_DELETED_BY_ADMIN_MSG;
                   const menuCanReply = canCollaborateActivities && !menuRemoved;
+                  /** Writer, group admin, or super admin — others only get reply + reactions in this menu. */
+                  const menuCanSeeEditDeleteCopy =
+                    !!currentUserId &&
+                    (mc.userId === currentUserId || canModerateComments);
                   const menuCanEdit =
+                    menuCanSeeEditDeleteCopy &&
                     mc.userId === currentUserId &&
                     !menuRemoved &&
                     (!!((mc.text || '').trim()) || mc.photos.length > 0);
-                  const menuCanDelete = mc.userId === currentUserId || canModerateComments;
+                  const menuCanDelete = menuCanSeeEditDeleteCopy;
                   const menuTs =
                     typeof mc.createdAt === 'string' ? new Date(mc.createdAt) : mc.createdAt;
                   const previewText = (mc.text || '').trim();
@@ -3169,7 +3225,7 @@ export default function EventDetailScreen() {
                       },
                     });
                   }
-                  if (previewText) {
+                  if (previewText && menuCanSeeEditDeleteCopy) {
                     menuRows.push({
                       key: 'copy',
                       label: 'Copy text',
@@ -3199,83 +3255,42 @@ export default function EventDetailScreen() {
                   return (
                     <>
                       {currentUserId && menuCanReply ? (
-                        <View style={styles.commentActionEmojiPill}>
-                          <ScrollView
-                            horizontal
-                            showsHorizontalScrollIndicator={false}
-                            contentContainerStyle={styles.commentActionEmojiPillScroll}
-                            keyboardShouldPersistTaps="handled"
+                        <View style={styles.commentActionEmojiBarRow}>
+                          <View style={styles.commentActionEmojiQuickPill}>
+                            <View style={styles.commentActionEmojiQuickInner}>
+                              {COMMENT_QUICK_REACTIONS.map((emoji) => {
+                                const active = (mc.viewerReactionEmojis || []).includes(emoji);
+                                return (
+                                  <TouchableOpacity
+                                    key={emoji}
+                                    onPress={() => void applyCommentReactionAndDismiss(mc.id, emoji)}
+                                    disabled={commentReactionMutation.isPending}
+                                    style={[
+                                      styles.commentActionEmojiQuickHit,
+                                      active && styles.commentActionEmojiHitActive,
+                                    ]}
+                                    accessibilityLabel={`React with ${emoji}`}
+                                  >
+                                    <Text style={commentMenuEmojiTextStyle(24)}>{emoji}</Text>
+                                  </TouchableOpacity>
+                                );
+                              })}
+                            </View>
+                          </View>
+                          <TouchableOpacity
+                            style={styles.commentActionEmojiMoreBtn}
+                            onPress={() => setCommentReactionFullPickerFor(mc.id)}
+                            disabled={commentReactionMutation.isPending}
+                            accessibilityLabel="More emojis"
+                            activeOpacity={0.75}
                           >
-                            {COMMENT_QUICK_REACTIONS.map((emoji) => {
-                              const active = (mc.viewerReactionEmojis || []).includes(emoji);
-                              return (
-                                <TouchableOpacity
-                                  key={emoji}
-                                  onPress={() =>
-                                    void commentReactionMutation.mutateAsync({
-                                      commentId: mc.id,
-                                      emoji,
-                                    })
-                                  }
-                                  disabled={commentReactionMutation.isPending}
-                                  style={[
-                                    styles.commentActionEmojiHit,
-                                    active && styles.commentActionEmojiHitActive,
-                                  ]}
-                                >
-                                  <Text style={commentMenuEmojiTextStyle(24)}>{emoji}</Text>
-                                </TouchableOpacity>
-                              );
-                            })}
-                            <View style={styles.commentActionEmojiDivider} />
-                            <TextInput
-                              ref={commentMenuEmojiInputRef}
-                              value={commentMenuCustomEmoji}
-                              onChangeText={setCommentMenuCustomEmoji}
-                              placeholder="＋"
-                              placeholderTextColor="rgba(255,255,255,0.35)"
-                              accessibilityLabel="Custom emoji"
-                              style={styles.commentActionEmojiCustomInput}
-                              maxLength={8}
-                              returnKeyType="done"
-                              onSubmitEditing={() => {
-                                const e = commentMenuCustomEmoji.trim();
-                                if (!e) return;
-                                void commentReactionMutation
-                                  .mutateAsync({ commentId: mc.id, emoji: e })
-                                  .then(() => setCommentMenuCustomEmoji(''));
-                              }}
-                            />
-                            {Platform.OS === 'web' ? (
-                              <TouchableOpacity
-                                onPress={() => {
-                                  if (typeof window === 'undefined') return;
-                                  const raw = window.prompt('Paste or type an emoji');
-                                  const e = (raw || '').trim().slice(0, 8);
-                                  if (e) {
-                                    void commentReactionMutation.mutateAsync({
-                                      commentId: mc.id,
-                                      emoji: e,
-                                    });
-                                  }
-                                }}
-                                hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
-                                style={styles.commentActionEmojiAddBtn}
-                                accessibilityLabel="Add custom emoji"
-                              >
-                                <Ionicons name="add-circle-outline" size={24} color="rgba(255,255,255,0.88)" />
-                              </TouchableOpacity>
-                            ) : (
-                              <TouchableOpacity
-                                onPress={() => commentMenuEmojiInputRef.current?.focus()}
-                                hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
-                                style={styles.commentActionEmojiAddBtn}
-                                accessibilityLabel="Focus emoji field"
-                              >
-                                <Ionicons name="add-circle-outline" size={24} color="rgba(255,255,255,0.88)" />
-                              </TouchableOpacity>
-                            )}
-                          </ScrollView>
+                            <View style={styles.commentActionEmojiMoreInner}>
+                              <Ionicons name="happy-outline" size={22} color={Colors.textSub} />
+                              <View style={styles.commentActionEmojiMorePlus} pointerEvents="none">
+                                <Ionicons name="add" size={11} color={Colors.textSub} />
+                              </View>
+                            </View>
+                          </TouchableOpacity>
                         </View>
                       ) : null}
 
@@ -3291,8 +3306,14 @@ export default function EventDetailScreen() {
                             isMinePreview && styles.commentActionPreviewBubbleMine,
                           ]}
                         >
-                          <Text style={styles.commentActionPreviewMeta} numberOfLines={1}>
-                            {getUserSafe(mc.userId).displayName} · {timeAgo(menuTs)}
+                          <Text style={styles.commentActionPreviewMetaLine} numberOfLines={1}>
+                            <Text style={styles.commentActionPreviewAuthor}>
+                              {getUserSafe(mc.userId).displayName}
+                            </Text>
+                            <Text style={styles.commentActionPreviewMetaMuted}>
+                              {' · '}
+                              {timeAgo(menuTs)}
+                            </Text>
                           </Text>
                           {previewText ? (
                             <Text style={styles.commentActionPreviewBody} numberOfLines={8}>
@@ -3335,7 +3356,7 @@ export default function EventDetailScreen() {
                             <Ionicons
                               name={row.icon}
                               size={22}
-                              color={row.danger ? '#FF453A' : 'rgba(255,255,255,0.88)'}
+                              color={row.danger ? Colors.todayRed : Colors.textSub}
                             />
                           </TouchableOpacity>
                         ))}
@@ -3349,14 +3370,61 @@ export default function EventDetailScreen() {
         </Modal>
       ) : null}
 
+      {commentReactionFullPickerFor && currentUserId ? (
+        <Modal
+          visible
+          transparent
+          animationType="fade"
+          presentationStyle={Platform.OS === 'ios' ? 'overFullScreen' : undefined}
+          onRequestClose={() => setCommentReactionFullPickerFor(null)}
+          statusBarTranslucent
+        >
+          <View style={styles.commentReactionPickerRoot}>
+            <Pressable
+              style={[StyleSheet.absoluteFill, { backgroundColor: Colors.overlay }]}
+              onPress={() => setCommentReactionFullPickerFor(null)}
+              accessibilityRole="button"
+              accessibilityLabel="Close emoji picker"
+            />
+            <View style={styles.commentReactionPickerCenter} pointerEvents="box-none">
+              <View style={styles.commentReactionPickerCard} pointerEvents="auto">
+                <Text style={styles.commentReactionPickerTitle}>Choose a reaction</Text>
+                <ScrollView
+                  nestedScrollEnabled
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={false}
+                  style={styles.commentReactionPickerScroll}
+                  contentContainerStyle={styles.commentReactionPickerGrid}
+                >
+                  {COMMENT_REACTION_EMOJIS.map((emoji, emojiIdx) => (
+                    <TouchableOpacity
+                      key={`${emoji}-${emojiIdx}`}
+                      onPress={() =>
+                        void applyCommentReactionAndDismiss(commentReactionFullPickerFor, emoji)
+                      }
+                      disabled={commentReactionMutation.isPending}
+                      style={styles.commentActionEmojiHit}
+                      accessibilityLabel={`React with ${emoji}`}
+                    >
+                      <Text style={commentMenuEmojiTextStyle(22)}>{emoji}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      ) : null}
+
       {/* Attendance sheet */}
       <AttendanceSheet ev={ev} group={group} users={users} visible={showAttend} onClose={() => setShowAttend(false)} />
 
       {/* Memo sheet */}
       {memoFor && (
         <MemoSheet
+          key={memoFor}
           status={memoFor}
-          existing={myRsvp?.status === memoFor ? myRsvp.memo : ''}
+          existing={myRsvp?.memo ?? ''}
           onConfirm={memo => { applyRsvp(memoFor!, memo); setMemoFor(null); }}
           onClose={() => setMemoFor(null)}
         />
@@ -3997,13 +4065,13 @@ function AttendanceSheet({ ev, group, users, visible, onClose }: { ev: EventDeta
     return (
       <TouchableOpacity 
         onPress={() => r.memo ? setMemoPopup(r) : null} 
-        style={styles.attendRsvpRow} 
+        style={styles.attendDarkRsvpRow} 
         activeOpacity={r.memo ? 0.7 : 1}
       >
         <UserAvatar seed={user.displayName || user.name} backgroundColor={[user.avatarSeed]} thumbnail={user.thumbnail} size={38} />
         <View style={{ flex: 1 }}>
-          <Text style={[styles.attendName, faded && { color: Colors.textMuted }]}>{user.displayName}</Text>
-          {r.memo ? <Text style={styles.attendMemo} numberOfLines={1}>"{r.memo}"</Text> : null}
+          <Text style={[styles.attendDarkName, faded && styles.attendDarkNameFaded]}>{user.displayName}</Text>
+          {r.memo ? <Text style={styles.attendDarkMemo} numberOfLines={1}>"{r.memo}"</Text> : null}
         </View>
       </TouchableOpacity>
     );
@@ -4011,42 +4079,42 @@ function AttendanceSheet({ ev, group, users, visible, onClose }: { ev: EventDeta
 
   return (
     <>
-      <Sheet visible={visible} onClose={onClose}>
-        <Text style={styles.sheetTitle}>Attendance</Text>
+      <Sheet visible={visible} onClose={onClose} variant="dark">
+        <Text style={styles.reactionSheetTitle}>Attendance</Text>
         {going.length > 0 && (
           <>
-            <Text style={styles.attendSection}>GOING · {going.length}</Text>
+            <Text style={styles.attendDarkSection}>GOING · {going.length}</Text>
             {going.map(r => <RsvpRow key={r.userId} r={r} />)}
           </>
         )}
         {waitlist.length > 0 && (
           <>
-            <Text style={[styles.attendSection, { color: '#F59E0B' }]}>WAITLIST · {waitlist.length}</Text>
+            <Text style={[styles.attendDarkSection, { color: '#FBBF24' }]}>WAITLIST · {waitlist.length}</Text>
             {waitlist.map(r => <RsvpRow key={r.userId} r={r} />)}
           </>
         )}
         {maybe.length > 0 && (
           <>
-            <Text style={styles.attendSection}>MAYBE · {maybe.length}</Text>
+            <Text style={styles.attendDarkSection}>MAYBE · {maybe.length}</Text>
             {maybe.map(r => <RsvpRow key={r.userId} r={r} />)}
           </>
         )}
         {notGoing.length > 0 && (
           <>
-            <Text style={styles.attendSection}>NOT ATTENDING · {notGoing.length}</Text>
+            <Text style={styles.attendDarkSection}>NOT ATTENDING · {notGoing.length}</Text>
             {notGoing.map(r => <RsvpRow key={r.userId} r={r} faded />)}
           </>
         )}
         {noResponseIds.length > 0 && (
             <>
-            <Text style={styles.attendSection}>NO RESPONSE · {noResponseIds.length}</Text>
+            <Text style={styles.attendDarkSection}>NO RESPONSE · {noResponseIds.length}</Text>
             {noResponseIds.map(uid => {
               const user = users[uid] || { id: uid, name: 'Loading...', displayName: 'Loading...', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
               return (
-                <View key={uid} style={styles.attendRsvpRow}>
+                <View key={uid} style={styles.attendDarkRsvpRow}>
                   <UserAvatar seed={user.displayName || user.name} backgroundColor={[user.avatarSeed]} thumbnail={user.thumbnail} size={38} />
                   <View style={{ flex: 1 }}>
-                    <Text style={[styles.attendName, { color: Colors.textMuted }]}>{user.displayName}</Text>
+                    <Text style={styles.attendDarkNameMuted}>{user.displayName}</Text>
                   </View>
                 </View>
               );
@@ -4087,33 +4155,76 @@ function AttendanceSheet({ ev, group, users, visible, onClose }: { ev: EventDeta
 }
 
 function MemoSheet({ status, existing, onConfirm, onClose }: { status: RSVPInput.status; existing: string; onConfirm: (m: string) => void; onClose: () => void }) {
+  const insets = useSafeAreaInsets();
   const [val, setVal] = useState(existing || '');
+  useEffect(() => {
+    setVal(existing || '');
+  }, [existing]);
   const isGoing = status === RSVPInput.status.GOING;
   const isMaybe = status === RSVPInput.status.MAYBE;
   const isWaitlist = status === RSVPInput.status.WAITLIST;
-  const waitlistColor = '#F59E0B';
-  const color = isGoing ? Colors.going : isMaybe ? Colors.maybe : isWaitlist ? waitlistColor : Colors.notGoing;
   const label = isGoing ? 'Going' : isMaybe ? 'Maybe' : isWaitlist ? 'Waitlist' : "Can't go";
 
   return (
-    <Sheet visible onClose={onClose}>
-      <Text style={styles.sheetTitle}>{label}</Text>
-      <Text style={{ fontSize: 13, color: Colors.textMuted, marginBottom: 14, fontFamily: Fonts.regular }}>Add a note (optional)</Text>
-      <TextInput
-        autoFocus value={val} onChangeText={setVal}
-        placeholder={isGoing ? 'e.g. might be a little late!' : "e.g. out of town this weekend"}
-        placeholderTextColor={Colors.textMuted}
-        maxLength={60}
-        style={[styles.commentInputField, { marginBottom: 12 }]}
-      />
-      <TouchableOpacity onPress={() => onConfirm(val.trim())} style={[styles.rsvpBtn, { flex: 0, backgroundColor: color, borderColor: color, paddingVertical: 13, marginBottom: 8 }]}>
-        <Text style={[styles.rsvpBtnText, { color: '#fff', fontFamily: Fonts.bold, fontSize: 15 }]}>Confirm — {label}</Text>
-      </TouchableOpacity>
-      <TouchableOpacity onPress={onClose} style={[styles.rsvpBtn, { flex: 0, borderColor: Colors.border, paddingVertical: 10 }]}>
-        <Text style={[styles.rsvpBtnText, { color: Colors.textSub }]}>Cancel</Text>
-      </TouchableOpacity>
-      <View style={{ height: 20 }} />
-    </Sheet>
+    <Modal
+      visible
+      transparent
+      animationType="fade"
+      presentationStyle={Platform.OS === 'ios' ? 'overFullScreen' : undefined}
+      statusBarTranslucent
+      onRequestClose={onClose}
+    >
+      <KeyboardAvoidingView
+        style={styles.rsvpMemoModalRoot}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={0}
+      >
+        <Pressable
+          style={styles.rsvpMemoModalBackdrop}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Dismiss"
+        />
+        <View
+          style={[
+            styles.rsvpMemoModalCenter,
+            { paddingBottom: Math.max(insets.bottom, 20) },
+          ]}
+          pointerEvents="box-none"
+        >
+          <View style={styles.rsvpMemoModalCard}>
+            <Text style={styles.rsvpMemoModalTitle}>{label}</Text>
+            <Text style={styles.rsvpMemoModalHint}>Optional note</Text>
+            <TextInput
+              autoFocus
+              value={val}
+              onChangeText={setVal}
+              placeholder={isGoing ? 'e.g. might be a little late' : 'e.g. out of town'}
+              placeholderTextColor={Colors.textMuted}
+              maxLength={60}
+              style={styles.rsvpMemoModalInput}
+            />
+            <View style={styles.rsvpMemoModalBtnRow}>
+              <TouchableOpacity
+                onPress={onClose}
+                style={[styles.rsvpMemoModalBtn, styles.rsvpMemoModalBtnGhost]}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.rsvpMemoModalBtnGhostText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => onConfirm(val.trim())}
+                style={[styles.rsvpMemoModalBtn, styles.rsvpMemoModalBtnDone]}
+                activeOpacity={0.7}
+                accessibilityLabel={`Done, save as ${label}`}
+              >
+                <Text style={styles.rsvpMemoModalBtnDoneText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
   );
 }
 
@@ -4581,64 +4692,108 @@ const styles = StyleSheet.create({
     maxWidth: 400,
     alignSelf: 'center',
   },
-  commentActionEmojiPill: {
-    marginBottom: 10,
-    maxWidth: '100%',
-    alignSelf: 'stretch',
-    borderRadius: 999,
-    backgroundColor: 'rgba(58,58,60,0.95)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.1)',
-    paddingVertical: 8,
-    paddingHorizontal: 6,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 12,
-      },
-      android: { elevation: 8 },
-      default: {},
-    }),
-  },
-  commentActionEmojiPillScroll: {
+  commentActionEmojiBarRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 6,
+    gap: 8,
+    marginBottom: 10,
+    alignSelf: 'stretch',
+  },
+  commentActionEmojiQuickPill: {
+    flex: 1,
+    minWidth: 0,
+    borderRadius: 999,
+    backgroundColor: Colors.bg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    ...Shadows.sm,
+  },
+  commentActionEmojiQuickInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  commentActionEmojiQuickHit: {
+    flex: 1,
+    minWidth: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 4,
+    borderRadius: 10,
+  },
+  commentActionEmojiMoreBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...Shadows.sm,
+  },
+  commentActionEmojiMoreInner: {
+    position: 'relative',
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  commentActionEmojiMorePlus: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
   },
   commentActionEmojiHit: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 12,
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   commentActionEmojiHitActive: {
-    backgroundColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: Colors.surface,
   },
-  commentActionEmojiDivider: {
-    width: 1,
-    height: 22,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    marginHorizontal: 4,
+  commentReactionPickerRoot: {
+    flex: 1,
   },
-  commentActionEmojiCustomInput: {
-    minWidth: 44,
-    maxWidth: 88,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    fontSize: 22,
-    color: '#fff',
-    ...Platform.select({
-      web: { fontFamily: Fonts.regular },
-      default: {},
-    }),
-  },
-  commentActionEmojiAddBtn: {
-    paddingHorizontal: 4,
-    paddingVertical: 4,
+  commentReactionPickerCenter: {
+    ...StyleSheet.absoluteFillObject,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  commentReactionPickerCard: {
+    width: '100%',
+    maxWidth: 340,
+    maxHeight: Dimensions.get('window').height * 0.62,
+    borderRadius: Radius.xl,
+    backgroundColor: Colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    paddingTop: 14,
+    paddingHorizontal: 12,
+    paddingBottom: 10,
+    ...Shadows.md,
+  },
+  commentReactionPickerTitle: {
+    fontSize: 15,
+    fontFamily: Fonts.semiBold,
+    color: Colors.text,
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  commentReactionPickerScroll: {
+    maxHeight: Dimensions.get('window').height * 0.48,
+  },
+  commentReactionPickerGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-start',
+    gap: 4,
+    paddingBottom: 8,
   },
   commentActionPreviewAlign: {
     alignSelf: 'stretch',
@@ -4652,27 +4807,34 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     paddingVertical: 12,
     paddingHorizontal: 14,
-    backgroundColor: 'rgba(58, 58, 60, 0.98)',
+    backgroundColor: Colors.surface,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: Colors.border,
+    ...Shadows.sm,
   },
   commentActionPreviewBubbleMine: {
     maxWidth: '92%',
     alignSelf: 'flex-end',
+    backgroundColor: Colors.goingBg,
+    borderColor: Colors.goingBorder,
   },
-  commentActionPreviewMeta: {
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.55)',
+  commentActionPreviewMetaLine: {
     marginBottom: 6,
-    ...Platform.select({
-      web: { fontFamily: Fonts.semiBold },
-      default: { fontWeight: '600' as const },
-    }),
+  },
+  commentActionPreviewAuthor: {
+    fontSize: 12,
+    fontFamily: Fonts.semiBold,
+    color: Colors.going,
+  },
+  commentActionPreviewMetaMuted: {
+    fontSize: 12,
+    fontFamily: Fonts.regular,
+    color: Colors.textMuted,
   },
   commentActionPreviewBody: {
-    fontSize: 16,
-    lineHeight: 22,
-    color: 'rgba(255,255,255,0.96)',
+    fontSize: 14,
+    lineHeight: 20,
+    color: Colors.text,
     ...Platform.select({
       web: { fontFamily: Fonts.regular },
       default: {},
@@ -4682,46 +4844,37 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
     borderRadius: 14,
     overflow: 'hidden',
-    backgroundColor: '#2c2c2e',
+    backgroundColor: Colors.surface,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.1)',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.35,
-        shadowRadius: 20,
-      },
-      android: { elevation: 14 },
-      default: {},
-    }),
+    borderColor: Colors.border,
+    ...Shadows.md,
   },
   commentActionMenuRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 15,
-    paddingHorizontal: 18,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255,255,255,0.1)',
+    borderBottomColor: Colors.border,
   },
   commentActionMenuRowFirst: {},
   commentActionMenuRowLast: {
     borderBottomWidth: 0,
   },
   commentActionMenuLabel: {
-    fontSize: 17,
-    letterSpacing: -0.2,
-    color: 'rgba(255,255,255,0.95)',
+    fontSize: 15,
+    letterSpacing: -0.15,
+    color: Colors.text,
     ...Platform.select({
       web: { fontFamily: Fonts.regular },
       default: {},
     }),
   },
   commentActionMenuLabelDanger: {
-    fontSize: 17,
-    letterSpacing: -0.2,
-    color: '#FF453A',
+    fontSize: 15,
+    letterSpacing: -0.15,
+    color: Colors.todayRed,
     ...Platform.select({
       web: { fontFamily: Fonts.semiBold },
       default: { fontWeight: '600' as const },
@@ -4914,6 +5067,109 @@ const styles = StyleSheet.create({
   attendRsvpRow:    { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: Colors.border },
   attendName:       { fontSize: 14, fontFamily: Fonts.medium, color: Colors.text },
   attendMemo:       { fontSize: 12, color: Colors.textMuted, fontFamily: Fonts.regular },
+  attendDarkSection: {
+    fontSize: 11,
+    fontFamily: Fonts.semiBold,
+    color: 'rgba(255,255,255,0.48)',
+    letterSpacing: 0.6,
+    marginTop: 14,
+    marginBottom: 6,
+  },
+  attendDarkRsvpRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
+  },
+  attendDarkName: { fontSize: 14, fontFamily: Fonts.medium, color: '#f5f5f7' },
+  attendDarkNameFaded: { color: 'rgba(245,245,247,0.45)' },
+  attendDarkNameMuted: { fontSize: 14, fontFamily: Fonts.medium, color: 'rgba(245,245,247,0.42)' },
+  attendDarkMemo: { fontSize: 12, color: 'rgba(255,255,255,0.5)', fontFamily: Fonts.regular },
+  rsvpMemoModalTitle: {
+    fontSize: 15,
+    fontFamily: Fonts.semiBold,
+    color: Colors.text,
+    textAlign: 'center',
+    marginBottom: 4,
+    letterSpacing: -0.2,
+  },
+  rsvpMemoModalHint: {
+    fontSize: 12,
+    fontFamily: Fonts.regular,
+    color: Colors.textMuted,
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  rsvpMemoModalInput: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: Radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    backgroundColor: Colors.bg,
+    fontSize: 14,
+    lineHeight: 20,
+    color: Colors.text,
+    fontFamily: Fonts.regular,
+    marginBottom: 12,
+    ...(Platform.OS === 'web' ? ({ outlineStyle: 'none', outlineWidth: 0 } as object) : null),
+  },
+  rsvpMemoModalBtnRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: 8,
+  },
+  rsvpMemoModalBtn: {
+    flex: 1,
+    paddingVertical: 11,
+    borderRadius: Radius.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 44,
+  },
+  rsvpMemoModalBtnGhost: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+  },
+  rsvpMemoModalBtnGhostText: {
+    fontSize: 14,
+    fontFamily: Fonts.semiBold,
+    color: Colors.textSub,
+  },
+  rsvpMemoModalBtnDone: {
+    backgroundColor: Colors.border,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.borderStrong,
+  },
+  rsvpMemoModalBtnDoneText: {
+    fontSize: 14,
+    fontFamily: Fonts.semiBold,
+    color: Colors.text,
+  },
+  rsvpMemoModalRoot: { flex: 1 },
+  rsvpMemoModalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: Colors.overlay,
+  },
+  rsvpMemoModalCenter: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  rsvpMemoModalCard: {
+    width: '100%',
+    maxWidth: 320,
+    borderRadius: Radius.xl,
+    padding: 16,
+    backgroundColor: Colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    ...Shadows.md,
+  },
   memoOverlay:      { flex: 1, backgroundColor: 'rgba(0,0,0,0.2)', alignItems: 'center', justifyContent: 'center', padding: 24 },
   memoPopup:        { backgroundColor: Colors.surface, borderRadius: Radius['2xl'], padding: 20, width: '100%', maxWidth: 300, ...Shadows.lg },
   memoTextBox:      { backgroundColor: Colors.bg, borderRadius: Radius.lg, padding: 12 },
