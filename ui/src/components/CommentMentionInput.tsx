@@ -104,6 +104,7 @@ export function CommentMentionInput({
       style={style}
       autoCorrect={false}
       autoCapitalize="sentences"
+      underlineColorAndroid="transparent"
       {...rest}
     />
   );

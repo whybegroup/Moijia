@@ -13,6 +13,7 @@ import {
   CommentInput,
   CommentUpdateInput,
   CommentDeleteInput,
+  CommentReactionInput,
   EventWatchInput,
   EventActivityOptionInput,
   EventActivityVoteInput,
@@ -38,6 +39,27 @@ const localUploads = new LocalUploadService();
 const COMMENT_MENTION_NOTIFICATION_TITLE = 'You were mentioned';
 /** Shown when a group admin removes someone else's comment (soft-delete). */
 export const COMMENT_DELETED_BY_ADMIN_TEXT = 'This message was deleted by admin';
+
+const COMMENT_INCLUDE_FOR_API = {
+  photos: true,
+  reactions: true,
+  replyTo: {
+    include: {
+      user: { select: { id: true, displayName: true, name: true } },
+      photos: true,
+    },
+  },
+} as const;
+
+function previewForReplyQuote(text: string | null | undefined, photoCount: number): string {
+  const t = (text ?? '').trim();
+  if (t.length > 0) {
+    const line = (t.split('\n')[0] ?? t).trim();
+    return line.length > 120 ? `${line.slice(0, 117)}…` : line;
+  }
+  if (photoCount > 0) return 'Photo';
+  return 'Message';
+}
 
 /** Match a calendar row to a series member when truncating (ISO vs DB skew). */
 const MS_SERIES_OCCURRENCE_MATCH = 120000;
@@ -182,9 +204,7 @@ export class EventService {
         coverPhotos: true,
         rsvps: true,
         comments: {
-          include: {
-            photos: true,
-          },
+          include: COMMENT_INCLUDE_FOR_API,
           orderBy: {
             createdAt: 'asc',
           },
@@ -205,7 +225,7 @@ export class EventService {
       take: params?.limit,
     });
 
-    return events.map((e) => this.mapEventDetailed(e));
+    return events.map((e) => this.mapEventDetailed(e, { viewerUserId: params.userId }));
   }
 
   private async userCanAccessGroup(groupId: string, userId: string): Promise<boolean> {
@@ -308,9 +328,7 @@ export class EventService {
         coverPhotos: true,
         rsvps: true,
         comments: {
-          include: {
-            photos: true,
-          },
+          include: COMMENT_INCLUDE_FOR_API,
           orderBy: {
             createdAt: 'asc',
           },
@@ -337,7 +355,10 @@ export class EventService {
         where: { recurrenceSeriesId: event.recurrenceSeriesId },
       });
     }
-    const detailed = this.mapEventDetailed(event, { recurrenceSeriesMemberCount });
+    const detailed = this.mapEventDetailed(event, {
+      recurrenceSeriesMemberCount,
+      viewerUserId: userId,
+    });
     if (userId) {
       const withWatch = await this.enrichWithViewerWatch(detailed, id, userId);
       const voteRows = await prisma.eventActivityVote.findMany({
@@ -1325,29 +1346,101 @@ export class EventService {
   /**
    * Get comments for an event
    */
-  public async getComments(eventId: string): Promise<Comment[]> {
+  public async getComments(eventId: string, viewerUserId?: string): Promise<Comment[]> {
+    const event = await prisma.event.findUnique({
+      where: { id: eventId },
+      select: { id: true, groupId: true, createdBy: true },
+    });
+    if (!event) {
+      throw Object.assign(new Error('Event not found'), { status: 404 });
+    }
+    const viewer = viewerUserId?.trim();
+    if (viewer && !(await this.userCanReadEvent(event, viewer))) {
+      throw Object.assign(new Error('Not allowed to view comments'), { status: 403 });
+    }
+
     const comments = await prisma.comment.findMany({
       where: { eventId },
-      include: {
-        photos: true,
-      },
+      include: COMMENT_INCLUDE_FOR_API,
       orderBy: {
         createdAt: 'asc',
       },
     });
 
-    return comments.map((c: any) => this.mapCommentWithPhotos(c));
+    return comments.map((c: any) => this.mapCommentWithPhotos(c, viewer));
+  }
+
+  /**
+   * Toggle a reaction emoji on a comment (active group members only).
+   */
+  public async setCommentReaction(commentId: string, input: CommentReactionInput): Promise<Comment> {
+    const emoji = (input.emoji || '').trim();
+    if (!emoji) {
+      throw Object.assign(new Error('emoji is required'), { status: 400 });
+    }
+
+    const row = await prisma.comment.findUnique({
+      where: { id: commentId },
+      include: {
+        event: { select: { id: true, groupId: true, createdBy: true } },
+      },
+    });
+    if (!row) {
+      throw Object.assign(new Error('Comment not found'), { status: 404 });
+    }
+    await this.assertActiveMemberForEventEventRow(row.event, input.userId);
+
+    const existing = await prisma.commentReaction.findFirst({
+      where: { commentId, userId: input.userId, emoji },
+    });
+    if (existing) {
+      await prisma.commentReaction.delete({ where: { id: existing.id } });
+    } else {
+      await prisma.commentReaction.create({
+        data: { commentId, userId: input.userId, emoji },
+      });
+    }
+
+    const full = await prisma.comment.findUnique({
+      where: { id: commentId },
+      include: COMMENT_INCLUDE_FOR_API,
+    });
+    return this.mapCommentWithPhotos(full!, input.userId);
   }
 
   /**
    * Create a comment
    */
   public async createComment(eventId: string, input: CommentInput): Promise<Comment> {
-    const { photos = [], text, mentionedUserIds, ...commentData } = input;
+    const { photos = [], text, mentionedUserIds, replyToCommentId, ...commentData } = input;
+
+    const event = await prisma.event.findUnique({
+      where: { id: eventId },
+    });
+    if (!event) {
+      throw Object.assign(new Error('Event not found'), { status: 404 });
+    }
+    await this.assertActiveMemberForEventEventRow(event, input.userId);
+
+    let replyId: string | undefined;
+    if (replyToCommentId?.trim()) {
+      replyId = replyToCommentId.trim();
+      const parent = await prisma.comment.findFirst({
+        where: { id: replyId, eventId },
+        select: { id: true, text: true },
+      });
+      if (!parent) {
+        throw Object.assign(new Error('Reply target not found'), { status: 400 });
+      }
+      if (parent.text === COMMENT_DELETED_BY_ADMIN_TEXT) {
+        throw Object.assign(new Error('Cannot reply to removed message'), { status: 400 });
+      }
+    }
 
     const data: any = {
       ...commentData,
       eventId,
+      ...(replyId ? { replyToCommentId: replyId } : {}),
       photos: {
         create: photos.map((photoUrl) => ({ photoUrl })),
       },
@@ -1359,13 +1452,7 @@ export class EventService {
 
     const comment = await prisma.comment.create({
       data,
-      include: {
-        photos: true,
-      },
-    });
-
-    const event = await prisma.event.findUnique({
-      where: { id: eventId },
+      include: COMMENT_INCLUDE_FOR_API,
     });
 
     const user = await prisma.user.findUnique({
@@ -1449,7 +1536,7 @@ export class EventService {
       }
     }
 
-    return this.mapCommentWithPhotos(comment);
+    return this.mapCommentWithPhotos(comment, input.userId);
   }
 
   /**
@@ -1458,7 +1545,7 @@ export class EventService {
   public async updateComment(id: string, input: CommentUpdateInput): Promise<Comment> {
     const comment = await prisma.comment.findUnique({
       where: { id },
-      include: { photos: true },
+      include: COMMENT_INCLUDE_FOR_API,
     });
     if (!comment) {
       throw { status: 404, message: 'Comment not found' };
@@ -1489,16 +1576,16 @@ export class EventService {
           text: nextText || null,
           photos: { create: nextPhotos.map((photoUrl) => ({ photoUrl })) },
         },
-        include: { photos: true },
+        include: COMMENT_INCLUDE_FOR_API,
       });
     } else {
       updated = await prisma.comment.update({
         where: { id },
         data: { text: nextText || null },
-        include: { photos: true },
+        include: COMMENT_INCLUDE_FOR_API,
       });
     }
-    return this.mapCommentWithPhotos(updated);
+    return this.mapCommentWithPhotos(updated, input.actorId);
   }
 
   /**
@@ -1563,6 +1650,7 @@ export class EventService {
     }
 
     if (isAdmin && !isAuthor) {
+      await prisma.commentReaction.deleteMany({ where: { commentId: id } });
       await prisma.commentPhoto.deleteMany({ where: { commentId: id } });
       await purgeCommentPhotos();
       await prisma.comment.update({
@@ -1892,7 +1980,7 @@ export class EventService {
    */
   private mapEventDetailed(
     event: any,
-    extras?: { recurrenceSeriesMemberCount?: number }
+    extras?: { recurrenceSeriesMemberCount?: number; viewerUserId?: string }
   ): EventDetailed {
     const activityOptions: EventActivityOption[] = (event.activityOptions ?? []).map((o: any) => ({
       id: o.id,
@@ -1922,7 +2010,7 @@ export class EventService {
         createdAt: r.createdAt,
         updatedAt: r.updatedAt,
       })),
-      comments: event.comments.map((c: any) => this.mapCommentWithPhotos(c)),
+      comments: event.comments.map((c: any) => this.mapCommentWithPhotos(c, extras?.viewerUserId)),
       activityOptions,
       timeSuggestions,
     };
@@ -1931,14 +2019,64 @@ export class EventService {
   /**
    * Map Prisma comment with photos to Comment model
    */
-  private mapCommentWithPhotos(comment: any): Comment {
-    return {
+  private mapCommentWithPhotos(comment: any, viewerUserId?: string): Comment {
+    const rawReactions = (comment.reactions ?? []) as { userId: string; emoji: string }[];
+    const byEmoji = new Map<string, Set<string>>();
+    for (const r of rawReactions) {
+      const e = (r.emoji || '').trim();
+      if (!e) continue;
+      let set = byEmoji.get(e);
+      if (!set) {
+        set = new Set<string>();
+        byEmoji.set(e, set);
+      }
+      set.add(r.userId);
+    }
+    const reactions = [...byEmoji.entries()]
+      .map(([emoji, userIds]) => ({
+        emoji,
+        count: userIds.size,
+        userIds: [...userIds].sort(),
+      }))
+      .sort((a, b) => b.count - a.count || a.emoji.localeCompare(b.emoji));
+
+    const v = viewerUserId?.trim();
+    const viewerReactionEmojis = v
+      ? [...new Set(rawReactions.filter((r) => r.userId === v).map((r) => (r.emoji || '').trim()).filter(Boolean))]
+      : [];
+
+    let replyTo: Comment['replyTo'] = null;
+    if (comment.replyTo) {
+      const p = comment.replyTo;
+      const pPhotos = (p.photos ?? []).map((x: any) => x.photoUrl);
+      replyTo = {
+        id: p.id,
+        userId: p.userId,
+        text: p.text ?? '',
+        preview: previewForReplyQuote(p.text, pPhotos.length),
+        user: {
+          id: p.user.id,
+          displayName: p.user.displayName,
+          name: p.user.name,
+        },
+        photos: pPhotos,
+      };
+    }
+
+    const out: Comment = {
       id: comment.id,
       userId: comment.userId,
       text: comment.text ?? '',
-      photos: comment.photos.map((p: any) => p.photoUrl),
+      photos: (comment.photos ?? []).map((p: any) => p.photoUrl),
       createdAt: comment.createdAt,
       updatedAt: comment.updatedAt,
+      reactions,
+      viewerReactionEmojis,
+      replyTo,
     };
+    if (comment.replyToCommentId != null && comment.replyToCommentId !== '') {
+      (out as Comment).replyToCommentId = comment.replyToCommentId;
+    }
+    return out;
   }
 }

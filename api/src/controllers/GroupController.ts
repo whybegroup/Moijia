@@ -259,9 +259,17 @@ export class GroupController extends Controller {
       this.setStatus(400);
       throw new Error('userId is required');
     }
-    const result = await this.groupService.joinByInviteCode(body.inviteCode, body.userId);
-    this.setStatus(200);
-    return { success: true, ...result };
+    try {
+      const result = await this.groupService.joinByInviteCode(body.inviteCode, body.userId);
+      this.setStatus(200);
+      return { success: true, ...result };
+    } catch (e: any) {
+      if (e?.status === 403) {
+        this.setStatus(403);
+        throw new Error(e?.message || 'Forbidden');
+      }
+      throw e;
+    }
   }
 
   /**
@@ -461,8 +469,16 @@ export class GroupController extends Controller {
       this.setStatus(403);
       throw new Error('Must be admin to handle membership requests');
     }
-    await this.groupService.handleMembershipRequest(id, body);
-    this.setStatus(200);
+    try {
+      await this.groupService.handleMembershipRequest(id, body);
+      this.setStatus(200);
+    } catch (e: any) {
+      if (e?.status === 403) {
+        this.setStatus(403);
+        throw new Error(e?.message || 'Forbidden');
+      }
+      throw e;
+    }
   }
 
   /**

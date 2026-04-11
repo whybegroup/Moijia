@@ -23,6 +23,7 @@ import {
   Comment,
   CommentInput,
   CommentUpdateInput,
+  CommentReactionInput,
   EventWatchInput,
   EventActivityOptionInput,
   EventActivityVoteInput,
@@ -231,8 +232,11 @@ export class EventController extends Controller {
    * @summary Retrieves all comments for an event
    */
   @Get('{id}/comments')
-  public async getComments(@Path() id: string): Promise<Comment[]> {
-    return this.eventService.getComments(id);
+  public async getComments(
+    @Path() id: string,
+    @Query() userId?: string
+  ): Promise<Comment[]> {
+    return this.eventService.getComments(id, userId);
   }
 
   /**
@@ -384,6 +388,17 @@ export class EventController extends Controller {
 @Tags('Comments')
 export class CommentController extends Controller {
   private eventService = new EventService();
+
+  /**
+   * Toggle a reaction on a comment (same emoji again removes it).
+   */
+  @Post('{id}/reactions')
+  public async setCommentReaction(
+    @Path() id: string,
+    @Body() body: CommentReactionInput
+  ): Promise<Comment> {
+    return this.eventService.setCommentReaction(id, body);
+  }
 
   /**
    * Edit a comment

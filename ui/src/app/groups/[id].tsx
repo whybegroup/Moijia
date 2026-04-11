@@ -222,8 +222,10 @@ export default function GroupDetailScreen() {
         userId,
         action: MembershipRequestAction.action.APPROVE,
       });
-    } catch {
-      /* handled by mutation UI if needed */
+    } catch (e: any) {
+      const msg = e?.body?.message ?? e?.response?.data?.message ?? e?.message ?? 'Could not approve';
+      if (Platform.OS === 'web') window.alert(msg);
+      else Alert.alert('Error', msg);
     }
   };
 

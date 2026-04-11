@@ -30,6 +30,7 @@ model User {
   groupMemberships        GroupMember[]
   rsvps                   RSVP[]
   comments                Comment[]
+  commentReactions        CommentReaction[]
   eventWatches            EventWatch[]
   eventActivityVotes      EventActivityVote[]
   authoredTimeSuggestions EventTimeSuggestion[] @relation("TimeSuggestionAuthor")
@@ -248,15 +249,34 @@ model Comment {
   eventId   String
   userId    String
   text      String?
+  replyToCommentId String?
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
 
   // Relations
-  event  Event          @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  user   User           @relation(fields: [userId], references: [id])
-  photos CommentPhoto[]
+  event   Event             @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user    User              @relation(fields: [userId], references: [id])
+  photos  CommentPhoto[]
+  reactions CommentReaction[]
+  replyTo Comment?          @relation("CommentReplies", fields: [replyToCommentId], references: [id], onDelete: SetNull)
+  replies Comment[]         @relation("CommentReplies")
 
+  @@index([replyToCommentId])
   @@map("comments")
+}
+
+model CommentReaction {
+  id        String   @id @default(uuid())
+  commentId String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+
+  comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([commentId, userId, emoji])
+  @@map("comment_reactions")
 }
 
 model CommentPhoto {

@@ -218,6 +218,23 @@ export interface RSVPInput {
   memo?: string;
 }
 
+/** Aggregated reaction on a comment (multi-emoji per user). */
+export interface CommentReactionEntry {
+  emoji: string;
+  count: number;
+  userIds: string[];
+}
+
+/** Parent snippet for threaded reply UI. */
+export interface CommentReplyTo {
+  id: string;
+  userId: string;
+  text: string;
+  preview: string;
+  user: { id: string; displayName?: string; name?: string };
+  photos: string[];
+}
+
 /**
  * Comment model
  */
@@ -234,6 +251,11 @@ export interface Comment {
   createdAt: Date;
   /** Timestamp when updated */
   updatedAt: Date;
+  /** When set, this comment replies to another comment on the same event */
+  replyToCommentId?: string;
+  reactions: CommentReactionEntry[];
+  viewerReactionEmojis: string[];
+  replyTo: CommentReplyTo | null;
 }
 
 /**
@@ -246,6 +268,13 @@ export interface CommentInput {
   photos?: string[];
   /** Client-resolved mention targets; server validates they are in the event's group */
   mentionedUserIds?: string[];
+  replyToCommentId?: string;
+}
+
+/** Toggle a reaction emoji on a comment (POST body). */
+export interface CommentReactionInput {
+  userId: string;
+  emoji: string;
 }
 
 /** Input for editing a comment */
