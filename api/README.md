@@ -2,6 +2,30 @@
 
 REST API for Moija - A social event planning platform for groups.
 
+## OnPrem
+
+```bash
+brew install caddy
+```
+
+```bash
+sudo cat >> /opt/homebrew/etc/Caddyfile << EOF
+api.danielbyun.com {
+        tls /opt/homebrew/etc/moija-api.pem /opt/homebrew/etc/moija-api-privkey.pem
+        reverse_proxy 127.0.0.1:3000
+}
+
+moija.danielbyun.com {
+        tls /opt/homebrew/etc/moija-ui.pem /opt/homebrew/etc/moija-ui-privkey.pem
+        reverse_proxy 127.0.0.1:8081
+}
+EOF
+```
+
+```bash
+brew services start caddy
+```
+
 ## EC2
 
 ```bash
