@@ -32,13 +32,20 @@ export interface Event {
   enableWaitlist?: boolean | null;
   /** Whether 'maybe' RSVPs are allowed */
   allowMaybe: boolean;
-  /** RFC 5545 RRULE without the RRULE: prefix; null/empty = not recurring */
-  recurrenceRule?: string | null;
   /**
-   * Occurrence start instants (UTC ms) removed from a recurring series (this occurrence only).
-   * Omitted when empty; same encoding as expanded `Date.getTime()` for each instance.
+   * When set, RSVPs cannot be created or updated after this instant (server time).
+   * Null means no RSVP deadline.
    */
-  recurrenceExdates?: number[];
+  rsvpDeadline?: Date | string | null;
+  /** When true, clients show the activity ideas (options + voting) UI. */
+  activityIdeasEnabled: boolean;
+  /**
+   * RFC 5545 RRULE (same string on every row in a series). Null on one-off events.
+   * Used when creating/editing; not shown on the event detail screen in the app.
+   */
+  recurrenceRule?: string | null;
+  /** Present on each row that belongs to the same materialized recurrence. */
+  recurrenceSeriesId?: string | null;
   /** Timestamp when the event was created */
   createdAt: Date;
   /** Timestamp when the event was last updated */
@@ -69,6 +76,8 @@ export interface EventTimeSuggestion {
  * Event with RSVPs and comments (detailed view)
  */
 export interface EventDetailed extends Event {
+  /** Number of DB rows sharing `recurrenceSeriesId` (1 for non-series). Only on GET /events/:id. */
+  recurrenceSeriesMemberCount?: number;
   /** Array of RSVPs for this event */
   rsvps: RSVP[];
   /** Array of comments on this event */
@@ -93,10 +102,24 @@ export interface EventWatchInput {
   watching: boolean;
 }
 
-/** Body for POST /events/:id/recurrence/exclude */
-export interface RecurrenceExcludeOccurrenceInput {
-  /** ISO 8601 start time of the occurrence to remove from the series */
+/** Body for POST /events/:id/recurrence/truncate */
+export interface RecurrenceTruncateSeriesInput {
+  /**
+   * ISO 8601 start of the first occurrence to drop. That occurrence and every later one are removed;
+   * earlier instances stay on the calendar.
+   */
   occurrenceStart: string;
+  /**
+   * IANA timezone from `Intl.DateTimeFormat().resolvedOptions().timeZone` on the device.
+   * Needed so WEEKLY rules match the same instants as the in-app calendar (local weekday expansion).
+   */
+  viewerTimeZone?: string;
+}
+
+/** Result of truncating a series at an occurrence (or deleting the event if nothing would remain). */
+export interface RecurrenceTruncateResult {
+  deleted: boolean;
+  event?: Event;
 }
 
 /**
@@ -118,9 +141,17 @@ export interface EventInput {
   maxAttendees?: number;
   enableWaitlist?: boolean;
   allowMaybe?: boolean;
+  /** ISO instant; omit for no deadline on create. */
+  rsvpDeadline?: string | null;
+  /** When true, members can suggest and vote on activity ideas on the event page. */
+  activityIdeasEnabled?: boolean;
   /** Initial activity options (labels); creator is recorded as author */
   activityOptionLabels?: string[];
   recurrenceRule?: string | null;
+  /**
+   * IANA zone (`Intl…resolvedOptions().timeZone`) so WEEKLY materialization matches the device calendar.
+   */
+  viewerTimeZone?: string;
 }
 
 /**
@@ -135,13 +166,31 @@ export interface EventUpdate {
   end?: Date | string;
   isAllDay?: boolean;
   location?: string;
-  minAttendees?: number;
-  maxAttendees?: number;
+  /** Omit to leave unchanged; `null` clears the cap. */
+  minAttendees?: number | null;
+  /** Omit to leave unchanged; `null` clears the cap. */
+  maxAttendees?: number | null;
   enableWaitlist?: boolean;
   allowMaybe?: boolean;
+  activityIdeasEnabled?: boolean;
+  /** ISO instant, or null to clear the deadline. Omit to leave unchanged. */
+  rsvpDeadline?: string | null;
   updatedBy: string;
-  /** Set to null to clear recurrence */
+  /** Set to null to clear recurrence on this row (series rows should stay in sync via the same value). */
   recurrenceRule?: string | null;
+  /**
+   * How edits apply when this event belongs to a recurring series. Ignored for one-off events.
+   * `this_occurrence`: update only this row; clears `recurrenceSeriesId` and `recurrenceRule` so it is standalone.
+   * `this_and_following`: this row and any same-series row with `start` strictly after this row’s `start`; those rows get a new shared `recurrenceSeriesId` after the update (earlier rows keep the old id).
+   * `all_occurrences`: every stored row with the same `recurrenceSeriesId` (id unchanged).
+   * When omitted, legacy single-row behavior for non-series fields; recurrence rule still syncs across the whole series.
+   */
+  seriesUpdateScope?: 'this_occurrence' | 'this_and_following' | 'all_occurrences';
+  /**
+   * IANA zone (`Intl…resolvedOptions().timeZone`) when applying `start`/`end` across a series:
+   * each occurrence keeps its local date; wall times and duration follow the form.
+   */
+  viewerTimeZone?: string;
 }
 
 /**
@@ -202,7 +251,10 @@ export interface CommentInput {
 /** Input for editing a comment */
 export interface CommentUpdateInput {
   actorId: string;
-  text: string;
+  /** When omitted, existing text is kept */
+  text?: string;
+  /** When set, replaces the full photo set for this comment */
+  photos?: string[];
 }
 
 /** Input for deleting a comment */

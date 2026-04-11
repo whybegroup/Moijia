@@ -4,12 +4,12 @@ import {
   View, Text, ScrollView, TouchableOpacity, TextInput,
   StyleSheet, ActivityIndicator, Alert, Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams, type Href } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Fonts, Radius } from '../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName, groupAvatarBorderRadius } from '../utils/helpers';
 import { NavBar, Field, formSectionTitleStyle } from '../components/ui';
+import { EventFormPopoverChrome } from '../components/EventFormPopoverChrome';
 import { useCreateGroup } from '../hooks/api/useGroups';
 import { useAuth } from '../contexts/AuthContext';
 import { GroupAvatar } from '../components/GroupAvatar';
@@ -18,12 +18,15 @@ import type { PendingAvatarFile } from '../services/pickAndUploadImage';
 import { uploadPendingAvatarFile } from '../services/pickAndUploadImage';
 import { ResolvableImage } from '../components/ResolvableImage';
 import { pickAndUploadCoverPhoto } from '../services/pickAndUploadImage';
+import { firstSearchParam, parseReturnToParam, withReturnTo } from '../utils/navigationReturn';
 
 const DEFAULT_AVATAR_SEED = 'auto';
 const AVATAR_SIZE = 56;
 
 export default function CreateGroupScreen() {
   const router = useRouter();
+  const { returnTo: returnToRaw } = useLocalSearchParams<{ returnTo?: string | string[] }>();
+  const groupReturnTo = parseReturnToParam(firstSearchParam(returnToRaw));
   const { user } = useAuth();
   const createGroup = useCreateGroup();
   const [groupId] = useState(() => Crypto.randomUUID());
@@ -71,9 +74,13 @@ export default function CreateGroupScreen() {
   const handleBack = () => {
     if (router.canGoBack()) {
       router.back();
-    } else {
-      router.push('/(tabs)/groups');
+      return;
     }
+    if (groupReturnTo) {
+      router.replace(groupReturnTo as Href);
+      return;
+    }
+    router.push('/(tabs)/groups');
   };
 
   const handleCreate = async () => {
@@ -102,17 +109,19 @@ export default function CreateGroupScreen() {
         memberIds: [user.uid],
       });
 
-      router.replace(`/groups/${newGroup.id}`);
+      router.replace(withReturnTo(`/groups/${newGroup.id}`, groupReturnTo ?? '/(tabs)/groups'));
     } catch {
       Alert.alert('Error', 'Failed to create group. Please try again.');
     }
   };
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <>
+    <EventFormPopoverChrome onClose={handleBack}>
+      <View style={styles.inner}>
       <NavBar
         title="New Group"
-        onBack={handleBack}
+        onClose={handleBack}
         centerTitle
         right={
           <TouchableOpacity
@@ -240,8 +249,27 @@ export default function CreateGroupScreen() {
           </View>
         </View>
 
-        <View style={{ height: 100 }} />
+        <View style={{ height: 24 }} />
       </ScrollView>
+
+      <View style={[styles.bottomBar, { borderTopColor: Colors.border }]}>
+        <TouchableOpacity
+          onPress={() => void handleCreate()}
+          disabled={!valid || createGroup.isPending}
+          style={[styles.bottomCreateBtn, (!valid || createGroup.isPending) && styles.bottomCreateBtnDisabled]}
+          activeOpacity={0.85}
+        >
+          {createGroup.isPending ? (
+            <ActivityIndicator size="small" color={Colors.textMuted} />
+          ) : (
+            <Text style={[styles.bottomCreateBtnText, !valid && { color: Colors.textMuted }]} numberOfLines={1}>
+              Create group
+            </Text>
+          )}
+        </TouchableOpacity>
+      </View>
+      </View>
+    </EventFormPopoverChrome>
 
       <AvatarPickerModal
         variant="group"
@@ -255,12 +283,12 @@ export default function CreateGroupScreen() {
         deferFileUpload
         pendingAvatarFileRef={pendingAvatarFileRef}
       />
-    </SafeAreaView>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  safe:            { flex: 1, backgroundColor: Colors.bg },
+  inner:           { flex: 1, backgroundColor: Colors.bg },
   headerBlock:     { backgroundColor: Colors.surface, padding: 20, borderBottomWidth: 1 },
   avatarNameRow:   { flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 16 },
   groupThumb:      { width: AVATAR_SIZE, height: AVATAR_SIZE, borderWidth: 1, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
@@ -318,4 +346,29 @@ const styles = StyleSheet.create({
   photosToolbar:   { flexDirection: 'row', alignItems: 'center', padding: 8, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: Colors.border },
   photoBtn:        { paddingHorizontal: 10, paddingVertical: 5, borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.bg },
   removeThumb:     { position: 'absolute', top: -5, right: -5, width: 18, height: 18, borderRadius: 9, backgroundColor: Colors.text, borderWidth: 2, borderColor: Colors.surface, alignItems: 'center', justifyContent: 'center' },
+  bottomBar: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: Platform.OS === 'ios' ? 10 : 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    backgroundColor: Colors.surface,
+  },
+  bottomCreateBtn: {
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: Radius.lg,
+    backgroundColor: Colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 48,
+  },
+  bottomCreateBtnDisabled: {
+    backgroundColor: Colors.border,
+  },
+  bottomCreateBtnText: {
+    fontSize: 15,
+    fontFamily: Fonts.bold,
+    color: Colors.accentFg,
+    textAlign: 'center',
+  },
 });

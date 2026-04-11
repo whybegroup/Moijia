@@ -10,17 +10,19 @@ import {
 } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput,
-  StyleSheet, Modal, Linking, Alert, FlatList,
-  useWindowDimensions,
+  StyleSheet, Modal, Linking, Alert,
   type StyleProp,
   type TextStyle,
+  type NativeSyntheticEvent,
+  type TextInputContentSizeChangeEventData,
   Platform,
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { EventFormPopoverChrome } from '../../components/EventFormPopoverChrome';
+import { modalTopBarStyles } from '../../components/modalTopBarStyles';
 import Swipeable, { type SwipeableMethods } from 'react-native-gesture-handler/ReanimatedSwipeable';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter, usePathname, type Href } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { Colors, Fonts, Radius, Shadows } from '../../constants/theme';
 import {
@@ -32,10 +34,10 @@ import {
   dDiff,
   getMyWaitlistPosition,
   formatLocalDateInput,
+  formatLocalDateYmdSlashes,
 } from '../../utils/helpers';
-import { formatRecurrenceSummary } from '../../utils/recurrence';
 import { computeMentionUserIdsForPost, type MentionMemberRow } from '../../utils/mentionUtils';
-import { Avatar, Sheet, formSectionTitleStyle } from '../../components/ui';
+import { Avatar, Sheet, Toggle, formSectionTitleStyle } from '../../components/ui';
 import { CommentMentionInput } from '../../components/CommentMentionInput';
 import { UserAvatar } from '../../components/UserAvatar';
 import { UserAvatarStack } from '../../components/UserAvatarStack';
@@ -50,7 +52,8 @@ import {
   useUpdateComment,
   useGroupMemberColor,
   useDeleteEvent,
-  useExcludeRecurrenceOccurrence,
+  useDeleteRecurrenceSeries,
+  useTruncateRecurrenceSeries,
   useSetEventWatch,
   useUpdateEvent,
   useAddActivityOption,
@@ -62,7 +65,7 @@ import {
 } from '../../hooks/api';
 import { uid, getNoResponseIds } from '../../utils/api-helpers';
 import type { CommentInput, EventDetailed, GroupScoped, RSVP, User } from '@moija/client';
-import { RSVPInput, MembershipStatus } from '@moija/client';
+import { RSVPInput, MembershipStatus, EventUpdate } from '@moija/client';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useCurrentUserContext } from '../../contexts/CurrentUserContext';
 import { ResolvableImage } from '../../components/ResolvableImage';
@@ -75,6 +78,16 @@ import {
   type PickedImageAsset,
 } from '../../services/pickAndUploadImage';
 import { useResolvedImageUrls } from '../../hooks/useResolvedImageUrls';
+import { firstSearchParam, parseReturnToParam, withReturnTo } from '../../utils/navigationReturn';
+import {
+  formatWallDateFromUtcIso,
+  formatWallTimeHmFromUtcIso,
+  localWallDateTimeToUtcIso,
+  localWallDateStartOfDayToUtcIso,
+  localWallDateEndOfDayToUtcIso,
+  isValidEventFormTimeRange,
+} from '../../utils/datetimeUtc';
+import { SERIES_SCOPE_OPTIONS, type SeriesUpdateScope } from '../../utils/seriesUpdateScopeOptions';
 
 type PendingCommentPhoto = {
   id: string;
@@ -83,8 +96,30 @@ type PendingCommentPhoto = {
   pendingUpload: PickedImageAsset | File | string;
 };
 
+const COMPOSER_INPUT_MIN_H = 38;
+const COMPOSER_INPUT_MAX_H = 140;
+
 /** Must match API soft-delete text when an admin removes someone else's comment */
 const COMMENT_DELETED_BY_ADMIN_MSG = 'This message was deleted by admin';
+
+function webDetailTimeInputStyle(errored: boolean): Record<string, string | number> {
+  return {
+    padding: '6px 10px',
+    borderRadius: 8,
+    border: errored ? '1.5px solid #EF4444' : '1.5px solid #E5E5E5',
+    backgroundColor: '#FAFAFA',
+    fontSize: 13,
+    color: '#1A1A1A',
+    fontFamily: 'DMSans_400Regular',
+    boxSizing: 'border-box',
+    outline: 'none',
+    minWidth: 0,
+    width: '100%',
+  };
+}
+
+const EVENT_COVER_THUMB = 80;
+const EVENT_COVER_THUMB_GAP = 4;
 
 // ── Photo Carousel ───────────────────────────────────────────────────────────
 function PhotoCarousel({
@@ -96,38 +131,33 @@ function PhotoCarousel({
 }: {
   photos: string[];
   urlMap: Map<string, string>;
-  onPhotoPress: (url: string) => void;
+  onPhotoPress: (url: string, index: number) => void;
   canRemove?: boolean;
   onRemoveAt?: (index: number) => void;
 }) {
-  const { width: windowWidth } = useWindowDimensions();
-  const ITEM_WIDTH = Math.min(windowWidth - 40, 400);
-
   return (
-    <FlatList
-      data={photos}
+    <ScrollView
       horizontal
-      pagingEnabled={false}
       showsHorizontalScrollIndicator={false}
-      snapToInterval={ITEM_WIDTH + 12}
-      decelerationRate="fast"
-      contentContainerStyle={{ paddingHorizontal: 20, gap: 12 }}
-      style={{ marginBottom: 22 }}
-      renderItem={({ item, index }) => (
-        <View style={{ width: ITEM_WIDTH, position: 'relative' }}>
-          <TouchableOpacity
-            onPress={() => onPhotoPress(item)}
-            activeOpacity={0.9}
-          >
+      style={{ marginBottom: 10 }}
+      contentContainerStyle={{
+        gap: EVENT_COVER_THUMB_GAP,
+        paddingHorizontal: 16,
+        paddingVertical: 10,
+      }}
+    >
+      {photos.map((item, index) => (
+        <View key={`${item}-${index}`} style={{ width: EVENT_COVER_THUMB, position: 'relative' }}>
+          <TouchableOpacity onPress={() => onPhotoPress(item, index)} activeOpacity={0.9}>
             <ResolvableImage
               storedUrl={item}
               urlMap={urlMap}
               style={{
-                width: ITEM_WIDTH,
-                height: 240,
-                borderRadius: 12,
+                width: EVENT_COVER_THUMB,
+                height: EVENT_COVER_THUMB,
+                borderRadius: Radius.lg,
                 backgroundColor: Colors.bg,
-                borderWidth: 1,
+                borderWidth: StyleSheet.hairlineWidth,
                 borderColor: Colors.border,
               }}
               resizeMode="cover"
@@ -143,9 +173,8 @@ function PhotoCarousel({
             </TouchableOpacity>
           ) : null}
         </View>
-      )}
-      keyExtractor={(_, index) => index.toString()}
-    />
+      ))}
+    </ScrollView>
   );
 }
 
@@ -160,8 +189,11 @@ function CommentPhotoGallery({
 }: {
   photos: string[];
   urlMap: Map<string, string>;
-  onPhotoPress: (url: string) => void;
+  onPhotoPress: (url: string, index: number) => void;
 }) {
+  const resolved = photos.filter((p) => typeof p === 'string' && p.trim().length > 0);
+  if (resolved.length === 0) return null;
+
   return (
     <ScrollView 
       horizontal 
@@ -169,10 +201,10 @@ function CommentPhotoGallery({
       style={{ marginHorizontal: -4 }}
       contentContainerStyle={{ paddingHorizontal: 4, gap: COMMENT_PHOTO_GAP, flexDirection: 'row' }}
     >
-      {photos.map((photo, index) => (
+      {resolved.map((photo, index) => (
         <TouchableOpacity
-          key={index}
-          onPress={() => onPhotoPress(photo)}
+          key={`${photo}\0${index}`}
+          onPress={() => onPhotoPress(photo, index)}
           activeOpacity={0.8}
         >
           <ResolvableImage
@@ -282,14 +314,28 @@ function CommentMentionText({ text, style }: { text: string; style?: StyleProp<T
 }
 
 export default function EventDetailScreen() {
-  const params = useLocalSearchParams<{ id: string; at?: string }>();
+  const params = useLocalSearchParams<{ id: string; returnTo?: string | string[] }>();
   const router = useRouter();
+  const pathname = usePathname();
+  const returnToHref = useMemo(
+    () => parseReturnToParam(firstSearchParam(params.returnTo)),
+    [params.returnTo]
+  );
+  const dismiss = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+    if (returnToHref) {
+      router.replace(returnToHref as Href);
+      return;
+    }
+    router.replace('/(tabs)/events');
+  }, [router, returnToHref]);
   const { userId: currentUserId } = useCurrentUserContext();
 
   const id = params.id;
   const eventId = Array.isArray(id) ? id[0] : id;
-  const atParam = params.at;
-  const occurrenceAtRaw = Array.isArray(atParam) ? atParam[0] : atParam;
 
   const { data: ev, refetch: refetchEvent } = useEvent(
     eventId || '',
@@ -312,12 +358,16 @@ export default function EventDetailScreen() {
   const deleteRSVPMutation = useDeleteRSVP(eventId || '');
   const createCommentMutation = useCreateComment(eventId || '');
   const updateCommentMutation = useUpdateComment(eventId || '');
-  const deleteCommentMutation = useDeleteComment(eventId || '');
+  const deleteCommentMutation = useDeleteComment(eventId || '', currentUserId);
   const deleteEventMutation = useDeleteEvent(currentUserId ?? '');
-  const excludeOccurrenceMutation = useExcludeRecurrenceOccurrence(currentUserId ?? '');
+  const deleteRecurrenceSeriesMutation = useDeleteRecurrenceSeries(currentUserId ?? '');
+  const truncateSeriesMutation = useTruncateRecurrenceSeries(currentUserId ?? '');
+
+  const viewEv = ev;
 
   const displayTiming = useMemo(() => {
-    if (!ev?.start || !ev?.end) {
+    const v = viewEv;
+    if (!v?.start || !v?.end) {
       const t = new Date();
       return {
         displayStart: t,
@@ -327,24 +377,20 @@ export default function EventDetailScreen() {
         occurrenceIso: '',
       };
     }
-    const seriesStart = new Date(ev.start as string);
-    const seriesEnd = new Date(ev.end as string);
-    const dur = seriesEnd.getTime() - seriesStart.getTime();
-    const rr = !!(ev as { recurrenceRule?: string | null }).recurrenceRule?.trim();
-    let displayStart = seriesStart;
-    if (occurrenceAtRaw) {
-      const ms = new Date(occurrenceAtRaw).getTime();
-      if (Number.isFinite(ms)) displayStart = new Date(ms);
-    }
-    const displayEnd = new Date(displayStart.getTime() + dur);
+    const displayStart = new Date(v.start as string);
+    const displayEnd = new Date(v.end as string);
+    const seriesStart = displayStart;
+    const inSeries = !!(ev as EventDetailed | undefined)?.recurrenceSeriesId?.trim();
+    const seriesCount = (ev as EventDetailed | undefined)?.recurrenceSeriesMemberCount ?? 1;
+    const isRecurring = inSeries && seriesCount > 1;
     return {
       displayStart,
       displayEnd,
       seriesStart,
-      isRecurring: rr,
+      isRecurring,
       occurrenceIso: displayStart.toISOString(),
     };
-  }, [ev, occurrenceAtRaw]);
+  }, [ev, viewEv]);
   const setWatchMutation = useSetEventWatch(eventId || '', currentUserId ?? undefined);
   const updateEventMutation = useUpdateEvent(eventId || '', currentUserId ?? '');
   const addActivityOptionMutation = useAddActivityOption(eventId || '', currentUserId ?? '');
@@ -360,13 +406,13 @@ export default function EventDetailScreen() {
   const lastServerCoverPhotosKeyRef = useRef<string>('');
 
   useEffect(() => {
-    const e = ev as EventDetailed | undefined;
+    const e = viewEv as EventDetailed | undefined;
     if (!e?.id) return;
     const key = JSON.stringify(e.coverPhotos ?? []);
     if (key === lastServerCoverPhotosKeyRef.current) return;
     lastServerCoverPhotosKeyRef.current = key;
     setLocalCoverPhotos(e.coverPhotos ?? []);
-  }, [ev]);
+  }, [viewEv]);
 
   /** Group roster for @mentions (server validates the same set). */
   const mentionMemberRows: MentionMemberRow[] = useMemo(() => {
@@ -391,7 +437,7 @@ export default function EventDetailScreen() {
 
   const allSourceUrls = useMemo(() => {
     const s = new Set<string>();
-    const e = ev as EventDetailed | undefined;
+    const e = (viewEv ?? ev) as EventDetailed | undefined;
     if (!e) return [];
     (e.coverPhotos || []).forEach((u) => s.add(u));
     localCoverPhotos.forEach((u) => s.add(u));
@@ -399,20 +445,30 @@ export default function EventDetailScreen() {
       (c.photos || []).forEach((u) => s.add(u));
     }
     return [...s];
-  }, [ev, localCoverPhotos]);
+  }, [ev, viewEv, localCoverPhotos]);
 
   const resolvedImageMap = useResolvedImageUrls(allSourceUrls);
 
   const [showAttend,  setShowAttend]  = useState(false);
   const [memoFor,     setMemoFor]     = useState<RSVPInput.status | null>(null);
-  const [input,       setInput]       = useState('');
-  const [pendingPhotos, setPendingPhotos] = useState<PendingCommentPhoto[]>([]);
-  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+  const [composerInput, setComposerInput] = useState('');
+  const [composerFieldHeight, setComposerFieldHeight] = useState(COMPOSER_INPUT_MIN_H);
+  const [composerPendingPhotos, setComposerPendingPhotos] = useState<PendingCommentPhoto[]>([]);
+  const composerPendingPhotosRef = useRef<PendingCommentPhoto[]>([]);
+  composerPendingPhotosRef.current = composerPendingPhotos;
+  /** Inline edit drafts keyed by comment id (multiple edits allowed). */
+  const [commentEditDrafts, setCommentEditDrafts] = useState<
+    Record<string, { text: string; photos: PendingCommentPhoto[] }>
+  >({});
+  const commentEditDraftsRef = useRef(commentEditDrafts);
+  commentEditDraftsRef.current = commentEditDrafts;
+  /** Where the next picked / URL-added photo should go: composer or a comment being edited. */
+  const commentPhotoTargetRef = useRef<'composer' | string>('composer');
   const [showCommentPhotoModal, setShowCommentPhotoModal] = useState(false);
   const [commentPhotoUrl, setCommentPhotoUrl] = useState('');
-  const [pendingPreviewLightbox, setPendingPreviewLightbox] = useState<string | null>(null);
+  const [pendingPreviewLightbox, setPendingPreviewLightbox] = useState<{ urls: string[]; index: number } | null>(null);
   const commentPhotoFileInputRef = useRef<{ click: () => void } | null>(null);
-  const [lightbox,    setLightbox]    = useState<{ url: string; name: string; ts: Date } | null>(null);
+  const [lightbox, setLightbox] = useState<{ urls: string[]; index: number; name: string; ts: Date } | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [commentPostBusy, setCommentPostBusy] = useState(false);
   const [newActivityLabel, setNewActivityLabel] = useState('');
@@ -427,6 +483,31 @@ export default function EventDetailScreen() {
   const [showSuggestEndTimePicker, setShowSuggestEndTimePicker] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   const commentSwipeRefById = useRef(new Map<string, RefObject<SwipeableMethods | null>>());
+  const [draftTitle, setDraftTitle] = useState('');
+  const [draftDesc, setDraftDesc] = useState('');
+  const [draftLocation, setDraftLocation] = useState('');
+  const [draftMinAttendees, setDraftMinAttendees] = useState('');
+  const [draftMaxAttendees, setDraftMaxAttendees] = useState('');
+  const [draftAllowMaybe, setDraftAllowMaybe] = useState(false);
+  const [draftActivityIdeasEnabled, setDraftActivityIdeasEnabled] = useState(false);
+  const [draftStartDate, setDraftStartDate] = useState('');
+  const [draftStartTime, setDraftStartTime] = useState('');
+  const [draftEndDate, setDraftEndDate] = useState('');
+  const [draftEndTime, setDraftEndTime] = useState('');
+  const [draftAllDay, setDraftAllDay] = useState(false);
+  const [showDetailStartDatePicker, setShowDetailStartDatePicker] = useState(false);
+  const [showDetailStartTimePicker, setShowDetailStartTimePicker] = useState(false);
+  const [showDetailEndDatePicker, setShowDetailEndDatePicker] = useState(false);
+  const [showDetailEndTimePicker, setShowDetailEndTimePicker] = useState(false);
+  const [draftRsvpDeadlineEnabled, setDraftRsvpDeadlineEnabled] = useState(false);
+  const [draftRsvpDeadlineDate, setDraftRsvpDeadlineDate] = useState('');
+  const [draftRsvpDeadlineTime, setDraftRsvpDeadlineTime] = useState('12:00');
+  const [showDetailRsvpDeadlineDatePicker, setShowDetailRsvpDeadlineDatePicker] = useState(false);
+  const [showDetailRsvpDeadlineTimePicker, setShowDetailRsvpDeadlineTimePicker] = useState(false);
+  const [showDetailSaveScopeModal, setShowDetailSaveScopeModal] = useState(false);
+  const [detailSeriesUpdateScope, setDetailSeriesUpdateScope] = useState<SeriesUpdateScope>(
+    EventUpdate.seriesUpdateScope.THIS_OCCURRENCE
+  );
 
   const refForCommentSwipe = useCallback((commentId: string) => {
     let r = commentSwipeRefById.current.get(commentId);
@@ -444,16 +525,44 @@ export default function EventDetailScreen() {
     }
   }, []);
 
-  const removePendingPhoto = useCallback((p: PendingCommentPhoto) => {
+  const removePendingPhoto = useCallback((target: 'composer' | string, p: PendingCommentPhoto) => {
     if (p.uri.startsWith('blob:')) {
       URL.revokeObjectURL(p.uri);
     }
-    setPendingPhotos((rows) => rows.filter((x) => x.id !== p.id));
-    setPendingPreviewLightbox((open) => (open === p.uri ? null : open));
+    if (target === 'composer') {
+      setComposerPendingPhotos((rows) => rows.filter((x) => x.id !== p.id));
+    } else {
+      setCommentEditDrafts((prev) => {
+        const d = prev[target];
+        if (!d) return prev;
+        return { ...prev, [target]: { ...d, photos: d.photos.filter((x) => x.id !== p.id) } };
+      });
+    }
+    setPendingPreviewLightbox((prev) => {
+      if (!prev) return null;
+      const removedIdx = prev.urls.indexOf(p.uri);
+      if (removedIdx < 0) return prev;
+      const urls = prev.urls.filter((u) => u !== p.uri);
+      if (urls.length === 0) return null;
+      let index = prev.index;
+      if (removedIdx < index) index -= 1;
+      else if (removedIdx === index) index = Math.min(index, urls.length - 1);
+      return { urls, index };
+    });
   }, []);
 
   const addPendingCommentPhoto = useCallback((previewUri: string, pendingUpload: PickedImageAsset | File) => {
-    setPendingPhotos((rows) => [...rows, { id: uid(), uri: previewUri, pendingUpload }]);
+    const t = commentPhotoTargetRef.current;
+    const row: PendingCommentPhoto = { id: uid(), uri: previewUri, pendingUpload };
+    if (t === 'composer') {
+      setComposerPendingPhotos((rows) => [...rows, row]);
+    } else {
+      setCommentEditDrafts((prev) => {
+        const d = prev[t];
+        if (!d) return prev;
+        return { ...prev, [t]: { ...d, photos: [...d.photos, row] } };
+      });
+    }
   }, []);
 
   const pickCommentPhotoNative = useCallback(async () => {
@@ -486,17 +595,37 @@ export default function EventDetailScreen() {
     [addPendingCommentPhoto],
   );
 
-  const onCommentPhotoButtonPress = useCallback(() => {
+  const onCommentPhotoButtonPress = useCallback((forCommentEditId?: string) => {
     if (!currentUserId) {
       Alert.alert('Sign in', 'You must be signed in to add photos.');
       return;
     }
+    commentPhotoTargetRef.current = forCommentEditId ?? 'composer';
     if (Platform.OS === 'web') {
       commentPhotoFileInputRef.current?.click();
     } else {
       void pickCommentPhotoNative();
     }
   }, [currentUserId, pickCommentPhotoNative]);
+
+  const openCommentPhotoUrlModal = useCallback((target: 'composer' | string) => {
+    commentPhotoTargetRef.current = target;
+    setShowCommentPhotoModal(true);
+  }, []);
+
+  useEffect(() => {
+    if (composerInput.length === 0) setComposerFieldHeight(COMPOSER_INPUT_MIN_H);
+  }, [composerInput]);
+
+  const onComposerInputContentSizeChange = useCallback(
+    (e: NativeSyntheticEvent<TextInputContentSizeChangeEventData>) => {
+      const contentH = e.nativeEvent.contentSize.height;
+      const padded = Math.ceil(contentH) + (Platform.OS === 'web' ? 20 : 18);
+      const next = Math.min(COMPOSER_INPUT_MAX_H, Math.max(COMPOSER_INPUT_MIN_H, padded));
+      setComposerFieldHeight((prev) => (prev === next ? prev : next));
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!showTimeSuggestModal || !ev?.start || !ev?.end) return;
@@ -509,29 +638,208 @@ export default function EventDetailScreen() {
     setSuggestEndTime(`${pad(e.getHours())}:${pad(e.getMinutes())}`);
   }, [showTimeSuggestModal, ev?.id, ev?.start, ev?.end, displayTiming.displayStart, displayTiming.displayEnd]);
 
+  useEffect(() => {
+    if (!ev?.id || !ev.start || !ev.end) return;
+    setDraftTitle(ev.title ?? '');
+    setDraftDesc(ev.description ?? '');
+    setDraftLocation(ev.location ?? '');
+    setDraftStartDate(formatWallDateFromUtcIso(ev.start as string));
+    setDraftStartTime(formatWallTimeHmFromUtcIso(ev.start as string));
+    setDraftEndDate(formatWallDateFromUtcIso(ev.end as string));
+    setDraftEndTime(formatWallTimeHmFromUtcIso(ev.end as string));
+    setDraftAllDay(!!ev.isAllDay);
+    setDraftMinAttendees(ev.minAttendees != null && ev.minAttendees > 0 ? String(ev.minAttendees) : '');
+    setDraftMaxAttendees(ev.maxAttendees != null && ev.maxAttendees > 0 ? String(ev.maxAttendees) : '');
+    setDraftAllowMaybe(!!ev.allowMaybe);
+    setDraftActivityIdeasEnabled(ev.activityIdeasEnabled ?? false);
+    setDraftRsvpDeadlineEnabled(!!ev.rsvpDeadline);
+    if (ev.rsvpDeadline) {
+      setDraftRsvpDeadlineDate(formatWallDateFromUtcIso(ev.rsvpDeadline as string));
+      setDraftRsvpDeadlineTime(
+        ev.isAllDay ? '12:00' : formatWallTimeHmFromUtcIso(ev.rsvpDeadline as string)
+      );
+    } else if (ev.start) {
+      setDraftRsvpDeadlineDate(formatWallDateFromUtcIso(ev.start as string));
+      setDraftRsvpDeadlineTime('12:00');
+    }
+  }, [
+    ev?.id,
+    ev?.title,
+    ev?.description,
+    ev?.location,
+    ev?.start,
+    ev?.end,
+    ev?.isAllDay,
+    ev?.minAttendees,
+    ev?.maxAttendees,
+    ev?.allowMaybe,
+    ev?.activityIdeasEnabled,
+    ev?.rsvpDeadline,
+  ]);
+
+  const timeFieldsDirty = useMemo(() => {
+    if (!ev?.start || !ev?.end) return false;
+    return (
+      draftStartDate !== formatWallDateFromUtcIso(ev.start as string) ||
+      draftStartTime !== formatWallTimeHmFromUtcIso(ev.start as string) ||
+      draftEndDate !== formatWallDateFromUtcIso(ev.end as string) ||
+      draftEndTime !== formatWallTimeHmFromUtcIso(ev.end as string) ||
+      draftAllDay !== !!ev.isAllDay
+    );
+  }, [ev, draftStartDate, draftStartTime, draftEndDate, draftEndTime, draftAllDay]);
+
+  const rsvpDeadlineDirty = useMemo(() => {
+    if (!ev) return false;
+    const savedHas = !!ev.rsvpDeadline;
+    if (draftRsvpDeadlineEnabled !== savedHas) return true;
+    if (!savedHas) return false;
+    const draftIso = draftAllDay
+      ? localWallDateEndOfDayToUtcIso(draftRsvpDeadlineDate)
+      : localWallDateTimeToUtcIso(draftRsvpDeadlineDate, draftRsvpDeadlineTime);
+    return draftIso !== String(ev.rsvpDeadline);
+  }, [
+    ev,
+    draftRsvpDeadlineEnabled,
+    draftRsvpDeadlineDate,
+    draftRsvpDeadlineTime,
+    draftAllDay,
+  ]);
+
+  const detailTimeRangeValid = useMemo(
+    () =>
+      isValidEventFormTimeRange({
+        allDay: draftAllDay,
+        startDate: draftStartDate,
+        endDate: draftEndDate,
+        startTime: draftStartTime,
+        endTime: draftEndTime,
+      }),
+    [draftAllDay, draftStartDate, draftEndDate, draftStartTime, draftEndTime]
+  );
+
+  const detailsDirty = useMemo(() => {
+    if (!ev || !currentUserId || !group) return false;
+    if (ev.createdBy !== currentUserId) return false;
+    const t = (ev.title ?? '').trim();
+    const d = (ev.description ?? '').trim();
+    const l = (ev.location ?? '').trim();
+    const minB = ev.minAttendees != null && ev.minAttendees > 0 ? String(ev.minAttendees) : '';
+    const maxB = ev.maxAttendees != null && ev.maxAttendees > 0 ? String(ev.maxAttendees) : '';
+    return (
+      draftTitle.trim() !== t ||
+      draftDesc.trim() !== d ||
+      draftLocation.trim() !== l ||
+      draftMinAttendees.trim() !== minB ||
+      draftMaxAttendees.trim() !== maxB ||
+      draftAllowMaybe !== !!ev.allowMaybe ||
+      draftActivityIdeasEnabled !== (ev.activityIdeasEnabled ?? false) ||
+      timeFieldsDirty ||
+      rsvpDeadlineDirty
+    );
+  }, [
+    ev,
+    group,
+    currentUserId,
+    draftTitle,
+    draftDesc,
+    draftLocation,
+    draftMinAttendees,
+    draftMaxAttendees,
+    draftAllowMaybe,
+    draftActivityIdeasEnabled,
+    timeFieldsDirty,
+    rsvpDeadlineDirty,
+  ]);
+
+  const detailGetTimeDate = useCallback((timeStr: string) => {
+    const [hours, minutes] = timeStr.split(':').map(Number);
+    const date = new Date();
+    date.setHours(hours || 0);
+    date.setMinutes(minutes || 0);
+    return date;
+  }, []);
+
+  const handleDetailStartDateChange = useCallback((_e: unknown, selectedDate?: Date) => {
+    if (Platform.OS === 'android') setShowDetailStartDatePicker(false);
+    if (selectedDate) setDraftStartDate(formatLocalDateInput(selectedDate));
+  }, []);
+
+  const handleDetailEndDateChange = useCallback((_e: unknown, selectedDate?: Date) => {
+    if (Platform.OS === 'android') setShowDetailEndDatePicker(false);
+    if (selectedDate) setDraftEndDate(formatLocalDateInput(selectedDate));
+  }, []);
+
+  const handleDetailStartTimeChange = useCallback((_e: unknown, selectedTime?: Date) => {
+    if (Platform.OS === 'android') setShowDetailStartTimePicker(false);
+    if (selectedTime) {
+      const hours = String(selectedTime.getHours()).padStart(2, '0');
+      const minutes = String(selectedTime.getMinutes()).padStart(2, '0');
+      setDraftStartTime(`${hours}:${minutes}`);
+    }
+  }, []);
+
+  const handleDetailEndTimeChange = useCallback((_e: unknown, selectedTime?: Date) => {
+    if (Platform.OS === 'android') setShowDetailEndTimePicker(false);
+    if (selectedTime) {
+      const hours = String(selectedTime.getHours()).padStart(2, '0');
+      const minutes = String(selectedTime.getMinutes()).padStart(2, '0');
+      setDraftEndTime(`${hours}:${minutes}`);
+    }
+  }, []);
+
+  const handleDetailRsvpDeadlineDateChange = useCallback((_e: unknown, selectedDate?: Date) => {
+    if (Platform.OS === 'android') setShowDetailRsvpDeadlineDatePicker(false);
+    if (selectedDate) setDraftRsvpDeadlineDate(formatLocalDateInput(selectedDate));
+  }, []);
+
+  const handleDetailRsvpDeadlineTimeChange = useCallback((_e: unknown, selectedTime?: Date) => {
+    if (Platform.OS === 'android') setShowDetailRsvpDeadlineTimePicker(false);
+    if (selectedTime) {
+      const hours = String(selectedTime.getHours()).padStart(2, '0');
+      const minutes = String(selectedTime.getMinutes()).padStart(2, '0');
+      setDraftRsvpDeadlineTime(`${hours}:${minutes}`);
+    }
+  }, []);
+
+  const getDetailMinimumStartTime = useCallback(() => {
+    const selectedDate = new Date(draftStartDate);
+    const todayDate = new Date();
+    todayDate.setHours(0, 0, 0, 0);
+    if (selectedDate.getTime() === todayDate.getTime()) {
+      return new Date();
+    }
+    return undefined;
+  }, [draftStartDate]);
+
+  const getDetailMinimumEndTime = useCallback(() => {
+    if (draftStartDate !== draftEndDate) return undefined;
+    if (!draftStartTime) return undefined;
+    const [h, m] = draftStartTime.split(':').map(Number);
+    const minTime = new Date();
+    minTime.setHours(h, m + 1, 0, 0);
+    return minTime;
+  }, [draftStartDate, draftEndDate, draftStartTime]);
+
   if (!eventId) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>Event not found</Text>
+      <EventFormPopoverChrome onClose={dismiss}>
+        <View style={styles.container}>
+          <View style={styles.errorContainer}>
+            <Text style={styles.errorText}>Event not found</Text>
+          </View>
         </View>
-      </SafeAreaView>
+      </EventFormPopoverChrome>
     );
   }
 
   const eventDetailed = ev as EventDetailed | undefined;
   
   const comments = (eventDetailed?.comments || [])
-    .map((c, i) => {
-      const anchor = eventDetailed ? displayTiming.displayStart : new Date();
-      return {
-        ...c,
-        createdAt: new Date(c.createdAt),
-        photos: dDiff(anchor) < 0 && i < 2 && (!c.photos || c.photos.length === 0)
-          ? ['https://placehold.co/400x300/FFF0F6/B5245E/png?text=Photo']
-          : c.photos || [],
-      };
-    })
+    .map((c) => ({
+      ...c,
+      createdAt: new Date(c.createdAt),
+      photos: (c.photos || []).filter((u) => typeof u === 'string' && u.trim().length > 0),
+    }))
     .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
   
   const users: Record<string, User> = {};
@@ -550,9 +858,16 @@ export default function EventDetailScreen() {
   };
 
   if (!ev || !group) {
-    return null;
+    return (
+      <EventFormPopoverChrome onClose={dismiss}>
+        <View style={[styles.safe, { justifyContent: 'center', alignItems: 'center' }]}>
+          <ActivityIndicator size="large" color={Colors.accent} />
+        </View>
+      </EventFormPopoverChrome>
+    );
   }
 
+  const displayEv = viewEv!;
   const userColorHex = memberColorData?.colorHex || getDefaultGroupThemeFromName(group.name);
   const p       = getGroupColor(userColorHex);
   const rsvps   = ev.rsvps || [];
@@ -567,32 +882,228 @@ export default function EventDetailScreen() {
   const isMultiDay = evStart.toDateString() !== evEnd.toDateString();
   const diff    = dDiff(evStart);
   const isPast  = diff < 0;
-  const minN = ev.minAttendees || 0;
-  const maxN = ev.maxAttendees || 0;
+  const minN = displayEv.minAttendees || 0;
+  const maxN = displayEv.maxAttendees || 0;
   const needsMore = minN > 0 && going.length < minN && !isPast;
   const spotsLeft = maxN > 0 ? Math.max(0, maxN - going.length) : 0;
   const showLowSpots = maxN > 0 && !isPast && spotsLeft > 0 && spotsLeft <= 5;
   const imWaitlisted = myRsvp?.status === 'waitlist' && !isPast;
   const myWaitlistPos = imWaitlisted ? getMyWaitlistPosition(rsvps, currentUserId) : null;
   const hoursLeft = Math.max(0, Math.floor((evStart.getTime() - Date.now()) / 3600000));
-  const allPhotos = comments.flatMap(c => {
-    const ts = typeof c.createdAt === 'string' ? new Date(c.createdAt) : c.createdAt;
-    return (c.photos || []).map(url => ({ url, name: 'Unknown', ts }));
-  });
-  
-  const canEdit = ev.createdBy === currentUserId || 
-                  group.superAdminId === currentUserId || 
-                  (group.adminIds ?? []).includes(currentUserId);
+  const canEdit = ev.createdBy === currentUserId;
+  const canDeleteEvent =
+    ev.createdBy === currentUserId ||
+    group.superAdminId === currentUserId ||
+    (group.adminIds ?? []).includes(currentUserId);
   const gScoped = group as GroupScoped;
   const canCollaborateActivities =
     !!currentUserId &&
     (gScoped.membershipStatus === MembershipStatus.MEMBER ||
       gScoped.membershipStatus === MembershipStatus.ADMIN);
+  const activityIdeasOn = ev.activityIdeasEnabled ?? false;
+  const activityIdeasEffective = canEdit ? draftActivityIdeasEnabled : activityIdeasOn;
+  /** RSVP row follows saved event flag, not the Settings draft (organizers were losing Maybe while editing). */
+  const showMaybeRsvp = !!displayEv.allowMaybe;
+  const rsvpDeadlineRaw = displayEv.rsvpDeadline as string | null | undefined;
+  const rsvpDeadlineDt = rsvpDeadlineRaw ? new Date(rsvpDeadlineRaw) : null;
+  const rsvpDeadlineValid =
+    rsvpDeadlineDt != null && Number.isFinite(rsvpDeadlineDt.getTime());
+  const rsvpDeadlinePassed = rsvpDeadlineValid && Date.now() > rsvpDeadlineDt.getTime();
+  const rsvpHeaderYmdSlashed = !canEdit
+    ? rsvpDeadlineValid && rsvpDeadlineRaw
+      ? formatLocalDateYmdSlashes(rsvpDeadlineDt as Date)
+      : null
+    : draftRsvpDeadlineEnabled
+      ? draftRsvpDeadlineDate.trim()
+        ? draftRsvpDeadlineDate.trim().replace(/-/g, '/')
+        : null
+      : rsvpDeadlineDirty
+        ? null
+        : ev.rsvpDeadline
+          ? formatLocalDateYmdSlashes(new Date(ev.rsvpDeadline as string))
+          : null;
+  const rsvpHeaderTimed =
+    !canEdit
+      ? rsvpDeadlineValid && !displayEv.isAllDay
+      : draftRsvpDeadlineEnabled
+        ? !draftAllDay
+        : !rsvpDeadlineDirty && !!ev.rsvpDeadline
+          ? !displayEv.isAllDay
+          : false;
+  let rsvpHeaderTimeLabel: string | null = null;
+  if (rsvpHeaderYmdSlashed && rsvpHeaderTimed) {
+    if (!canEdit && rsvpDeadlineDt) {
+      rsvpHeaderTimeLabel = fmtTime(rsvpDeadlineDt);
+    } else if (canEdit && draftRsvpDeadlineEnabled && !draftAllDay && draftRsvpDeadlineDate.trim()) {
+      const d = new Date(`${draftRsvpDeadlineDate.trim()}T${draftRsvpDeadlineTime}:00`);
+      if (Number.isFinite(d.getTime())) rsvpHeaderTimeLabel = fmtTime(d);
+    } else if (canEdit && !draftRsvpDeadlineEnabled && !rsvpDeadlineDirty && ev.rsvpDeadline) {
+      const d = new Date(ev.rsvpDeadline as string);
+      if (Number.isFinite(d.getTime())) rsvpHeaderTimeLabel = fmtTime(d);
+    }
+  }
+  const rsvpSectionLabel = rsvpHeaderYmdSlashed
+    ? `RSVP by ${rsvpHeaderYmdSlashed}${rsvpHeaderTimeLabel ? ` · ${rsvpHeaderTimeLabel}` : ''}`
+    : 'RSVP';
   const activityOptions = ev.activityOptions ?? [];
   const timeSuggestions = ev.timeSuggestions ?? [];
   const myActivityVoteOptionIds = ev.myActivityVoteOptionIds ?? [];
-  const canResolveTimeSuggestions = canEdit;
+  const canResolveTimeSuggestions =
+    ev.createdBy === currentUserId ||
+    group.superAdminId === currentUserId ||
+    (group.adminIds ?? []).includes(currentUserId);
   const pendingTimeSuggestions = timeSuggestions.filter((s) => s.status === 'pending');
+
+  const resetDetailsDrafts = () => {
+    setDraftTitle(ev.title ?? '');
+    setDraftDesc(ev.description ?? '');
+    setDraftLocation(ev.location ?? '');
+    if (ev.start && ev.end) {
+      setDraftStartDate(formatWallDateFromUtcIso(ev.start as string));
+      setDraftStartTime(formatWallTimeHmFromUtcIso(ev.start as string));
+      setDraftEndDate(formatWallDateFromUtcIso(ev.end as string));
+      setDraftEndTime(formatWallTimeHmFromUtcIso(ev.end as string));
+      setDraftAllDay(!!ev.isAllDay);
+      setDraftMinAttendees(ev.minAttendees != null && ev.minAttendees > 0 ? String(ev.minAttendees) : '');
+      setDraftMaxAttendees(ev.maxAttendees != null && ev.maxAttendees > 0 ? String(ev.maxAttendees) : '');
+      setDraftAllowMaybe(!!ev.allowMaybe);
+      setDraftActivityIdeasEnabled(ev.activityIdeasEnabled ?? false);
+      setDraftRsvpDeadlineEnabled(!!ev.rsvpDeadline);
+      if (ev.rsvpDeadline) {
+        setDraftRsvpDeadlineDate(formatWallDateFromUtcIso(ev.rsvpDeadline as string));
+        setDraftRsvpDeadlineTime(
+          ev.isAllDay ? '12:00' : formatWallTimeHmFromUtcIso(ev.rsvpDeadline as string)
+        );
+      } else if (ev.start) {
+        setDraftRsvpDeadlineDate(formatWallDateFromUtcIso(ev.start as string));
+        setDraftRsvpDeadlineTime('12:00');
+      }
+    }
+  };
+
+  const executeDetailSave = async (seriesScope?: SeriesUpdateScope) => {
+    const title = draftTitle.trim();
+    if (!title) {
+      if (Platform.OS === 'web') window.alert('Event title is required');
+      else Alert.alert('Error', 'Event title is required');
+      return;
+    }
+    if (!detailTimeRangeValid) {
+      if (Platform.OS === 'web') window.alert('End must be after start');
+      else Alert.alert('Error', 'End must be after start');
+      return;
+    }
+    if (!currentUserId || !ev.start || !ev.end) return;
+    const inSeries = !!(ev as EventDetailed).recurrenceSeriesId?.trim();
+    const minTrim = draftMinAttendees.trim();
+    const maxTrim = draftMaxAttendees.trim();
+    let minAttendees: number | null;
+    let maxAttendees: number | null;
+    if (minTrim === '') {
+      minAttendees = null;
+    } else {
+      const n = parseInt(minTrim, 10);
+      if (Number.isNaN(n) || n < 0) {
+        if (Platform.OS === 'web') window.alert('Min attendees must be a non-negative number');
+        else Alert.alert('Error', 'Min attendees must be a non-negative number');
+        return;
+      }
+      minAttendees = n;
+    }
+    if (maxTrim === '') {
+      maxAttendees = null;
+    } else {
+      const n = parseInt(maxTrim, 10);
+      if (Number.isNaN(n) || n < 0) {
+        if (Platform.OS === 'web') window.alert('Max attendees must be a non-negative number');
+        else Alert.alert('Error', 'Max attendees must be a non-negative number');
+        return;
+      }
+      maxAttendees = n;
+    }
+    if (minAttendees != null && maxAttendees != null && maxAttendees < minAttendees) {
+      if (Platform.OS === 'web') window.alert('Max attendees must be at least the minimum');
+      else Alert.alert('Error', 'Max attendees must be at least the minimum');
+      return;
+    }
+    try {
+      const startIso = draftAllDay
+        ? localWallDateStartOfDayToUtcIso(draftStartDate)
+        : localWallDateTimeToUtcIso(draftStartDate, draftStartTime);
+      const endIso = draftAllDay
+        ? localWallDateEndOfDayToUtcIso(draftEndDate)
+        : localWallDateTimeToUtcIso(draftEndDate, draftEndTime);
+      const isAllDaySingle = draftAllDay && draftStartDate === draftEndDate;
+      const hasMaxCap = maxAttendees != null && maxAttendees > 0;
+      let rsvpDeadlineOut: string | null = null;
+      if (draftRsvpDeadlineEnabled) {
+        if (!draftRsvpDeadlineDate.trim()) {
+          if (Platform.OS === 'web') window.alert('Choose a date for the RSVP deadline');
+          else Alert.alert('Error', 'Choose a date for the RSVP deadline');
+          return;
+        }
+        rsvpDeadlineOut = draftAllDay
+          ? localWallDateEndOfDayToUtcIso(draftRsvpDeadlineDate)
+          : localWallDateTimeToUtcIso(draftRsvpDeadlineDate, draftRsvpDeadlineTime);
+        if (new Date(rsvpDeadlineOut).getTime() > new Date(endIso).getTime()) {
+          if (Platform.OS === 'web') window.alert('RSVP deadline must be on or before the event end');
+          else Alert.alert('Error', 'RSVP deadline must be on or before the event end');
+          return;
+        }
+      }
+      await updateEventMutation.mutateAsync({
+        title,
+        description: draftDesc.trim(),
+        location: draftLocation.trim(),
+        start: startIso,
+        end: endIso,
+        isAllDay: isAllDaySingle || undefined,
+        minAttendees,
+        maxAttendees,
+        enableWaitlist: hasMaxCap ? !!displayEv.enableWaitlist : false,
+        allowMaybe: draftAllowMaybe,
+        activityIdeasEnabled: draftActivityIdeasEnabled,
+        rsvpDeadline: rsvpDeadlineOut,
+        updatedBy: currentUserId,
+        viewerTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        ...(inSeries && (timeFieldsDirty || rsvpDeadlineDirty) && seriesScope
+          ? { seriesUpdateScope: seriesScope }
+          : {}),
+      });
+      setShowDetailSaveScopeModal(false);
+    } catch (e: any) {
+      const msg = e?.body?.error ?? e?.response?.data?.error ?? e?.message ?? 'Failed to save changes';
+      if (Platform.OS === 'web') window.alert(msg);
+      else Alert.alert('Error', msg);
+    }
+  };
+
+  const onDetailSavePress = () => {
+    if (!draftTitle.trim()) {
+      if (Platform.OS === 'web') window.alert('Event title is required');
+      else Alert.alert('Error', 'Event title is required');
+      return;
+    }
+    if (!detailTimeRangeValid) {
+      if (Platform.OS === 'web') window.alert('End must be after start');
+      else Alert.alert('Error', 'End must be after start');
+      return;
+    }
+    if (!currentUserId) return;
+    const inSeries = !!(ev as EventDetailed).recurrenceSeriesId?.trim();
+    if (inSeries && (timeFieldsDirty || rsvpDeadlineDirty)) {
+      setDetailSeriesUpdateScope(EventUpdate.seriesUpdateScope.THIS_OCCURRENCE);
+      setShowDetailSaveScopeModal(true);
+      return;
+    }
+    void executeDetailSave();
+  };
+
+  const detailTimeFieldsComplete =
+    !!draftStartDate?.trim() &&
+    !!draftEndDate?.trim() &&
+    (draftAllDay || (!!draftStartTime?.trim() && !!draftEndTime?.trim()));
+  const detailTimeRangeErrored = detailTimeFieldsComplete && !detailTimeRangeValid;
 
   const submitNewActivityOption = async () => {
     const label = newActivityLabel.trim();
@@ -672,7 +1183,7 @@ export default function EventDetailScreen() {
     }
   };
 
-  const coverPhotosForDisplay = canEdit ? localCoverPhotos : (ev.coverPhotos ?? []);
+  const coverPhotosForDisplay = canEdit ? localCoverPhotos : (displayEv.coverPhotos ?? []);
   const showEventPhotosSection = coverPhotosForDisplay.length > 0 || canEdit;
 
   const persistCoverPhotos = async (next: string[]) => {
@@ -741,32 +1252,54 @@ export default function EventDetailScreen() {
     }
   };
   
-  const maxCapacity = ev.maxAttendees || 0;
+  const maxCapacity = displayEv.maxAttendees || 0;
   const isAtCapacity = maxCapacity > 0 && going.length >= maxCapacity;
   const canGoGoing = !isAtCapacity || myRsvp?.status === 'going';
-  const hasWaitlist = ev.enableWaitlist && maxCapacity > 0;
+  const hasWaitlist = !!displayEv.enableWaitlist && maxCapacity > 0;
 
   const handleDeleteEntireSeries = async () => {
     setShowDeleteConfirm(false);
     try {
-      await deleteEventMutation.mutateAsync(eventId || '');
-      router.push('/(tabs)/events');
+      const seriesId = (ev as EventDetailed | undefined)?.recurrenceSeriesId?.trim();
+      if (seriesId) {
+        await deleteRecurrenceSeriesMutation.mutateAsync(seriesId);
+      } else {
+        await deleteEventMutation.mutateAsync(eventId || '');
+      }
+      if (returnToHref) router.replace(returnToHref as Href);
+      else router.replace('/(tabs)/events');
     } catch {
       Alert.alert('Error', 'Failed to delete event');
     }
   };
 
-  const handleExcludeThisOccurrence = async () => {
+  const handleDeleteThisOccurrenceOnly = async () => {
+    setShowDeleteConfirm(false);
+    if (!eventId) return;
+    try {
+      await deleteEventMutation.mutateAsync(eventId);
+      if (returnToHref) router.replace(returnToHref as Href);
+      else router.replace('/(tabs)/events');
+    } catch {
+      Alert.alert('Error', 'Failed to remove this occurrence');
+    }
+  };
+
+  const handleTruncateSeriesFromHere = async () => {
     setShowDeleteConfirm(false);
     if (!eventId || !displayTiming.occurrenceIso) return;
     try {
-      await excludeOccurrenceMutation.mutateAsync({
+      await truncateSeriesMutation.mutateAsync({
         eventId,
         occurrenceStart: displayTiming.occurrenceIso,
+        viewerTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       });
-      router.push('/(tabs)/events');
-    } catch {
-      Alert.alert('Error', 'Failed to remove this occurrence');
+      if (returnToHref) router.replace(returnToHref as Href);
+      else router.replace('/(tabs)/events');
+    } catch (e: unknown) {
+      const msg =
+        e && typeof e === 'object' && 'body' in e && (e as { body?: { message?: string } }).body?.message;
+      Alert.alert('Error', msg || 'Could not shorten the series');
     }
   };
 
@@ -808,21 +1341,62 @@ export default function EventDetailScreen() {
       Alert.alert('Invalid URL', 'Please enter a valid image URL (e.g. https://example.com/image.jpg)');
       return;
     }
-    setPendingPhotos((p) => [...p, { id: uid(), uri: url, pendingUpload: url }]);
+    const t = commentPhotoTargetRef.current;
+    const row: PendingCommentPhoto = { id: uid(), uri: url, pendingUpload: url };
+    if (t === 'composer') {
+      setComposerPendingPhotos((p) => [...p, row]);
+    } else {
+      setCommentEditDrafts((prev) => {
+        const d = prev[t];
+        if (!d) return prev;
+        return { ...prev, [t]: { ...d, photos: [...d.photos, row] } };
+      });
+    }
     setCommentPhotoUrl('');
     setShowCommentPhotoModal(false);
   };
 
-  const beginEditComment = (commentId: string, text?: string | null) => {
-    const next = (text || '').trim();
-    if (!next || next === COMMENT_DELETED_BY_ADMIN_MSG) {
-      return;
-    }
+  const beginEditComment = (commentId: string, text?: string | null, photos?: string[]) => {
+    const trimmed = (text || '').trim();
+    if (trimmed === COMMENT_DELETED_BY_ADMIN_MSG) return;
+    if (!trimmed && !(photos && photos.length)) return;
     closeCommentSwipe(commentId);
-    setEditingCommentId(commentId);
-    setInput(next);
-    setPendingPhotos([]);
-    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
+    setCommentEditDrafts((prev) => {
+      const old = prev[commentId];
+      if (old) {
+        for (const p of old.photos) {
+          if (p.uri.startsWith('blob:')) URL.revokeObjectURL(p.uri);
+        }
+      }
+      return {
+        ...prev,
+        [commentId]: {
+          text: trimmed,
+          photos: (photos || []).map((u) => ({ id: uid(), uri: u, pendingUpload: u })),
+        },
+      };
+    });
+  };
+
+  const cancelEditComment = (commentId: string) => {
+    closeCommentSwipe(commentId);
+    setCommentEditDrafts((prev) => {
+      const d = prev[commentId];
+      if (!d) return prev;
+      for (const p of d.photos) {
+        if (p.uri.startsWith('blob:')) URL.revokeObjectURL(p.uri);
+      }
+      const { [commentId]: _, ...rest } = prev;
+      return rest;
+    });
+  };
+
+  const updateEditDraftText = (commentId: string, text: string) => {
+    setCommentEditDrafts((prev) => {
+      const d = prev[commentId];
+      if (!d) return prev;
+      return { ...prev, [commentId]: { ...d, text } };
+    });
   };
 
   const handleDeleteComment = (commentId: string) => {
@@ -837,12 +1411,17 @@ export default function EventDetailScreen() {
           try {
             await deleteCommentMutation.mutateAsync({
               commentId,
-              input: { actorId: currentUserId },
+              actorId: currentUserId,
             });
-            if (editingCommentId === commentId) {
-              setEditingCommentId(null);
-              setInput('');
-            }
+            setCommentEditDrafts((prev) => {
+              const d = prev[commentId];
+              if (!d) return prev;
+              for (const p of d.photos) {
+                if (p.uri.startsWith('blob:')) URL.revokeObjectURL(p.uri);
+              }
+              const { [commentId]: _, ...rest } = prev;
+              return rest;
+            });
           } catch (error: any) {
             Alert.alert('Error', error?.body?.message || error?.message || 'Failed to delete comment');
           }
@@ -851,52 +1430,75 @@ export default function EventDetailScreen() {
     ]);
   };
 
+  const uploadPendingPhotos = async (photosToUpload: PendingCommentPhoto[]) => {
+    return Promise.all(
+      photosToUpload.map(async (p) => {
+        const src = p.pendingUpload;
+        if (typeof src === 'string' && (src.startsWith('http://') || src.startsWith('https://'))) {
+          return src;
+        }
+        if (typeof File !== 'undefined' && src instanceof File) {
+          return uploadWebImageFile(currentUserId!, src);
+        }
+        return uploadPickedImageAsset(currentUserId!, src as PickedImageAsset);
+      }),
+    );
+  };
+
+  const saveCommentEdit = async (commentId: string) => {
+    if (!currentUserId) return;
+    const draft = commentEditDraftsRef.current[commentId];
+    if (!draft) return;
+    const photosToUpload = draft.photos;
+    const nextText = draft.text.trim();
+    if (!nextText && photosToUpload.length === 0) {
+      Alert.alert('Error', 'Comment cannot be empty');
+      return;
+    }
+    try {
+      const photoUrls = await uploadPendingPhotos(photosToUpload);
+      if (!nextText && photoUrls.length === 0) {
+        Alert.alert('Error', 'Comment cannot be empty');
+        return;
+      }
+      await updateCommentMutation.mutateAsync({
+        commentId,
+        input: { actorId: currentUserId, text: nextText, photos: photoUrls },
+      });
+      for (const p of photosToUpload) {
+        if (p.uri.startsWith('blob:')) URL.revokeObjectURL(p.uri);
+      }
+      closeCommentSwipe(commentId);
+      setCommentEditDrafts((prev) => {
+        const { [commentId]: _, ...rest } = prev;
+        return rest;
+      });
+    } catch (error: unknown) {
+      const err = error as { body?: { message?: string }; message?: string };
+      Alert.alert('Error', err?.body?.message || err?.message || 'Failed to save comment');
+    }
+  };
+
   const postComment = async () => {
-    if (!input.trim() && !pendingPhotos.length) return;
+    const photosToUpload = composerPendingPhotosRef.current;
+    if (!composerInput.trim() && !photosToUpload.length) return;
     if (!currentUserId) {
       Alert.alert('Sign in', 'You must be signed in to comment.');
       return;
     }
     setCommentPostBusy(true);
     try {
-      if (editingCommentId) {
-        const nextText = input.trim();
-        if (!nextText) {
-          Alert.alert('Error', 'Comment text cannot be empty');
-          return;
-        }
-        const cid = editingCommentId;
-        await updateCommentMutation.mutateAsync({
-          commentId: cid,
-          input: { actorId: currentUserId, text: nextText },
-        });
-        closeCommentSwipe(cid);
-        setEditingCommentId(null);
-        setInput('');
-        setPendingPhotos([]);
-        return;
-      }
-
-      const photoUrls = await Promise.all(
-        pendingPhotos.map(async (p) => {
-          const src = p.pendingUpload;
-          if (typeof src === 'string' && (src.startsWith('http://') || src.startsWith('https://'))) {
-            return src;
-          }
-          if (typeof File !== 'undefined' && src instanceof File) {
-            return uploadWebImageFile(currentUserId, src);
-          }
-          return uploadPickedImageAsset(currentUserId, src as PickedImageAsset);
-        }),
-      );
+      const photoUrls = await uploadPendingPhotos(photosToUpload);
 
       const newComment: CommentInput = {
         id: uid(),
         userId: currentUserId,
-        photos: photoUrls,
       };
-      if (input.trim()) {
-        const trimmed = input.trim();
+      if (photoUrls.length > 0) {
+        newComment.photos = photoUrls;
+      }
+      if (composerInput.trim()) {
+        const trimmed = composerInput.trim();
         newComment.text = trimmed;
         const mids = computeMentionUserIdsForPost(trimmed, mentionMemberRows, currentUserId);
         if (mids.length > 0) {
@@ -917,12 +1519,11 @@ export default function EventDetailScreen() {
         }
       }
 
-      for (const p of pendingPhotos) {
+      for (const p of photosToUpload) {
         if (p.uri.startsWith('blob:')) URL.revokeObjectURL(p.uri);
       }
-      setInput('');
-      setPendingPhotos([]);
-      setEditingCommentId(null);
+      setComposerInput('');
+      setComposerPendingPhotos([]);
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
     } catch (error: unknown) {
       const err = error as { body?: { message?: string }; message?: string };
@@ -943,21 +1544,35 @@ export default function EventDetailScreen() {
   const hasBanners = showHoursBanner || isPast || needsMore || showLowSpots || imWaitlisted;
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <EventFormPopoverChrome onClose={dismiss}>
+    <View style={styles.safe}>
+      {Platform.OS === 'web' && (
+        <input
+          ref={(el) => {
+            commentPhotoFileInputRef.current = el;
+          }}
+          type="file"
+          accept="image/*"
+          style={{ display: 'none' }}
+          onChange={onCommentWebPhotoChange}
+        />
+      )}
       {/* Nav */}
-      <View style={styles.nav}>
+      <View style={modalTopBarStyles.bar}>
         <TouchableOpacity
-          onPress={() => router.replace('/(tabs)/events')}
-          style={styles.navBack}
+          onPress={dismiss}
+          style={modalTopBarStyles.closeButton}
+          accessibilityRole="button"
+          accessibilityLabel="Close"
         >
-          <Text style={styles.navBackText}>← Back</Text>
+          <Ionicons name="close" size={26} color={Colors.textSub} />
         </TouchableOpacity>
         <View style={{ flex: 1 }} />
         {currentUserId ? (
           <TouchableOpacity
             onPress={toggleEventWatch}
             disabled={setWatchMutation.isPending}
-            style={styles.navIconBtn}
+            style={[modalTopBarStyles.trailingIconTap, { marginRight: 8 }]}
             accessibilityRole="button"
             accessibilityLabel={
               effectiveWatching
@@ -972,36 +1587,50 @@ export default function EventDetailScreen() {
             />
           </TouchableOpacity>
         ) : null}
-        {canEdit && (
-          <>
+        {canDeleteEvent ? (
+          <TouchableOpacity
+            onPress={() => setShowDeleteConfirm(true)}
+            style={[modalTopBarStyles.trailingIconTap, { marginRight: 8 }]}
+          >
+            <Ionicons name="trash-outline" size={20} color={Colors.text} />
+          </TouchableOpacity>
+        ) : null}
+        {canEdit && detailsDirty ? (
+          <View style={styles.navEditActions}>
             <TouchableOpacity
-              onPress={() => {
-                const q = occurrenceAtRaw ? `?at=${encodeURIComponent(occurrenceAtRaw)}` : '';
-                router.push(`/event/edit/${eventId}${q}`);
-              }}
-              style={styles.navIconBtn}
+              onPress={resetDetailsDrafts}
+              disabled={updateEventMutation.isPending}
+              style={[styles.draftBarBtnSecondary, updateEventMutation.isPending && { opacity: 0.45 }]}
+              activeOpacity={0.8}
             >
-              <Ionicons name="create-outline" size={20} color={Colors.text} />
+              <Text style={styles.draftBarBtnSecondaryText}>Reset</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              onPress={() => setShowDeleteConfirm(true)}
-              style={styles.navIconBtn}
+              onPress={onDetailSavePress}
+              disabled={!draftTitle.trim() || !detailTimeRangeValid || updateEventMutation.isPending}
+              style={[
+                styles.draftBarBtnPrimary,
+                (!draftTitle.trim() || !detailTimeRangeValid || updateEventMutation.isPending) &&
+                  styles.draftBarBtnPrimaryDisabled,
+              ]}
+              activeOpacity={0.8}
             >
-              <Ionicons name="trash-outline" size={20} color={Colors.text} />
+              {updateEventMutation.isPending ? (
+                <ActivityIndicator size="small" color={Colors.accentFg} />
+              ) : (
+                <Text style={styles.draftBarBtnPrimaryText}>Save</Text>
+              )}
             </TouchableOpacity>
-          </>
-        )}
-        <TouchableOpacity 
-          style={styles.navGroup}
-          onPress={() => router.push(`/groups/${ev.groupId}`)}
-          activeOpacity={0.7}
-        >
-          <View style={[styles.groupDot, { backgroundColor: p.dot }]} />
-          <Text style={styles.navGroupName}>{group?.name}</Text>
-        </TouchableOpacity>
+          </View>
+        ) : null}
       </View>
 
-      <ScrollView ref={scrollRef} style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        ref={scrollRef}
+        style={styles.eventScrollView}
+        contentContainerStyle={styles.eventScrollContent}
+        showsVerticalScrollIndicator={false}
+      >
 
         {/* Event block */}
         <View style={styles.eventBlock}>
@@ -1053,12 +1682,48 @@ export default function EventDetailScreen() {
             </View>
           ) : null}
 
-          <View style={{ paddingHorizontal: 20, paddingTop: hasBanners ? 12 : 20 }}>
-            <Text style={styles.eventTitle}>{ev.title}</Text>
-            {ev.description ? (
+          <View style={styles.eventMainCardWrap}>
+            <View style={styles.eventMainCard}>
+          <View style={{ paddingHorizontal: 16, paddingTop: hasBanners ? 16 : 18 }}>
+            <TouchableOpacity
+              style={styles.groupChipAboveTitle}
+              onPress={() => router.push(withReturnTo(`/groups/${ev.groupId}`, pathname))}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.groupDot, { backgroundColor: p.dot }]} />
+              <Text style={styles.navGroupName} numberOfLines={1}>
+                {group.name}
+              </Text>
+              <Ionicons name="chevron-forward" size={14} color={Colors.textMuted} style={{ marginTop: 1 }} />
+            </TouchableOpacity>
+            {canEdit ? (
+              <TextInput
+                value={draftTitle}
+                onChangeText={setDraftTitle}
+                placeholder="Event title"
+                placeholderTextColor={Colors.textMuted}
+                style={styles.eventTitleInput}
+                autoCapitalize="sentences"
+                autoCorrect
+              />
+            ) : (
+              <Text style={styles.eventTitle}>{displayEv.title}</Text>
+            )}
+            {canEdit ? (
+              <View style={[styles.descBox, { marginTop: 10 }]}>
+                <TextInput
+                  value={draftDesc}
+                  onChangeText={setDraftDesc}
+                  placeholder="Description"
+                  placeholderTextColor={Colors.textMuted}
+                  style={styles.eventDescInput}
+                  multiline
+                />
+              </View>
+            ) : displayEv.description?.trim() ? (
               <View style={[styles.descBox, { marginTop: 10 }]}>
                 <Text style={styles.descText}>
-                  <DescText text={ev.description} />
+                  <DescText text={displayEv.description} />
                 </Text>
               </View>
             ) : null}
@@ -1066,8 +1731,13 @@ export default function EventDetailScreen() {
 
           {/* Photos */}
           {showEventPhotosSection ? (
-            <View style={{ marginTop: ev.description ? 4 : 10 }}>
-              <View style={{ paddingHorizontal: 20 }}>
+            <View
+              style={{
+                marginTop:
+                  canEdit || displayEv.description?.trim() ? 4 : 10,
+              }}
+            >
+              <View style={{ paddingHorizontal: 16 }}>
                 <Text style={formSectionTitleStyle}>
                   Photos{coverPhotosForDisplay.length > 0 ? ` · ${coverPhotosForDisplay.length}` : ''}
                 </Text>
@@ -1078,9 +1748,10 @@ export default function EventDetailScreen() {
                   urlMap={resolvedImageMap}
                   canRemove={canEdit}
                   onRemoveAt={(i) => void removeCoverPhotoAt(i)}
-                  onPhotoPress={(url) =>
+                  onPhotoPress={(url, index) =>
                     setLightbox({
-                      url,
+                      urls: coverPhotosForDisplay,
+                      index,
                       name: getUserSafe(ev.createdBy).displayName,
                       ts: new Date(ev.createdAt),
                     })
@@ -1090,12 +1761,12 @@ export default function EventDetailScreen() {
               {canEdit ? (
                 <View
                   style={{
-                    paddingHorizontal: 20,
+                    paddingHorizontal: 16,
                     marginTop: coverPhotosForDisplay.length > 0 ? 4 : 0,
                     marginBottom: 16,
                   }}
                 >
-                  <View style={styles.eventPhotosAddCard}>
+                  <View style={[styles.eventPhotosAddCard, styles.eventPhotosAddCardNested]}>
                     <TouchableOpacity
                       onPress={() => void addCoverPhotoFromPicker()}
                       style={styles.eventPhotosAddBtn}
@@ -1117,19 +1788,174 @@ export default function EventDetailScreen() {
             </View>
           ) : null}
 
-          <View style={{ paddingHorizontal: 20 }}>
+          <View style={{ paddingHorizontal: 16 }}>
             {/* Info rows */}
             <View style={{ gap: 8, marginBottom: 16 }}>
-              {isMultiDay ? (
-                <View style={{ gap: 4 }}>
+              {canEdit ? (
+                <View style={{ gap: 8 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
                     <Ionicons name="calendar-outline" size={20} color={Colors.textSub} style={{ width: 22, marginTop: 1 }} />
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <View style={styles.detailTimeSectionHeader}>
+                        <Text style={[formSectionTitleStyle, styles.detailTimeHeading]}>When</Text>
+                        <TouchableOpacity
+                          onPress={() => setDraftAllDay((v) => !v)}
+                          style={styles.detailAllDayChip}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={[styles.detailAllDayChipText, draftAllDay && styles.detailAllDayChipTextActive]}>
+                            All-day
+                          </Text>
+                          <View style={[styles.detailAllDayCheckbox, draftAllDay && styles.detailAllDayCheckboxActive]}>
+                            {draftAllDay ? <Ionicons name="checkmark" size={12} color="#fff" /> : null}
+                          </View>
+                        </TouchableOpacity>
+                      </View>
+                      <View style={styles.detailEventTimeStack}>
+                        <View style={styles.detailEventTimeLine}>
+                          <Text style={styles.detailEventTimeLineLabel}>From</Text>
+                          <View style={styles.detailEventTimeRow}>
+                            {Platform.OS === 'web' ? (
+                              <View style={[styles.detailEventTimeCell, styles.detailEventTimeFieldDate]}>
+                                <input
+                                  type="date"
+                                  value={draftStartDate}
+                                  min={formatLocalDateInput(new Date())}
+                                  onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                                    setDraftStartDate(e.target.value)
+                                  }
+                                  style={webDetailTimeInputStyle(false)}
+                                />
+                              </View>
+                            ) : (
+                              <View style={[styles.detailEventTimeCell, styles.detailEventTimeFieldDate]}>
+                                <TouchableOpacity
+                                  onPress={() => setShowDetailStartDatePicker(true)}
+                                  activeOpacity={0.85}
+                                  style={styles.detailEventTimeSegment}
+                                >
+                                  <Text style={styles.detailEventTimeSegmentText} numberOfLines={1}>
+                                    {draftStartDate}
+                                  </Text>
+                                </TouchableOpacity>
+                              </View>
+                            )}
+                            {!draftAllDay &&
+                              (Platform.OS === 'web' ? (
+                                <View style={[styles.detailEventTimeCell, styles.detailEventTimeFieldTime]}>
+                                  <input
+                                    type="time"
+                                    value={draftStartTime}
+                                    onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                                      setDraftStartTime(e.target.value)
+                                    }
+                                    style={webDetailTimeInputStyle(false)}
+                                  />
+                                </View>
+                              ) : (
+                                <View style={[styles.detailEventTimeCell, styles.detailEventTimeFieldTime]}>
+                                  <TouchableOpacity
+                                    onPress={() => setShowDetailStartTimePicker(true)}
+                                    activeOpacity={0.85}
+                                    style={styles.detailEventTimeSegment}
+                                  >
+                                    <Text style={styles.detailEventTimeSegmentText} numberOfLines={1}>
+                                      {draftStartTime}
+                                    </Text>
+                                  </TouchableOpacity>
+                                </View>
+                              ))}
+                          </View>
+                        </View>
+                        <View style={styles.detailEventTimeLine}>
+                          <Text style={styles.detailEventTimeLineLabel}>To</Text>
+                          <View style={styles.detailEventTimeRow}>
+                            {Platform.OS === 'web' ? (
+                              <View style={[styles.detailEventTimeCell, styles.detailEventTimeFieldDate]}>
+                                <input
+                                  type="date"
+                                  value={draftEndDate}
+                                  min={draftStartDate}
+                                  onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                                    setDraftEndDate(e.target.value)
+                                  }
+                                  style={webDetailTimeInputStyle(detailTimeRangeErrored)}
+                                />
+                              </View>
+                            ) : (
+                              <View style={[styles.detailEventTimeCell, styles.detailEventTimeFieldDate]}>
+                                <TouchableOpacity
+                                  onPress={() => setShowDetailEndDatePicker(true)}
+                                  activeOpacity={0.85}
+                                  style={[
+                                    styles.detailEventTimeSegment,
+                                    detailTimeRangeErrored && styles.detailEventTimeSegmentError,
+                                  ]}
+                                >
+                                  <Text style={styles.detailEventTimeSegmentText} numberOfLines={1}>
+                                    {draftEndDate}
+                                  </Text>
+                                </TouchableOpacity>
+                              </View>
+                            )}
+                            {!draftAllDay &&
+                              (Platform.OS === 'web' ? (
+                                <View style={[styles.detailEventTimeCell, styles.detailEventTimeFieldTime]}>
+                                  <input
+                                    type="time"
+                                    value={draftEndTime}
+                                    onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                                      setDraftEndTime(e.target.value)
+                                    }
+                                    style={webDetailTimeInputStyle(detailTimeRangeErrored)}
+                                  />
+                                </View>
+                              ) : (
+                                <View style={[styles.detailEventTimeCell, styles.detailEventTimeFieldTime]}>
+                                  <TouchableOpacity
+                                    onPress={() => setShowDetailEndTimePicker(true)}
+                                    activeOpacity={0.85}
+                                    style={[
+                                      styles.detailEventTimeSegment,
+                                      detailTimeRangeErrored && styles.detailEventTimeSegmentError,
+                                    ]}
+                                  >
+                                    <Text style={styles.detailEventTimeSegmentText} numberOfLines={1}>
+                                      {draftEndTime}
+                                    </Text>
+                                  </TouchableOpacity>
+                                </View>
+                              ))}
+                          </View>
+                        </View>
+                      </View>
+                      {detailTimeRangeErrored ? (
+                        <Text style={styles.detailTimeError}>End must be after start</Text>
+                      ) : null}
+                    </View>
+                  </View>
+                  {canCollaborateActivities && !isPast && ev.createdBy !== currentUserId ? (
+                    <TouchableOpacity
+                      onPress={() => setShowTimeSuggestModal(true)}
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginLeft: 32 }}
+                    >
+                      <Ionicons name="time-outline" size={18} color={Colors.textMuted} />
+                      <Text style={{ fontSize: 14, color: Colors.textMuted, fontFamily: Fonts.semiBold }}>
+                        Suggest a different time
+                      </Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+              ) : isMultiDay ? (
+                <View style={{ gap: 4 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                    <Ionicons name="calendar-outline" size={20} color={Colors.textSub} style={{ width: 22 }} />
                     <View style={{ flex: 1 }}>
                       <Text style={styles.infoText}>
-                        {fmtDateFull(evStart)}{ev.isAllDay ? '' : ` · ${fmtTime(evStart)}`}
+                        {fmtDateFull(evStart)}{displayEv.isAllDay ? '' : ` · ${fmtTime(evStart)}`}
                       </Text>
                       <Text style={[styles.infoText, { marginTop: 4 }]}>
-                        {fmtDateFull(evEnd)}{ev.isAllDay ? '' : ` · ${fmtTime(evEnd)}`}
+                        {fmtDateFull(evEnd)}{displayEv.isAllDay ? '' : ` · ${fmtTime(evEnd)}`}
                       </Text>
                     </View>
                   </View>
@@ -1149,7 +1975,7 @@ export default function EventDetailScreen() {
                 <View style={{ gap: 6 }}>
                   <InfoRow ionicon="calendar-outline">
                     {fmtDateFull(evStart)}
-                    {ev.isAllDay ? ' · All day' : ` · ${fmtTime(evStart)} – ${fmtTime(evEnd)}`}
+                    {displayEv.isAllDay ? ' · All day' : ` · ${fmtTime(evStart)} – ${fmtTime(evEnd)}`}
                   </InfoRow>
                   {canCollaborateActivities && !isPast && ev.createdBy !== currentUserId ? (
                     <TouchableOpacity
@@ -1164,25 +1990,66 @@ export default function EventDetailScreen() {
                   ) : null}
                 </View>
               )}
-              {(ev as { recurrenceRule?: string | null }).recurrenceRule?.trim() ? (
-                <InfoRow ionicon="repeat-outline">
-                  {formatRecurrenceSummary(
-                    (ev as { recurrenceRule?: string | null }).recurrenceRule,
-                    displayTiming.seriesStart
+              {canEdit ? (
+                <InfoRowSlot ionicon="location-outline">
+                  <TextInput
+                    value={draftLocation}
+                    onChangeText={setDraftLocation}
+                    placeholder="Location"
+                    placeholderTextColor={Colors.textMuted}
+                    style={styles.eventLocationInput}
+                    autoCapitalize="words"
+                  />
+                </InfoRowSlot>
+              ) : (
+                <InfoRow ionicon="location-outline">
+                  {displayEv.location?.trim() ? (
+                    displayEv.location.trim()
+                  ) : (
+                    <Text style={{ color: Colors.textMuted }}>None</Text>
                   )}
                 </InfoRow>
-              ) : null}
-              <InfoRow ionicon="location-outline">
-                {ev.location?.trim() ? ev.location.trim() : <Text style={{ color: Colors.textMuted }}>None</Text>}
-              </InfoRow>
-              {((ev.minAttendees || 0) > 0 || (ev.maxAttendees || 0) > 0) && (
-                <InfoRow ionicon="people-outline">
-                  {(ev.minAttendees || 0) > 0 && `Min ${ev.minAttendees}`}
-                  {(ev.minAttendees || 0) > 0 && (ev.maxAttendees || 0) > 0 && ' · '}
-                  {(ev.maxAttendees || 0) > 0 && `Max ${ev.maxAttendees}`}
-                  {(ev.maxAttendees || 0) > 0 && ev.enableWaitlist && ' · Waitlist enabled'}
-                </InfoRow>
               )}
+              {canEdit ? (
+                <InfoRowSlot ionicon="people-outline">
+                  <View>
+                    <View style={styles.detailCapacityRow}>
+                      <View style={styles.detailCapacityField}>
+                        <Text style={styles.detailCapacityLabel}>Min</Text>
+                        <TextInput
+                          value={draftMinAttendees}
+                          onChangeText={(t) => setDraftMinAttendees(t.replace(/[^0-9]/g, ''))}
+                          placeholder="None"
+                          placeholderTextColor={Colors.textMuted}
+                          style={styles.detailCapacityInput}
+                          keyboardType="number-pad"
+                        />
+                      </View>
+                      <View style={styles.detailCapacityField}>
+                        <Text style={styles.detailCapacityLabel}>Max</Text>
+                        <TextInput
+                          value={draftMaxAttendees}
+                          onChangeText={(t) => setDraftMaxAttendees(t.replace(/[^0-9]/g, ''))}
+                          placeholder="None"
+                          placeholderTextColor={Colors.textMuted}
+                          style={styles.detailCapacityInput}
+                          keyboardType="number-pad"
+                        />
+                      </View>
+                    </View>
+                    {draftMaxAttendees.trim() && displayEv.enableWaitlist ? (
+                      <Text style={styles.detailCapacityWaitlistHint}>Waitlist enabled</Text>
+                    ) : null}
+                  </View>
+                </InfoRowSlot>
+              ) : (displayEv.minAttendees || 0) > 0 || (displayEv.maxAttendees || 0) > 0 ? (
+                <InfoRow ionicon="people-outline">
+                  {(displayEv.minAttendees || 0) > 0 && `Min ${displayEv.minAttendees}`}
+                  {(displayEv.minAttendees || 0) > 0 && (displayEv.maxAttendees || 0) > 0 && ' · '}
+                  {(displayEv.maxAttendees || 0) > 0 && `Max ${displayEv.maxAttendees}`}
+                  {(displayEv.maxAttendees || 0) > 0 && displayEv.enableWaitlist && ' · Waitlist enabled'}
+                </InfoRow>
+              ) : null}
               <InfoRow ionicon="person-outline">Created by {getUserSafe(ev.createdBy).displayName}</InfoRow>
             </View>
 
@@ -1208,8 +2075,8 @@ export default function EventDetailScreen() {
                       </Text>
                       <Text style={{ fontSize: 14, fontFamily: Fonts.medium, color: Colors.text }}>
                         {fmtDateFull(ss)}
-                        {ev.isAllDay ? '' : ` · ${fmtTime(ss)}`} – {fmtDateFull(se)}
-                        {ev.isAllDay ? '' : ` · ${fmtTime(se)}`}
+                        {displayEv.isAllDay ? '' : ` · ${fmtTime(ss)}`} – {fmtDateFull(se)}
+                        {displayEv.isAllDay ? '' : ` · ${fmtTime(se)}`}
                       </Text>
                       {canResolveTimeSuggestions ? (
                         <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
@@ -1246,47 +2113,8 @@ export default function EventDetailScreen() {
             ) : null}
           </View>
 
-          <View style={{ paddingHorizontal: 20 }}>
-            {/* RSVP buttons */}
-            {!isPast && (
-              <>
-                <View style={{ flexDirection: 'row', gap: 8, marginBottom: 6 }}>
-                  <RsvpBtn 
-                    status={myRsvp?.status === 'waitlist' ? 'waitlist' : 'going'}
-                    active={myRsvp?.status === 'going' || myRsvp?.status === 'waitlist'} 
-                    disabled={isAtCapacity && !canGoGoing && !hasWaitlist}
-                    isWaitlist={isAtCapacity && !canGoGoing && hasWaitlist}
-                    onPress={() => applyRsvp(RSVPInput.status.GOING)} 
-                    onLongPress={() => setMemoFor(isAtCapacity && !canGoGoing && hasWaitlist ? RSVPInput.status.WAITLIST : RSVPInput.status.GOING)} 
-                  />
-                  {ev.allowMaybe && <RsvpBtn status="maybe"    active={myRsvp?.status === 'maybe'}    onPress={() => applyRsvp(RSVPInput.status.MAYBE)}    onLongPress={() => setMemoFor(RSVPInput.status.MAYBE)} />}
-                  <RsvpBtn status="notGoing" active={myRsvp?.status === 'notGoing'} onPress={() => applyRsvp(RSVPInput.status.NOT_GOING)} onLongPress={() => setMemoFor(RSVPInput.status.NOT_GOING)} />
-                </View>
-                {isAtCapacity && !canGoGoing && !hasWaitlist && (
-                  <Text style={styles.capacityHint}>Event has reached maximum capacity</Text>
-                )}
-                <Text style={styles.holdHint}>Hold to add a note</Text>
-              </>
-            )}
-
-            {/* Attendance row */}
-            <TouchableOpacity onPress={() => setShowAttend(true)} style={styles.attendRow}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                {going.length > 0 && (
-                  <UserAvatarStack
-                    userIds={going.map(r => r.userId)}
-                    getUser={getUserSafe}
-                    size={24}
-                    max={5}
-                    dotUserIds={Array.from(usersWithMemos)}
-                  />
-                )}
-                <Text style={styles.attendText}>{attendLabel || 'No responses yet'}</Text>
-              </View>
-              <Text style={{ color: Colors.textMuted, fontSize: 16 }}>›</Text>
-            </TouchableOpacity>
-
-            {activityOptions.length > 0 || canCollaborateActivities ? (
+          <View style={{ paddingHorizontal: 16, paddingBottom: 4 }}>
+            {activityIdeasEffective ? (
               <View style={styles.activitiesSection}>
                 <Text style={formSectionTitleStyle}>Activities</Text>
                 {canCollaborateActivities ? (
@@ -1300,7 +2128,7 @@ export default function EventDetailScreen() {
                 )}
                 {activityOptions.map((opt) => {
                   const selected = myActivityVoteOptionIds.includes(opt.id);
-                  const canRemoveOpt = opt.createdBy === currentUserId || canEdit;
+                  const canRemoveOpt = opt.createdBy === currentUserId || ev.createdBy === currentUserId;
                   return (
                     <View
                       key={opt.id}
@@ -1348,7 +2176,7 @@ export default function EventDetailScreen() {
                       onChangeText={setNewActivityLabel}
                       placeholder="Add an activity idea"
                       placeholderTextColor={Colors.textMuted}
-                      style={[styles.commentInput, { flex: 1 }]}
+                      style={[styles.commentInputField, styles.commentInput]}
                       onSubmitEditing={() => void submitNewActivityOption()}
                     />
                     <TouchableOpacity
@@ -1363,69 +2191,236 @@ export default function EventDetailScreen() {
               </View>
             ) : null}
           </View>
+            </View>
+          </View>
         </View>
 
-        {/* Photo gallery (past events) */}
-        {isPast && allPhotos.length > 0 && (
-          <View style={styles.galleryBlock}>
-            <Text style={styles.galleryTitle}>Photos · {allPhotos.length}</Text>
-            <View style={styles.galleryGrid}>
-              {allPhotos.map((ph, i) => (
-                <TouchableOpacity key={i} onPress={() => setLightbox(ph)} style={styles.galleryThumb}>
-                  <ResolvableImage
-                    storedUrl={ph.url}
-                    urlMap={resolvedImageMap}
-                    style={{ width: '100%', height: '100%' }}
-                    resizeMode="cover"
-                  />
-                </TouchableOpacity>
-              ))}
+        {canEdit ? (
+          <View style={[styles.eventScrollInset, styles.eventSectionGap]}>
+            <Text style={styles.eventSectionLabel}>Settings</Text>
+            <View style={styles.eventMainCard}>
+              <Toggle
+                value={draftAllowMaybe}
+                onChange={setDraftAllowMaybe}
+                label={"Allow 'Maybe' responses"}
+                style={styles.eventTogglePad}
+              />
+              <Toggle
+                value={draftActivityIdeasEnabled}
+                onChange={setDraftActivityIdeasEnabled}
+                label="Enable activity ideas"
+                style={styles.eventTogglePad}
+              />
+              <Toggle
+                value={draftRsvpDeadlineEnabled}
+                onChange={(v) => {
+                  if (v) {
+                    setDraftRsvpDeadlineEnabled(true);
+                    setDraftRsvpDeadlineDate((d) => (d.trim() ? d : draftEndDate));
+                    setDraftRsvpDeadlineTime('12:00');
+                  } else {
+                    setDraftRsvpDeadlineEnabled(false);
+                  }
+                }}
+                label="RSVP deadline"
+                style={[
+                  styles.eventTogglePad,
+                  draftRsvpDeadlineEnabled && { borderBottomWidth: 0 },
+                ]}
+              />
+              {draftRsvpDeadlineEnabled ? (
+                <View
+                  style={{
+                    paddingHorizontal: 16,
+                    paddingTop: 4,
+                    paddingBottom: 14,
+                  }}
+                >
+                  <View style={styles.detailEventTimeRow}>
+                    {Platform.OS === 'web' ? (
+                      <>
+                        <View style={[styles.detailEventTimeCell, styles.detailEventTimeFieldDate]}>
+                          <input
+                            type="date"
+                            value={draftRsvpDeadlineDate}
+                            onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                              setDraftRsvpDeadlineDate(e.target.value)
+                            }
+                            style={webDetailTimeInputStyle(false)}
+                          />
+                        </View>
+                        {!draftAllDay ? (
+                          <View style={[styles.detailEventTimeCell, styles.detailEventTimeFieldTime]}>
+                            <input
+                              type="time"
+                              value={draftRsvpDeadlineTime}
+                              onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                                setDraftRsvpDeadlineTime(e.target.value)
+                              }
+                              style={webDetailTimeInputStyle(false)}
+                            />
+                          </View>
+                        ) : null}
+                      </>
+                    ) : (
+                      <>
+                        <View style={[styles.detailEventTimeCell, styles.detailEventTimeFieldDate]}>
+                          <TouchableOpacity
+                            onPress={() => setShowDetailRsvpDeadlineDatePicker(true)}
+                            activeOpacity={0.85}
+                            style={styles.detailEventTimeSegment}
+                          >
+                            <Text style={styles.detailEventTimeSegmentText} numberOfLines={1}>
+                              {draftRsvpDeadlineDate}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                        {!draftAllDay ? (
+                          <View style={[styles.detailEventTimeCell, styles.detailEventTimeFieldTime]}>
+                            <TouchableOpacity
+                              onPress={() => setShowDetailRsvpDeadlineTimePicker(true)}
+                              activeOpacity={0.85}
+                              style={styles.detailEventTimeSegment}
+                            >
+                              <Text style={styles.detailEventTimeSegmentText} numberOfLines={1}>
+                                {draftRsvpDeadlineTime}
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                        ) : null}
+                      </>
+                    )}
+                  </View>
+                  {draftAllDay ? (
+                    <Text style={{ fontSize: 11, color: Colors.textMuted, marginTop: 6 }}>
+                      End of that calendar day
+                    </Text>
+                  ) : null}
+                </View>
+              ) : null}
             </View>
           </View>
-        )}
+        ) : null}
+
+        {/* RSVP + attendance summary */}
+        <View style={[styles.eventScrollInset, styles.eventSectionGap]}>
+          <Text style={styles.eventSectionLabel}>{rsvpSectionLabel}</Text>
+          <View style={styles.eventMainCard}>
+            <View style={{ paddingHorizontal: 16, paddingTop: 14 }}>
+              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 6 }}>
+                <RsvpBtn
+                  status={myRsvp?.status === 'waitlist' ? 'waitlist' : 'going'}
+                  active={myRsvp?.status === 'going' || myRsvp?.status === 'waitlist'}
+                  disabled={
+                    rsvpDeadlinePassed || (isAtCapacity && !canGoGoing && !hasWaitlist)
+                  }
+                  isWaitlist={isAtCapacity && !canGoGoing && hasWaitlist}
+                  onPress={() => applyRsvp(RSVPInput.status.GOING)}
+                  onLongPress={() =>
+                    setMemoFor(
+                      isAtCapacity && !canGoGoing && hasWaitlist
+                        ? RSVPInput.status.WAITLIST
+                        : RSVPInput.status.GOING
+                    )
+                  }
+                />
+                {showMaybeRsvp ? (
+                  <RsvpBtn
+                    status="maybe"
+                    active={myRsvp?.status === 'maybe'}
+                    disabled={rsvpDeadlinePassed}
+                    onPress={() => applyRsvp(RSVPInput.status.MAYBE)}
+                    onLongPress={() => setMemoFor(RSVPInput.status.MAYBE)}
+                  />
+                ) : null}
+                <RsvpBtn
+                  status="notGoing"
+                  active={myRsvp?.status === 'notGoing'}
+                  disabled={rsvpDeadlinePassed}
+                  onPress={() => applyRsvp(RSVPInput.status.NOT_GOING)}
+                  onLongPress={() => setMemoFor(RSVPInput.status.NOT_GOING)}
+                />
+              </View>
+              {rsvpDeadlinePassed ? (
+                <Text style={[styles.holdHint, { marginBottom: 6 }]}>
+                  RSVP deadline has passed — responses are closed
+                </Text>
+              ) : null}
+              {isAtCapacity && !canGoGoing && !hasWaitlist ? (
+                <Text style={styles.capacityHint}>Event has reached maximum capacity</Text>
+              ) : null}
+              {!rsvpDeadlinePassed ? (
+                <Text style={styles.holdHint}>Hold to add a note</Text>
+              ) : null}
+            </View>
+            <TouchableOpacity
+              onPress={() => setShowAttend(true)}
+              style={[styles.attendRow, styles.attendRowBorderTop]}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                {going.length > 0 ? (
+                  <UserAvatarStack
+                    userIds={going.map((r) => r.userId)}
+                    getUser={getUserSafe}
+                    size={24}
+                    max={5}
+                    dotUserIds={Array.from(usersWithMemos)}
+                  />
+                ) : null}
+                <Text style={styles.attendText}>{attendLabel || 'No responses yet'}</Text>
+              </View>
+              <Text style={{ color: Colors.textMuted, fontSize: 16 }}>›</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
 
         {/* Comments */}
-        <View style={styles.commentsBlock}>
-          <View style={styles.commentsSectionHeader}>
-            <Text style={formSectionTitleStyle}>
-              Comments{comments.length > 0 ? ` · ${comments.length}` : ''}
-            </Text>
-          </View>
-          {comments.length === 0 && (
-            <View style={{ padding: 28, alignItems: 'center', gap: 8 }}>
-              {isPast ? (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Ionicons name="camera-outline" size={18} color={Colors.textMuted} />
+        <View style={[styles.eventScrollInset, styles.eventSectionGap]}>
+          <Text style={styles.eventSectionLabel}>
+            Comments{comments.length > 0 ? ` · ${comments.length}` : ''}
+          </Text>
+          <View style={styles.eventMainCard}>
+            {comments.length === 0 ? (
+              <View style={styles.commentsEmptyInsideCard}>
+                {isPast ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Ionicons name="camera-outline" size={18} color={Colors.textMuted} />
+                    <Text style={{ fontSize: 14, color: Colors.textMuted, fontFamily: Fonts.regular }}>
+                      Share a photo or memory!
+                    </Text>
+                  </View>
+                ) : (
                   <Text style={{ fontSize: 14, color: Colors.textMuted, fontFamily: Fonts.regular }}>
-                    Share a photo or memory!
+                    No comments yet — be the first!
                   </Text>
-                </View>
-              ) : (
-                <Text style={{ fontSize: 14, color: Colors.textMuted, fontFamily: Fonts.regular }}>
-                  No comments yet — be the first!
-                </Text>
-              )}
-            </View>
-          )}
+                )}
+              </View>
+            ) : null}
           {comments.map((c, i) => {
             const commentTs = typeof c.createdAt === 'string' ? new Date(c.createdAt) : c.createdAt;
             const isMine = c.userId === currentUserId;
             const isAdminRemovedOnly = c.text === COMMENT_DELETED_BY_ADMIN_MSG;
             const canDelete = isMine || canModerateComments;
-            const canEditOwn = isMine && !!c.text && !isAdminRemovedOnly;
+            const canEditOwn =
+              isMine && !isAdminRemovedOnly && (!!((c.text || '').trim()) || c.photos.length > 0);
             const hasActions = canDelete || canEditOwn;
+            const editDraft = commentEditDrafts[c.id];
+            const isEditingThis = editDraft !== undefined;
+            const borderBelow = i < comments.length - 1 && styles.commentBorder;
+            const savingThisComment =
+              updateCommentMutation.isPending && updateCommentMutation.variables?.commentId === c.id;
             return (
             <Swipeable
               key={c.id}
               ref={refForCommentSwipe(c.id)}
-              enabled={hasActions}
+              enabled={hasActions && !isEditingThis}
               overshootRight={false}
               renderRightActions={() => (
                 <View style={styles.commentActions}>
                   {canEditOwn ? (
                     <TouchableOpacity
                       style={[styles.commentActionBtn, styles.commentActionEdit]}
-                      onPress={() => beginEditComment(c.id, c.text)}
+                      onPress={() => beginEditComment(c.id, c.text, c.photos)}
                     >
                       <Ionicons name="pencil-outline" size={16} color="#fff" />
                       <Text style={styles.commentActionText}>Edit</Text>
@@ -1444,28 +2439,126 @@ export default function EventDetailScreen() {
               )}
             >
               {isAdminRemovedOnly ? (
-                <View style={[styles.commentAdminRemovedRow, i < comments.length - 1 && styles.commentBorder]}>
+                <View style={[styles.commentAdminRemovedRow, borderBelow]}>
                   <Text style={styles.commentAdminRemovedOnly}>{COMMENT_DELETED_BY_ADMIN_MSG}</Text>
                 </View>
+              ) : isEditingThis && editDraft ? (
+                <View style={[styles.commentRow, borderBelow]}>
+                  <Avatar name={getUserSafe(c.userId).displayName} size={34} />
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
+                      <Text style={[styles.commentName, c.userId === currentUserId && { color: Colors.going }]}>
+                        {getUserSafe(c.userId).displayName}
+                      </Text>
+                      <Text style={styles.commentTime}>{timeAgo(commentTs)}</Text>
+                    </View>
+                    {editDraft.photos.length > 0 ? (
+                      <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        style={styles.commentInlineEditPhotoStrip}
+                        contentContainerStyle={styles.commentInlineEditPhotoStripContent}
+                        nestedScrollEnabled
+                      >
+                        {editDraft.photos.map((p, pi) => (
+                          <View key={p.id} style={styles.commentInlineEditPhotoWrap}>
+                            <TouchableOpacity
+                              activeOpacity={0.85}
+                              onPress={() =>
+                                setPendingPreviewLightbox({
+                                  urls: editDraft.photos.map((x) => x.uri),
+                                  index: pi,
+                                })
+                              }
+                              style={styles.pendingPhotoHit}
+                            >
+                              <ResolvableImage storedUrl={p.uri} style={styles.pendingPhoto} resizeMode="cover" />
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              onPress={() => removePendingPhoto(c.id, p)}
+                              style={styles.pendingPhotoRemove}
+                            >
+                              <Ionicons name="close" size={11} color="#fff" />
+                            </TouchableOpacity>
+                          </View>
+                        ))}
+                      </ScrollView>
+                    ) : null}
+                    <View style={styles.commentInlineEditBlock}>
+                      <CommentMentionInput
+                        stacked
+                        value={editDraft.text}
+                        onChangeText={(t) => updateEditDraftText(c.id, t)}
+                        members={mentionMembersForInput}
+                        currentUserId={currentUserId}
+                        placeholder={isPast ? 'Memory… (@ to mention)' : 'Comment… (@ to mention)'}
+                        placeholderTextColor={Colors.textMuted}
+                        style={[styles.commentInputField, styles.commentInlineEditInput]}
+                        onSubmitEditing={() => void saveCommentEdit(c.id)}
+                        multiline
+                        scrollEnabled
+                        autoFocus
+                        textAlignVertical="top"
+                      />
+                      <View style={styles.commentInlineEditToolbar}>
+                        <TouchableOpacity
+                          onPress={() => onCommentPhotoButtonPress(c.id)}
+                          onLongPress={() => openCommentPhotoUrlModal(c.id)}
+                          delayLongPress={350}
+                          style={styles.photoBtn}
+                        >
+                          <Ionicons name="camera-outline" size={20} color={Colors.textSub} />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => cancelEditComment(c.id)}
+                          style={styles.commentInlineEditCancel}
+                        >
+                          <Text style={styles.commentInlineEditCancelText}>Cancel</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => void saveCommentEdit(c.id)}
+                          disabled={
+                            savingThisComment || !(editDraft.text.trim() || editDraft.photos.length)
+                          }
+                          style={[
+                            styles.postBtn,
+                            (savingThisComment || !(editDraft.text.trim() || editDraft.photos.length)) &&
+                              styles.postBtnDisabled,
+                          ]}
+                        >
+                          <Text style={styles.postBtnText}>Save</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </View>
+                </View>
               ) : (
-                <View style={[styles.commentRow, i < comments.length - 1 && styles.commentBorder]}>
+                <View style={[styles.commentRow, borderBelow]}>
                   <Avatar name={getUserSafe(c.userId).displayName} size={34} />
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, marginBottom: 3 }}>
                       <Text style={[styles.commentName, c.userId === currentUserId && { color: Colors.going }]}>{getUserSafe(c.userId).displayName}</Text>
                       <Text style={styles.commentTime}>{timeAgo(commentTs)}</Text>
                     </View>
-                    {!!c.text && <CommentMentionText text={c.text} style={styles.commentText} />}
                     {c.photos.length > 0 && (
-                      <View style={{ marginTop: c.text ? 8 : 0 }}>
-                        <CommentPhotoGallery
-                          photos={c.photos}
-                          urlMap={resolvedImageMap}
-                          onPhotoPress={(url) =>
-                            setLightbox({ url, name: getUserSafe(c.userId).displayName, ts: commentTs })
-                          }
-                        />
-                      </View>
+                      <CommentPhotoGallery
+                        photos={c.photos}
+                        urlMap={resolvedImageMap}
+                        onPhotoPress={(url, photoIndex) =>
+                          setLightbox({
+                            urls: c.photos,
+                            index: photoIndex,
+                            name: getUserSafe(c.userId).displayName,
+                            ts: commentTs,
+                          })
+                        }
+                      />
+                    )}
+                    {!!(c.text || '').trim() && (
+                      <CommentMentionText
+                        text={c.text}
+                        style={[styles.commentText, c.photos.length > 0 && { marginTop: 8 }]}
+                      />
                     )}
                   </View>
                 </View>
@@ -1473,85 +2566,87 @@ export default function EventDetailScreen() {
             </Swipeable>
             );
           })}
+          </View>
         </View>
 
         <View style={{ height: 100 }} />
       </ScrollView>
 
-      {/* Comment input */}
       <View style={styles.inputBar}>
-        {editingCommentId ? (
-          <View style={styles.editingBar}>
-            <Text style={styles.editingBarText}>Editing comment</Text>
-            <TouchableOpacity
-              onPress={() => {
-                if (editingCommentId) closeCommentSwipe(editingCommentId);
-                setEditingCommentId(null);
-                setInput('');
-              }}
-            >
-              <Text style={styles.editingBarCancel}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        ) : null}
-        {pendingPhotos.length > 0 && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }} contentContainerStyle={{ gap: 6 }}>
-            {pendingPhotos.map((p) => (
+        {composerPendingPhotos.length > 0 && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={{ marginBottom: 8 }}
+            contentContainerStyle={{ gap: 6 }}
+          >
+            {composerPendingPhotos.map((p, pi) => (
               <View key={p.id} style={{ position: 'relative' }}>
                 <TouchableOpacity
                   activeOpacity={0.85}
-                  onPress={() => setPendingPreviewLightbox(p.uri)}
+                  onPress={() =>
+                    setPendingPreviewLightbox({
+                      urls: composerPendingPhotos.map((x) => x.uri),
+                      index: pi,
+                    })
+                  }
                   style={styles.pendingPhotoHit}
                 >
                   <ResolvableImage storedUrl={p.uri} style={styles.pendingPhoto} resizeMode="cover" />
                 </TouchableOpacity>
-                <TouchableOpacity onPress={() => removePendingPhoto(p)} style={styles.pendingPhotoRemove}>
+                <TouchableOpacity
+                  onPress={() => removePendingPhoto('composer', p)}
+                  style={styles.pendingPhotoRemove}
+                >
                   <Ionicons name="close" size={11} color="#fff" />
                 </TouchableOpacity>
               </View>
             ))}
           </ScrollView>
         )}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          {Platform.OS === 'web' && (
-            <input
-              ref={(el) => {
-                commentPhotoFileInputRef.current = el;
-              }}
-              type="file"
-              accept="image/*"
-              style={{ display: 'none' }}
-              onChange={onCommentWebPhotoChange}
-            />
-          )}
+        <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
           <TouchableOpacity
-            onPress={onCommentPhotoButtonPress}
-            onLongPress={() => setShowCommentPhotoModal(true)}
+            onPress={() => onCommentPhotoButtonPress()}
+            onLongPress={() => openCommentPhotoUrlModal('composer')}
             delayLongPress={350}
             style={styles.photoBtn}
           >
             <Ionicons name="camera-outline" size={20} color={Colors.textSub} />
           </TouchableOpacity>
           <CommentMentionInput
-            value={input}
-            onChangeText={setInput}
+            value={composerInput}
+            onChangeText={setComposerInput}
             members={mentionMembersForInput}
             currentUserId={currentUserId}
             placeholder={isPast ? 'Add a memory or photo… (@ to mention)' : 'Add a comment… (@ to mention)'}
             placeholderTextColor={Colors.textMuted}
-            style={[styles.commentInput, { flex: 1, minWidth: 120 }]}
+            style={[
+              styles.commentInputField,
+              styles.commentInput,
+              styles.commentComposerInput,
+              { height: composerFieldHeight },
+            ]}
             onSubmitEditing={postComment}
+            multiline
+            scrollEnabled={composerFieldHeight >= COMPOSER_INPUT_MAX_H - 2}
+            onContentSizeChange={onComposerInputContentSizeChange}
+            textAlignVertical="top"
+            {...(Platform.OS === 'web'
+              ? ({ rows: 1 } as { rows: number })
+              : { numberOfLines: 1 })}
           />
           <TouchableOpacity
             onPress={postComment}
             disabled={commentPostBusy || createCommentMutation.isPending}
             style={[
               styles.postBtn,
-              (!(input.trim() || pendingPhotos.length) || commentPostBusy || createCommentMutation.isPending) &&
+              (!(composerInput.trim() || composerPendingPhotos.length) ||
+                commentPostBusy ||
+                createCommentMutation.isPending) &&
                 styles.postBtnDisabled,
             ]}
           >
-            <Text style={styles.postBtnText}>{editingCommentId ? 'Save' : 'Post'}</Text>
+            <Text style={styles.postBtnText}>Post</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -1570,11 +2665,55 @@ export default function EventDetailScreen() {
             >
               <Ionicons name="close" size={22} color="#fff" />
             </TouchableOpacity>
+            {pendingPreviewLightbox.urls.length > 1 ? (
+              <>
+                <TouchableOpacity
+                  accessibilityLabel="Previous photo"
+                  onPress={() =>
+                    setPendingPreviewLightbox((prev) =>
+                      prev && prev.index > 0 ? { ...prev, index: prev.index - 1 } : prev
+                    )
+                  }
+                  disabled={pendingPreviewLightbox.index <= 0}
+                  style={[
+                    styles.lightboxNavBtn,
+                    styles.lightboxNavPrev,
+                    pendingPreviewLightbox.index <= 0 && styles.lightboxNavBtnDisabled,
+                  ]}
+                >
+                  <Ionicons name="chevron-back" size={28} color="#fff" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  accessibilityLabel="Next photo"
+                  onPress={() =>
+                    setPendingPreviewLightbox((prev) =>
+                      prev && prev.index < prev.urls.length - 1
+                        ? { ...prev, index: prev.index + 1 }
+                        : prev
+                    )
+                  }
+                  disabled={pendingPreviewLightbox.index >= pendingPreviewLightbox.urls.length - 1}
+                  style={[
+                    styles.lightboxNavBtn,
+                    styles.lightboxNavNext,
+                    pendingPreviewLightbox.index >= pendingPreviewLightbox.urls.length - 1 &&
+                      styles.lightboxNavBtnDisabled,
+                  ]}
+                >
+                  <Ionicons name="chevron-forward" size={28} color="#fff" />
+                </TouchableOpacity>
+              </>
+            ) : null}
             <ResolvableImage
-              storedUrl={pendingPreviewLightbox}
+              storedUrl={pendingPreviewLightbox.urls[pendingPreviewLightbox.index] ?? ''}
               style={styles.lightboxImg}
               resizeMode="contain"
             />
+            {pendingPreviewLightbox.urls.length > 1 ? (
+              <Text style={styles.lightboxCounter}>
+                {pendingPreviewLightbox.index + 1} / {pendingPreviewLightbox.urls.length}
+              </Text>
+            ) : null}
           </View>
         </Modal>
       )}
@@ -1601,15 +2740,57 @@ export default function EventDetailScreen() {
                 <Avatar name={lightbox.name} size={28} />
                 <View>
                   <Text style={styles.lightboxName}>{lightbox.name}</Text>
-                  <Text style={styles.lightboxTime}>{timeAgo(lightbox.ts)}</Text>
+                  <Text style={styles.lightboxTime}>
+                    {lightbox.urls.length > 1
+                      ? `${lightbox.index + 1} of ${lightbox.urls.length} · ${timeAgo(lightbox.ts)}`
+                      : timeAgo(lightbox.ts)}
+                  </Text>
                 </View>
               </View>
               <TouchableOpacity onPress={() => setLightbox(null)} style={styles.lightboxBtn}>
                 <Ionicons name="close" size={22} color="#fff" />
               </TouchableOpacity>
             </View>
+            {lightbox.urls.length > 1 ? (
+              <>
+                <TouchableOpacity
+                  accessibilityLabel="Previous photo"
+                  onPress={() =>
+                    setLightbox((prev) =>
+                      prev && prev.index > 0 ? { ...prev, index: prev.index - 1 } : prev
+                    )
+                  }
+                  disabled={lightbox.index <= 0}
+                  style={[
+                    styles.lightboxNavBtn,
+                    styles.lightboxNavPrev,
+                    lightbox.index <= 0 && styles.lightboxNavBtnDisabled,
+                  ]}
+                >
+                  <Ionicons name="chevron-back" size={28} color="#fff" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  accessibilityLabel="Next photo"
+                  onPress={() =>
+                    setLightbox((prev) =>
+                      prev && prev.index < prev.urls.length - 1
+                        ? { ...prev, index: prev.index + 1 }
+                        : prev
+                    )
+                  }
+                  disabled={lightbox.index >= lightbox.urls.length - 1}
+                  style={[
+                    styles.lightboxNavBtn,
+                    styles.lightboxNavNext,
+                    lightbox.index >= lightbox.urls.length - 1 && styles.lightboxNavBtnDisabled,
+                  ]}
+                >
+                  <Ionicons name="chevron-forward" size={28} color="#fff" />
+                </TouchableOpacity>
+              </>
+            ) : null}
             <ResolvableImage
-              storedUrl={lightbox.url}
+              storedUrl={lightbox.urls[lightbox.index] ?? ''}
               urlMap={resolvedImageMap}
               style={styles.lightboxImg}
               resizeMode="contain"
@@ -1641,7 +2822,7 @@ export default function EventDetailScreen() {
               autoCapitalize="none"
               autoCorrect={false}
               keyboardType="url"
-              style={[styles.commentInput, { marginTop: 12 }]}
+              style={[styles.commentInputField, { marginTop: 12 }]}
             />
             <View style={styles.deleteActions}>
               <TouchableOpacity
@@ -1661,35 +2842,235 @@ export default function EventDetailScreen() {
         </View>
       </Modal>
 
+      {Platform.OS !== 'web' && showDetailStartDatePicker ? (
+        <DateTimePicker
+          value={draftStartDate ? new Date(draftStartDate) : new Date()}
+          mode="date"
+          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+          onChange={handleDetailStartDateChange}
+          minimumDate={new Date()}
+        />
+      ) : null}
+      {Platform.OS === 'ios' && showDetailStartDatePicker ? (
+        <View style={styles.detailDatePickerActions}>
+          <TouchableOpacity onPress={() => setShowDetailStartDatePicker(false)} style={styles.detailDatePickerBtn}>
+            <Text style={styles.detailDatePickerBtnText}>Done</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
+      {Platform.OS !== 'web' && showDetailEndDatePicker ? (
+        <DateTimePicker
+          value={draftEndDate ? new Date(draftEndDate) : new Date()}
+          mode="date"
+          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+          onChange={handleDetailEndDateChange}
+          minimumDate={draftStartDate ? new Date(draftStartDate) : new Date()}
+        />
+      ) : null}
+      {Platform.OS === 'ios' && showDetailEndDatePicker ? (
+        <View style={styles.detailDatePickerActions}>
+          <TouchableOpacity onPress={() => setShowDetailEndDatePicker(false)} style={styles.detailDatePickerBtn}>
+            <Text style={styles.detailDatePickerBtnText}>Done</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
+      {Platform.OS !== 'web' && showDetailStartTimePicker ? (
+        <DateTimePicker
+          value={detailGetTimeDate(draftStartTime)}
+          mode="time"
+          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+          onChange={handleDetailStartTimeChange}
+          minimumDate={getDetailMinimumStartTime()}
+        />
+      ) : null}
+      {Platform.OS === 'ios' && showDetailStartTimePicker ? (
+        <View style={styles.detailDatePickerActions}>
+          <TouchableOpacity onPress={() => setShowDetailStartTimePicker(false)} style={styles.detailDatePickerBtn}>
+            <Text style={styles.detailDatePickerBtnText}>Done</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
+      {Platform.OS !== 'web' && showDetailEndTimePicker ? (
+        <DateTimePicker
+          value={detailGetTimeDate(draftEndTime)}
+          mode="time"
+          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+          onChange={handleDetailEndTimeChange}
+          minimumDate={getDetailMinimumEndTime()}
+        />
+      ) : null}
+      {Platform.OS === 'ios' && showDetailEndTimePicker ? (
+        <View style={styles.detailDatePickerActions}>
+          <TouchableOpacity onPress={() => setShowDetailEndTimePicker(false)} style={styles.detailDatePickerBtn}>
+            <Text style={styles.detailDatePickerBtnText}>Done</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
+      {Platform.OS !== 'web' && showDetailRsvpDeadlineDatePicker ? (
+        <DateTimePicker
+          value={draftRsvpDeadlineDate ? new Date(draftRsvpDeadlineDate) : new Date()}
+          mode="date"
+          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+          onChange={handleDetailRsvpDeadlineDateChange}
+        />
+      ) : null}
+      {Platform.OS === 'ios' && showDetailRsvpDeadlineDatePicker ? (
+        <View style={styles.detailDatePickerActions}>
+          <TouchableOpacity
+            onPress={() => setShowDetailRsvpDeadlineDatePicker(false)}
+            style={styles.detailDatePickerBtn}
+          >
+            <Text style={styles.detailDatePickerBtnText}>Done</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
+      {Platform.OS !== 'web' && showDetailRsvpDeadlineTimePicker ? (
+        <DateTimePicker
+          value={detailGetTimeDate(draftRsvpDeadlineTime)}
+          mode="time"
+          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+          onChange={handleDetailRsvpDeadlineTimeChange}
+        />
+      ) : null}
+      {Platform.OS === 'ios' && showDetailRsvpDeadlineTimePicker ? (
+        <View style={styles.detailDatePickerActions}>
+          <TouchableOpacity
+            onPress={() => setShowDetailRsvpDeadlineTimePicker(false)}
+            style={styles.detailDatePickerBtn}
+          >
+            <Text style={styles.detailDatePickerBtnText}>Done</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
+      <Modal
+        visible={showDetailSaveScopeModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => !updateEventMutation.isPending && setShowDetailSaveScopeModal(false)}
+      >
+        <View style={styles.deleteOverlay}>
+          <View style={[styles.deleteBox, styles.detailSaveScopeModalBox]}>
+            <Text style={styles.deleteTitle}>Save changes</Text>
+            <Text style={[styles.deleteMessage, { marginBottom: 12 }]}>
+              Choose how to apply your edits to this repeating event.
+            </Text>
+            <View style={styles.detailScopeSettingsCard}>
+              {SERIES_SCOPE_OPTIONS.map((opt, i) => {
+                const sel = detailSeriesUpdateScope === opt.key;
+                return (
+                  <TouchableOpacity
+                    key={opt.key}
+                    onPress={() => !updateEventMutation.isPending && setDetailSeriesUpdateScope(opt.key)}
+                    style={[
+                      styles.detailScopeRow,
+                      i > 0 && styles.detailScopeRowBorderTop,
+                      sel && styles.detailScopeRowSelected,
+                    ]}
+                    activeOpacity={0.85}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: sel }}
+                  >
+                    <View style={[styles.detailScopeRadioOuter, sel && styles.detailScopeRadioOuterOn]}>
+                      {sel ? <View style={styles.detailScopeRadioInner} /> : null}
+                    </View>
+                    <View style={styles.detailScopeTextCol}>
+                      <Text style={styles.detailScopeTitle}>{opt.title}</Text>
+                      <Text style={styles.detailScopeSub}>{opt.sub}</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <View style={[styles.detailSaveScopeModalActions, { marginTop: 18 }]}>
+              <TouchableOpacity
+                onPress={() => setShowDetailSaveScopeModal(false)}
+                style={[styles.deleteCancelBtn, { flex: 1 }]}
+                disabled={updateEventMutation.isPending}
+              >
+                <Text style={styles.deleteCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => void executeDetailSave(detailSeriesUpdateScope)}
+                style={[
+                  styles.draftBarBtnPrimary,
+                  { flex: 1, paddingVertical: 12 },
+                  updateEventMutation.isPending && styles.draftBarBtnPrimaryDisabled,
+                ]}
+                disabled={updateEventMutation.isPending}
+              >
+                {updateEventMutation.isPending ? (
+                  <ActivityIndicator size="small" color={Colors.accentFg} />
+                ) : (
+                  <Text style={styles.draftBarBtnPrimaryText}>Save</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <Modal visible={showDeleteConfirm} transparent animationType="fade" onRequestClose={() => setShowDeleteConfirm(false)}>
         <View style={styles.deleteOverlay}>
-          <View style={[styles.deleteBox, displayTiming.isRecurring && { maxWidth: 340 }]}>
+          <View style={[styles.deleteBox, displayTiming.isRecurring && { maxWidth: 360 }]}>
             <Text style={styles.deleteTitle}>
-              {displayTiming.isRecurring ? 'Remove repeating event' : 'Delete Event'}
-            </Text>
-            <Text style={styles.deleteMessage}>
-              {displayTiming.isRecurring
-                ? 'Remove only this date from the series, or delete every occurrence.'
-                : 'Are you sure you want to delete this event? This action cannot be undone.'}
+              Delete event
             </Text>
             {displayTiming.isRecurring ? (
-              <View style={{ gap: 10, marginBottom: 8 }}>
+              <View style={{ gap: 10 }}>
                 <TouchableOpacity
-                  onPress={handleExcludeThisOccurrence}
-                  style={[styles.deleteConfirmBtn, { flex: undefined, width: '100%' }]}
-                  disabled={excludeOccurrenceMutation.isPending}
+                  onPress={handleDeleteThisOccurrenceOnly}
+                  style={[
+                    styles.deleteConfirmBtn,
+                    {
+                      flex: undefined,
+                      width: '100%',
+                      backgroundColor: 'transparent',
+                      borderWidth: 1,
+                      borderColor: '#EF4444',
+                    },
+                  ]}
+                  disabled={
+                    truncateSeriesMutation.isPending ||
+                    deleteEventMutation.isPending ||
+                    deleteRecurrenceSeriesMutation.isPending
+                  }
+                >
+                  <Text style={[styles.deleteConfirmText, { color: '#EF4444' }]}>
+                    {deleteEventMutation.isPending ? 'Removing…' : 'Only this event'}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={handleTruncateSeriesFromHere}
+                  style={[styles.deleteConfirmBtn, { flex: undefined, width: '100%', backgroundColor: '#EA580C' }]}
+                  disabled={
+                    truncateSeriesMutation.isPending ||
+                    deleteEventMutation.isPending ||
+                    deleteRecurrenceSeriesMutation.isPending
+                  }
                 >
                   <Text style={styles.deleteConfirmText}>
-                    {excludeOccurrenceMutation.isPending ? 'Removing…' : 'This occurrence only'}
+                    {truncateSeriesMutation.isPending ? 'Updating…' : 'This and following events in the series'}
                   </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   onPress={handleDeleteEntireSeries}
-                  style={[styles.deleteConfirmBtn, { flex: undefined, width: '100%', backgroundColor: '#B91C1C' }]}
-                  disabled={deleteEventMutation.isPending}
+                  style={[styles.deleteConfirmBtn, { flex: undefined, width: '100%' }]}
+                  disabled={
+                    truncateSeriesMutation.isPending ||
+                    deleteEventMutation.isPending ||
+                    deleteRecurrenceSeriesMutation.isPending
+                  }
                 >
                   <Text style={styles.deleteConfirmText}>
-                    {deleteEventMutation.isPending ? 'Deleting…' : 'Entire series'}
+                    {deleteRecurrenceSeriesMutation.isPending || deleteEventMutation.isPending
+                      ? 'Deleting…'
+                      : 'All events in the series'}
                   </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
@@ -1794,21 +3175,21 @@ export default function EventDetailScreen() {
                   <TextInput
                     value={suggestStartDate}
                     editable={false}
-                    style={styles.commentInput}
+                    style={styles.commentInputField}
                     placeholder="Date"
                   />
                 </TouchableOpacity>
                 <Text style={{ fontSize: 12, fontFamily: Fonts.semiBold, color: Colors.textMuted, marginBottom: 6 }}>Start time</Text>
                 <TouchableOpacity onPress={() => setShowSuggestStartTimePicker(true)} style={{ marginBottom: 12 }}>
-                  <TextInput value={suggestStartTime} editable={false} style={styles.commentInput} />
+                  <TextInput value={suggestStartTime} editable={false} style={styles.commentInputField} />
                 </TouchableOpacity>
                 <Text style={{ fontSize: 12, fontFamily: Fonts.semiBold, color: Colors.textMuted, marginBottom: 6 }}>End date</Text>
                 <TouchableOpacity onPress={() => setShowSuggestEndDatePicker(true)} style={{ marginBottom: 12 }}>
-                  <TextInput value={suggestEndDate} editable={false} style={styles.commentInput} />
+                  <TextInput value={suggestEndDate} editable={false} style={styles.commentInputField} />
                 </TouchableOpacity>
                 <Text style={{ fontSize: 12, fontFamily: Fonts.semiBold, color: Colors.textMuted, marginBottom: 6 }}>End time</Text>
                 <TouchableOpacity onPress={() => setShowSuggestEndTimePicker(true)} style={{ marginBottom: 8 }}>
-                  <TextInput value={suggestEndTime} editable={false} style={styles.commentInput} />
+                  <TextInput value={suggestEndTime} editable={false} style={styles.commentInputField} />
                 </TouchableOpacity>
                 {showSuggestStartDatePicker ? (
                   <DateTimePicker
@@ -1887,15 +3268,31 @@ export default function EventDetailScreen() {
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </View>
+    </EventFormPopoverChrome>
   );
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
+function InfoRowSlot({
+  ionicon,
+  children,
+}: {
+  ionicon: React.ComponentProps<typeof Ionicons>['name'];
+  children: React.ReactNode;
+}) {
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+      <Ionicons name={ionicon} size={20} color={Colors.textSub} style={{ width: 22 }} />
+      <View style={{ flex: 1, minWidth: 0 }}>{children}</View>
+    </View>
+  );
+}
+
 function InfoRow({ ionicon, children }: { ionicon: React.ComponentProps<typeof Ionicons>['name']; children: React.ReactNode }) {
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
-      <Ionicons name={ionicon} size={20} color={Colors.textSub} style={{ width: 22, marginTop: 1 }} />
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+      <Ionicons name={ionicon} size={20} color={Colors.textSub} style={{ width: 22 }} />
       <Text style={styles.infoText}>{children}</Text>
     </View>
   );
@@ -2076,7 +3473,7 @@ function MemoSheet({ status, existing, onConfirm, onClose }: { status: RSVPInput
         placeholder={isGoing ? 'e.g. might be a little late!' : "e.g. out of town this weekend"}
         placeholderTextColor={Colors.textMuted}
         maxLength={60}
-        style={[styles.commentInput, { marginBottom: 12 }]}
+        style={[styles.commentInputField, { marginBottom: 12 }]}
       />
       <TouchableOpacity onPress={() => onConfirm(val.trim())} style={[styles.rsvpBtn, { flex: 0, backgroundColor: color, borderColor: color, paddingVertical: 13, marginBottom: 8 }]}>
         <Text style={[styles.rsvpBtnText, { color: '#fff', fontFamily: Fonts.bold, fontSize: 15 }]}>Confirm — {label}</Text>
@@ -2095,14 +3492,184 @@ const styles = StyleSheet.create({
   errorContainer:   { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   errorText:        { fontSize: 16, fontFamily: Fonts.medium, color: Colors.textMuted },
   safe:             { flex: 1, backgroundColor: Colors.bg },
-  nav:              { flexDirection: 'row', alignItems: 'center', padding: 13, paddingHorizontal: 20, backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border },
-  navBack:          { marginRight: 12 },
-  navBackText:      { fontSize: 14, color: Colors.textSub, fontFamily: Fonts.medium },
-  navIconBtn:       { marginRight: 8, padding: 6 },
-  navGroup:         { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  groupChipAboveTitle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'flex-start',
+    maxWidth: '100%',
+    marginBottom: 10,
+    paddingVertical: 4,
+    paddingRight: 4,
+  },
   groupDot:         { width: 8, height: 8, borderRadius: 4 },
-  navGroupName:     { fontSize: 13, color: Colors.textSub, fontFamily: Fonts.medium },
-  eventBlock:       { backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border },
+  navGroupName:     { fontSize: 13, color: Colors.textSub, fontFamily: Fonts.medium, flexShrink: 1 },
+  navEditActions:   { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 0 },
+  draftBarBtnSecondary: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.bg,
+  },
+  draftBarBtnSecondaryText: { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.text },
+  draftBarBtnPrimary: {
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+    borderRadius: Radius.lg,
+    backgroundColor: Colors.accent,
+    minWidth: 72,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  draftBarBtnPrimaryDisabled: { opacity: 0.45 },
+  draftBarBtnPrimaryText: { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.accentFg },
+  detailTimeSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+    width: '100%',
+  },
+  detailTimeHeading: { marginBottom: 0 },
+  detailAllDayChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingVertical: 3,
+    paddingHorizontal: 9,
+    borderRadius: Radius.full,
+    backgroundColor: Colors.bg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  detailAllDayChipText: { fontSize: 12, fontFamily: Fonts.medium, color: Colors.textSub },
+  detailAllDayChipTextActive: { color: Colors.text },
+  detailAllDayCheckbox: {
+    width: 18,
+    height: 18,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    backgroundColor: Colors.bg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  detailAllDayCheckboxActive: { backgroundColor: Colors.accent, borderColor: Colors.accent },
+  detailEventTimeStack: { width: '100%', gap: 14, marginTop: 4 },
+  detailEventTimeLine: { width: '100%' },
+  detailEventTimeLineLabel: {
+    fontSize: 12,
+    fontFamily: Fonts.medium,
+    color: Colors.textMuted,
+    marginBottom: 4,
+  },
+  detailEventTimeRow: {
+    width: '100%',
+    flexDirection: 'row',
+    flexWrap: 'nowrap',
+    alignItems: 'stretch',
+    gap: 6,
+  },
+  detailEventTimeCell: { minWidth: 0, justifyContent: 'center' },
+  detailEventTimeFieldDate: { flexGrow: 3, flexShrink: 1, flexBasis: 0, alignSelf: 'stretch' },
+  detailEventTimeFieldTime: { flexGrow: 2, flexShrink: 1, flexBasis: 0, alignSelf: 'stretch' },
+  detailEventTimeSegment: {
+    width: '100%',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: Radius.md,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    backgroundColor: Colors.bg,
+    justifyContent: 'center',
+    minHeight: 40,
+  },
+  detailEventTimeSegmentError: { borderColor: '#EF4444' },
+  detailEventTimeSegmentText: {
+    fontSize: 13,
+    fontFamily: Fonts.medium,
+    color: Colors.text,
+  },
+  detailTimeError: {
+    fontSize: 12,
+    color: '#EF4444',
+    fontFamily: Fonts.regular,
+    marginTop: 6,
+  },
+  detailDatePickerActions: { flexDirection: 'row', justifyContent: 'flex-end', paddingVertical: 8 },
+  detailDatePickerBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: Radius.lg,
+    backgroundColor: Colors.accent,
+  },
+  detailDatePickerBtnText: { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.accentFg },
+  detailSaveScopeModalBox: { maxWidth: 400 },
+  detailSaveScopeModalActions: { flexDirection: 'row', gap: 12, alignItems: 'stretch' },
+  detailScopeSettingsCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.xl,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    overflow: 'hidden',
+  },
+  detailScopeRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+  },
+  detailScopeRowBorderTop: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.border,
+  },
+  detailScopeRowSelected: { backgroundColor: Colors.bg },
+  detailScopeRadioOuter: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: Colors.border,
+    marginTop: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  detailScopeRadioOuterOn: { borderColor: Colors.accent },
+  detailScopeRadioInner: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: Colors.accent,
+  },
+  detailScopeTextCol: { flex: 1, minWidth: 0 },
+  detailScopeTitle: { fontSize: 15, fontFamily: Fonts.semiBold, color: Colors.text },
+  detailScopeSub: {
+    fontSize: 13,
+    fontFamily: Fonts.regular,
+    color: Colors.textMuted,
+    marginTop: 4,
+    lineHeight: 18,
+  },
+  eventScrollView:  { flex: 1, backgroundColor: Colors.bg },
+  eventScrollContent: { flexGrow: 1, backgroundColor: Colors.bg, paddingBottom: 8 },
+  eventBlock:       { backgroundColor: 'transparent' },
+  eventMainCardWrap:{ marginHorizontal: 20, marginTop: 10, marginBottom: 4 },
+  eventMainCard:    { backgroundColor: Colors.surface, borderRadius: Radius['2xl'], overflow: 'hidden' },
+  eventScrollInset: { marginHorizontal: 20, marginBottom: 4 },
+  eventSectionGap:  { marginTop: 14 },
+  eventSectionLabel: {
+    fontSize: 11,
+    fontFamily: Fonts.semiBold,
+    color: Colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 10,
+  },
+  eventTogglePad:   { paddingHorizontal: 16 },
+  commentsEmptyInsideCard: { paddingVertical: 28, paddingHorizontal: 16, alignItems: 'center', gap: 8 },
   bannerStack:      { paddingHorizontal: 20, paddingTop: 10, gap: 5 },
   bannerInner:      { paddingVertical: 6, paddingHorizontal: 10, borderRadius: Radius.md },
   bannerAmber:      { backgroundColor: '#FFFBEB', borderWidth: 1, borderColor: '#FDE68A' },
@@ -2141,13 +3708,92 @@ const styles = StyleSheet.create({
     height: '80%',
   },
   eventTitle:       { fontSize: 21, fontFamily: Fonts.extraBold, color: Colors.text, lineHeight: 28, marginBottom: 4 },
+  eventTitleInput:  {
+    width: '100%',
+    paddingVertical: Platform.OS === 'ios' ? 8 : 4,
+    paddingHorizontal: 0,
+    margin: 0,
+    marginBottom: 4,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    fontSize: 21,
+    fontFamily: Fonts.extraBold,
+    color: Colors.text,
+    lineHeight: 28,
+    ...(Platform.OS === 'web' ? ({ outlineStyle: 'none', outlineWidth: 0 } as object) : null),
+  },
+  eventDescInput:   {
+    width: '100%',
+    minHeight: 88,
+    padding: 0,
+    margin: 0,
+    fontSize: 14,
+    fontFamily: Fonts.regular,
+    color: Colors.text,
+    lineHeight: 22,
+    textAlignVertical: 'top',
+    ...(Platform.OS === 'web' ? ({ outlineStyle: 'none', outlineWidth: 0 } as object) : null),
+  },
+  eventLocationInput: {
+    width: '100%',
+    paddingVertical: Platform.OS === 'ios' ? 2 : 0,
+    paddingHorizontal: 0,
+    margin: 0,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    fontSize: 14,
+    color: Colors.textSub,
+    fontFamily: Fonts.regular,
+    lineHeight: 20,
+    ...(Platform.OS === 'web' ? ({ outlineStyle: 'none', outlineWidth: 0 } as object) : null),
+  },
+  detailCapacityRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    alignItems: 'center',
+  },
+  detailCapacityField: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+    minWidth: 120,
+  },
+  detailCapacityLabel: {
+    fontSize: 13,
+    fontFamily: Fonts.medium,
+    color: Colors.textMuted,
+    minWidth: 28,
+  },
+  detailCapacityInput: {
+    flex: 1,
+    minWidth: 48,
+    maxWidth: 120,
+    paddingVertical: Platform.OS === 'ios' ? 6 : 4,
+    paddingHorizontal: 10,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.bg,
+    fontSize: 14,
+    color: Colors.textSub,
+    fontFamily: Fonts.regular,
+    ...(Platform.OS === 'web' ? ({ outlineStyle: 'none', outlineWidth: 0 } as object) : null),
+  },
+  detailCapacityWaitlistHint: {
+    fontSize: 12,
+    color: Colors.textMuted,
+    fontFamily: Fonts.regular,
+    marginTop: 6,
+  },
   carouselRemoveThumb: {
     position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+    top: -5,
+    right: -5,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
     backgroundColor: Colors.text,
     borderWidth: 2,
     borderColor: Colors.surface,
@@ -2157,42 +3803,49 @@ const styles = StyleSheet.create({
   eventPhotosAddCard: {
     backgroundColor: Colors.bg,
     borderRadius: 16,
-    borderWidth: 1,
-    borderColor: Colors.border,
     overflow: 'hidden',
+  },
+  eventPhotosAddCardNested: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
   },
   eventPhotosAddBtn: {
     paddingVertical: 10,
     paddingHorizontal: 12,
     alignItems: 'flex-start',
   },
-  infoText:         { fontSize: 14, color: Colors.textSub, fontFamily: Fonts.regular, lineHeight: 20, flex: 1 },
+  infoText:         {
+    fontSize: 14,
+    color: Colors.textSub,
+    fontFamily: Fonts.regular,
+    lineHeight: 20,
+    flex: 1,
+    ...(Platform.OS === 'android' ? ({ includeFontPadding: false } as const) : null),
+  },
   descBox:          { backgroundColor: Colors.bg, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border, padding: 12, marginBottom: 16 },
   descText:         { fontSize: 14, color: Colors.text, fontFamily: Fonts.regular, lineHeight: 22 },
   link:             { color: Colors.going, textDecorationLine: 'underline' },
   mentionInComment: { color: Colors.accent, fontFamily: Fonts.semiBold },
   rsvpBtn:          { flex: 1, paddingVertical: 10, borderRadius: Radius.lg, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
   rsvpBtnText:      { fontSize: 14, fontFamily: Fonts.semiBold },
-  holdHint:         { fontSize: 11, color: Colors.textMuted, textAlign: 'center', marginBottom: 14, marginTop: 4 },
+  holdHint:         { fontSize: 11, color: Colors.textMuted, textAlign: 'center', marginBottom: 4, marginTop: 4 },
   capacityHint:     { fontSize: 12, color: '#EF4444', textAlign: 'center', marginBottom: 8, fontFamily: Fonts.medium },
-  attendRow:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12, borderTopWidth: 1, borderTopColor: Colors.border },
-  attendText:       { fontSize: 13, color: Colors.textSub, fontFamily: Fonts.regular },
-  galleryBlock:     { backgroundColor: Colors.surface, marginTop: 8, padding: 16 },
-  galleryTitle:     { fontSize: 13, fontFamily: Fonts.bold, color: Colors.text, marginBottom: 12 },
-  galleryGrid:      { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
-  galleryThumb:     { width: '31.5%', aspectRatio: 1, borderRadius: Radius.md, overflow: 'hidden', backgroundColor: Colors.border },
-  commentsBlock:    { backgroundColor: Colors.surface, marginTop: 8 },
-  commentsSectionHeader: {
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: Colors.border,
+  attendRow:        {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
   },
-  commentRow:       { flexDirection: 'row', gap: 12, padding: 14, paddingHorizontal: 20 },
+  attendRowBorderTop: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.border,
+  },
+  attendText:       { fontSize: 13, color: Colors.textSub, fontFamily: Fonts.regular },
+  commentRow:       { flexDirection: 'row', gap: 12, paddingVertical: 14, paddingHorizontal: 16 },
   commentAdminRemovedRow: {
     paddingVertical: 12,
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -2213,11 +3866,59 @@ const styles = StyleSheet.create({
   commentTime:      { fontSize: 11, color: Colors.textMuted, fontFamily: Fonts.regular },
   commentText:      { fontSize: 14, color: Colors.text, fontFamily: Fonts.regular, lineHeight: 20 },
   inputBar:         { backgroundColor: Colors.surface, borderTopWidth: 1, borderTopColor: Colors.border, padding: 10, paddingHorizontal: 16 },
-  editingBar:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, padding: 8, borderRadius: Radius.md, backgroundColor: '#FEF3C7', borderWidth: 1, borderColor: '#FCD34D' },
-  editingBarText:   { fontSize: 12, color: '#92400E', fontFamily: Fonts.semiBold },
-  editingBarCancel: { fontSize: 12, color: '#92400E', fontFamily: Fonts.bold, textDecorationLine: 'underline' },
   photoBtn:         { width: 36, height: 36, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.bg, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  commentInput:     { flex: 1, padding: 9, paddingHorizontal: 14, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.bg, fontSize: 14, color: Colors.text, fontFamily: Fonts.regular },
+  /** Shared field chrome; use with `flex:1` (composer) or sizing on multiline inline edit. */
+  commentInputField: {
+    padding: 9,
+    paddingHorizontal: 14,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.bg,
+    fontSize: 14,
+    color: Colors.text,
+    fontFamily: Fonts.regular,
+  },
+  commentInput: { flex: 1 },
+  commentInlineEditPhotoStrip: {
+    flexGrow: 0,
+    marginBottom: 6,
+    paddingTop: 2,
+    maxHeight: 72,
+  },
+  commentInlineEditPhotoStripContent: {
+    gap: 6,
+    flexDirection: 'row',
+    paddingRight: 4,
+    alignItems: 'center',
+  },
+  commentInlineEditPhotoWrap: { position: 'relative' },
+  /** Column: bordered field, then toolbar (never overlap web textarea). */
+  commentInlineEditBlock: {
+    flexDirection: 'column',
+    alignSelf: 'stretch',
+    width: '100%',
+  },
+  commentInlineEditInput: {
+    alignSelf: 'stretch',
+    width: '100%',
+    minHeight: 72,
+    maxHeight: 160,
+    paddingTop: 10,
+    marginTop: 0,
+  },
+  /** Width only; height comes from composerFieldHeight + onContentSizeChange. */
+  commentComposerInput: { flex: 1, minWidth: 120, maxHeight: COMPOSER_INPUT_MAX_H },
+  commentInlineEditToolbar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 12,
+    flexWrap: 'wrap',
+    alignSelf: 'stretch',
+  },
+  commentInlineEditCancel: { paddingVertical: 9, paddingHorizontal: 4 },
+  commentInlineEditCancelText: { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.textSub },
   postBtn:          { paddingHorizontal: 18, paddingVertical: 9, borderRadius: Radius.lg, backgroundColor: Colors.accent },
   postBtnDisabled:  { backgroundColor: Colors.border },
   postBtnText:      { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.accentFg },
@@ -2231,6 +3932,28 @@ const styles = StyleSheet.create({
   lightboxTime:     { fontSize: 11, color: 'rgba(255,255,255,0.45)', fontFamily: Fonts.regular },
   lightboxBtn:      { paddingHorizontal: 14, paddingVertical: 7, borderRadius: Radius.lg, backgroundColor: 'rgba(255,255,255,0.14)' },
   lightboxImg:      { width: '100%', height: '70%' },
+  lightboxNavBtn: {
+    position: 'absolute',
+    top: '42%',
+    zIndex: 2,
+    paddingVertical: 14,
+    paddingHorizontal: 10,
+    borderRadius: Radius.full,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  lightboxNavBtnDisabled: { opacity: 0.28 },
+  lightboxNavPrev: { left: 10 },
+  lightboxNavNext: { right: 10 },
+  lightboxCounter: {
+    position: 'absolute',
+    bottom: 48,
+    alignSelf: 'center',
+    fontSize: 13,
+    fontFamily: Fonts.medium,
+    color: 'rgba(255,255,255,0.75)',
+  },
   sheetTitle:       { fontSize: 17, fontFamily: Fonts.bold, color: Colors.text, marginBottom: 14 },
   attendSection:    { fontSize: 11, fontFamily: Fonts.semiBold, color: Colors.textMuted, letterSpacing: 0.6, marginTop: 14, marginBottom: 6 },
   attendRsvpRow:    { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: Colors.border },

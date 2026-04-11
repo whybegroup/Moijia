@@ -68,8 +68,10 @@ CREATE TABLE "events" (
     "maxAttendees" INTEGER,
     "enableWaitlist" BOOLEAN DEFAULT false,
     "allowMaybe" BOOLEAN NOT NULL DEFAULT true,
+    "rsvpDeadline" DATETIME,
+    "activityIdeasEnabled" BOOLEAN NOT NULL DEFAULT false,
     "recurrenceRule" TEXT,
-    "recurrenceExdates" TEXT,
+    "recurrenceSeriesId" TEXT,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
     CONSTRAINT "events_groupId_fkey" FOREIGN KEY ("groupId") REFERENCES "groups" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
@@ -193,6 +195,9 @@ CREATE UNIQUE INDEX "groups_inviteCode_key" ON "groups"("inviteCode");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "group_members_groupId_userId_key" ON "group_members"("groupId", "userId");
+
+-- CreateIndex
+CREATE INDEX "events_recurrenceSeriesId_idx" ON "events"("recurrenceSeriesId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "event_activity_votes_eventId_userId_optionId_key" ON "event_activity_votes"("eventId", "userId", "optionId");

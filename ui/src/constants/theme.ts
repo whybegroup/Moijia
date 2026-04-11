@@ -2,7 +2,7 @@ import { StyleSheet, Platform } from 'react-native';
 
 // ── Colors ────────────────────────────────────────────────────────────────────
 export const Colors = {
-  bg:           '#FAFAF9',
+  bg:           '#F4F4F5',
   surface:      '#FFFFFF',
   border:       '#EBEBEA',
   borderStrong: '#D4D4D2',
@@ -65,6 +65,8 @@ export const Spacing = {
 /** Tab chrome: top bar height matches 16px vertical padding + 34px controls (icon buttons). */
 export const Layout = {
   tabHeaderMinHeight: Spacing.lg * 2 + 34,
+  /** Modal NavBar / event detail header: fixed height so all popovers align (16 + 44 + 16). */
+  modalTopBarHeight: Spacing.lg * 2 + 44,
 };
 
 // ── Border Radius ─────────────────────────────────────────────────────────────

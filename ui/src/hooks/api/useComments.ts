@@ -4,7 +4,6 @@ import {
   CommentsService,
   type CommentInput,
   type CommentUpdateInput,
-  type CommentDeleteInput,
 } from '@moija/client';
 import { queryKeys } from '../../config/queryClient';
 
@@ -28,15 +27,19 @@ export function useCreateComment(eventId: string) {
   });
 }
 
-export function useDeleteComment(eventId: string) {
+export function useDeleteComment(eventId: string, viewerUserId?: string | null) {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
-    mutationFn: ({ commentId, input }: { commentId: string; input: CommentDeleteInput }) =>
-      CommentsService.deleteComment(commentId, input),
+    mutationFn: ({ commentId, actorId }: { commentId: string; actorId: string }) =>
+      CommentsService.deleteComment(commentId, actorId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.events.comments(eventId) });
       queryClient.invalidateQueries({ queryKey: ['events'] });
+      const uid = viewerUserId?.trim();
+      if (uid) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.events.detail(eventId, uid) });
+      }
     },
   });
 }

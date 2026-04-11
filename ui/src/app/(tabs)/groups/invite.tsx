@@ -73,7 +73,7 @@ export default function GroupInviteScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <NavBar title="Invite People" onBack={handleBack} />
+      <NavBar title="Invite People" onClose={handleBack} />
 
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 100 }}>
 

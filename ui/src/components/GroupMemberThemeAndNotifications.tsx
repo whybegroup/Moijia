@@ -15,6 +15,8 @@ import ColorPicker, { Panel1, HueSlider, OpacitySlider } from 'reanimated-color-
 
 const REMINDER_OPTIONS = ['Never', '1 hour before', '1 day before', '1 week before'] as const;
 
+const rowPad = { paddingHorizontal: 16 } as const;
+
 type Props = {
   groupId: string;
   userId: string;
@@ -42,8 +44,8 @@ export function GroupMemberThemeAndNotifications({ groupId, userId, groupName }:
 
   return (
     <>
-      <Text style={styles.sectionLabel}>GROUP THEME COLOR (ONLY FOR ME)</Text>
-      <View style={[styles.card, { marginBottom: 20 }]}>
+      <Text style={[styles.sectionLabel, styles.sectionLabelSpaced]}>GROUP THEME COLOR (ONLY FOR ME)</Text>
+      <View style={[styles.card, { marginBottom: 16 }]}>
         <TouchableOpacity
           style={styles.themeHeader}
           onPress={() => setThemeExpanded((e) => !e)}
@@ -53,10 +55,7 @@ export function GroupMemberThemeAndNotifications({ groupId, userId, groupName }:
           accessibilityLabel={themeExpanded ? 'Collapse theme color picker' : 'Expand theme color picker'}
         >
           <View style={[styles.colorDot, { backgroundColor: p.dot }]} />
-          <View style={styles.themeHeaderText}>
-            <Text style={styles.hexInline}>{userColorHex.toUpperCase()}</Text>
-            <Text style={styles.hexInline}></Text>
-          </View>
+          <Text style={styles.hexInline}>{userColorHex.toUpperCase()}</Text>
           <Ionicons name={themeExpanded ? 'chevron-up' : 'chevron-down'} size={22} color={Colors.textMuted} />
         </TouchableOpacity>
         {themeExpanded ? (
@@ -85,25 +84,49 @@ export function GroupMemberThemeAndNotifications({ groupId, userId, groupName }:
                 value={notifPrefs.newEvent}
                 onChange={(v) => void patchNotif({ newEvent: v })}
                 label="New event alerts"
+                style={rowPad}
               />
               <Toggle
                 value={notifPrefs.minAttendees}
                 onChange={(v) => void patchNotif({ minAttendees: v })}
                 label="Event min attendees / waitlist"
+                style={rowPad}
               />
               <Toggle
                 value={notifPrefs.onLocation}
                 onChange={(v) => void patchNotif({ onLocation: v })}
                 label="Event location changes"
+                style={rowPad}
               />
-              <Toggle value={notifPrefs.onTime} onChange={(v) => void patchNotif({ onTime: v })} label="Event time changes" />
-              <Toggle value={notifPrefs.onRsvp} onChange={(v) => void patchNotif({ onRsvp: v })} label="Event RSVP updates" />
-              <Toggle value={notifPrefs.comments} onChange={(v) => void patchNotif({ comments: v })} label="Event comments" />
-              <Toggle value={notifPrefs.mentions} onChange={(v) => void patchNotif({ mentions: v })} label="Event comment mentions" />
+              <Toggle
+                value={notifPrefs.onTime}
+                onChange={(v) => void patchNotif({ onTime: v })}
+                label="Event time changes"
+                style={rowPad}
+              />
+              <Toggle
+                value={notifPrefs.onRsvp}
+                onChange={(v) => void patchNotif({ onRsvp: v })}
+                label="Event RSVP updates"
+                style={rowPad}
+              />
+              <Toggle
+                value={notifPrefs.comments}
+                onChange={(v) => void patchNotif({ comments: v })}
+                label="Event comments"
+                style={rowPad}
+              />
+              <Toggle
+                value={notifPrefs.mentions}
+                onChange={(v) => void patchNotif({ mentions: v })}
+                label="Event comment mentions"
+                style={rowPad}
+              />
               <Toggle
                 value={notifPrefs.groupMembership}
                 onChange={(v) => void patchNotif({ groupMembership: v })}
                 label="Group membership updates (e.g. approvals)"
+                style={{ ...rowPad, borderBottomWidth: 0 }}
               />
 
               <View style={styles.reminderRow}>
@@ -139,18 +162,42 @@ export function GroupMemberThemeAndNotifications({ groupId, userId, groupName }:
 }
 
 const styles = StyleSheet.create({
-  sectionLabel: { fontSize: 11, fontFamily: Fonts.semiBold, color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 10 },
-  sectionHint: { fontSize: 12, fontFamily: Fonts.regular, color: Colors.textMuted, marginTop: -6, marginBottom: 10, lineHeight: 17 },
-  card: { backgroundColor: Colors.surface, borderRadius: 16, borderWidth: 1, borderColor: Colors.border, overflow: 'hidden' },
-  themeHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16 },
-  themeHeaderText: { flex: 1, minWidth: 0 },
+  sectionLabel: {
+    fontSize: 11,
+    fontFamily: Fonts.semiBold,
+    color: Colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 10,
+  },
+  sectionLabelSpaced: { marginTop: 8 },
+  sectionHint: {
+    fontSize: 12,
+    fontFamily: Fonts.regular,
+    color: Colors.textMuted,
+    marginTop: -4,
+    marginBottom: 10,
+    lineHeight: 17,
+  },
+  card: { backgroundColor: Colors.surface, borderRadius: Radius['2xl'], overflow: 'hidden' },
+  themeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+  },
   colorDot: { width: 24, height: 24, borderRadius: 12, borderWidth: 1, borderColor: Colors.border },
-  colorLabel: { fontSize: 14, fontFamily: Fonts.medium, color: Colors.text },
-  hexInline: { fontSize: 14, color: Colors.textMuted, marginTop: 2 },
+  hexInline: { flex: 1, minWidth: 0, fontSize: 15, fontFamily: Fonts.medium, color: Colors.text },
   colorPickerWrap: { paddingHorizontal: 16, paddingBottom: 16 },
   hexReadout: { fontSize: 16, fontFamily: Fonts.semiBold, color: Colors.text, textAlign: 'center', marginTop: 12 },
-  notifSection: { padding: 16 },
-  reminderRow: { paddingVertical: 10, marginTop: 8 },
+  notifSection: { paddingHorizontal: 0 },
+  reminderRow: {
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.border,
+  },
   reminderLabel: { fontSize: 14, color: Colors.text, fontFamily: Fonts.regular, marginBottom: 8 },
   reminderChip: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: Radius.full, borderWidth: 1, borderColor: Colors.border },
   reminderChipActive: { borderColor: Colors.accent, backgroundColor: Colors.accent },

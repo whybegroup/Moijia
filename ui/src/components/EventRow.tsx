@@ -1,7 +1,7 @@
 import { View, Text, TouchableOpacity, Pressable, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors, Fonts, Radius, Shadows } from '../constants/theme';
-import { getGroupColor, getDefaultGroupThemeFromName, fmtTime, fmtMonthShort, dDiff, getMyWaitlistPosition } from '../utils/helpers';
+import { Colors, Fonts, Radius } from '../constants/theme';
+import { getGroupColor, getDefaultGroupThemeFromName, fmtTime, getMyWaitlistPosition } from '../utils/helpers';
 import type { EventDetailed, GroupScoped, User } from '@moija/client';
 import { UserAvatarStack } from './UserAvatarStack';
 
@@ -23,9 +23,7 @@ export function EventRow({ ev, group, groupColorHex, onPress, onGroupPress, isLa
   const evEnd = typeof ev.end === 'string' ? new Date(ev.end) : ev.end;
   const now = Date.now();
   const isOngoing = evStart.getTime() <= now && evEnd.getTime() > now;
-  const diff   = dDiff(evStart);
   const isPast = evEnd.getTime() <= Date.now();
-  const isToday_ = diff === 0;
   const rsvps  = ev.rsvps || [];
   const going  = rsvps.filter(r => r.status === 'going');
   const myRsvp = meId ? rsvps.find(r => r.userId === meId) : undefined;
@@ -186,16 +184,6 @@ export function EventRow({ ev, group, groupColorHex, onPress, onGroupPress, isLa
           </View>
         )}
       </View>
-
-      {/* Calendar badge */}
-      <View style={styles.badge}>
-        <View style={[styles.badgeTop, { backgroundColor: isToday_ ? Colors.todayRed : p.cal }]}>
-          <Text style={styles.badgeMonth}>{isToday_ ? 'TODAY' : fmtMonthShort(evStart)}</Text>
-        </View>
-        <View style={styles.badgeBottom}>
-          <Text style={styles.badgeDay}>{evStart.getDate()}</Text>
-        </View>
-      </View>
     </TouchableOpacity>
   );
 }
@@ -301,24 +289,6 @@ const styles = StyleSheet.create({
   },
   avatarRow: {
     marginTop: 6,
-  },
-  badge: {
-    width: 38, borderRadius: Radius.md, overflow: 'hidden',
-    borderWidth: 1, borderColor: Colors.border,
-    ...Shadows.xs,
-    flexShrink: 0,
-  },
-  badgeTop: {
-    paddingVertical: 2, alignItems: 'center',
-  },
-  badgeMonth: {
-    fontSize: 9, fontFamily: Fonts.bold, color: '#fff', letterSpacing: 0.4,
-  },
-  badgeBottom: {
-    backgroundColor: Colors.surface, paddingVertical: 3, alignItems: 'center',
-  },
-  badgeDay: {
-    fontSize: 17, fontFamily: Fonts.bold, color: Colors.text, lineHeight: 20,
   },
   liveBadge: {
     width: 8,

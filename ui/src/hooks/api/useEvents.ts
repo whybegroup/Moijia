@@ -95,24 +95,36 @@ export function useUpdateEvent(id: string, userId: string) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['events'] });
+      invalidateEventQueries(queryClient, id, userId);
     },
   });
 }
 
-/** Update start/end for any event id (e.g. week calendar drag). */
+/** Update start/end (e.g. week calendar drag). Same `EventUpdate` path as the edit form, including recurring scope. */
 export function useWeekEventTimeMove(userId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (p: { eventId: string; start: string; end: string }) => {
+    mutationFn: async (p: {
+      eventId: string;
+      start: string;
+      end: string;
+      seriesUpdateScope?: EventUpdate['seriesUpdateScope'];
+      viewerTimeZone?: string;
+    }) => {
       if (!userId) throw new Error('Not signed in');
+      const tz =
+        p.viewerTimeZone?.trim() || Intl.DateTimeFormat().resolvedOptions().timeZone;
       return EventsService.updateEvent(p.eventId, userId, {
         start: p.start,
         end: p.end,
         updatedBy: userId,
+        viewerTimeZone: tz,
+        ...(p.seriesUpdateScope ? { seriesUpdateScope: p.seriesUpdateScope } : {}),
       });
     },
     onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: ['events'] });
       invalidateEventQueries(queryClient, vars.eventId, userId);
     },
   });
@@ -132,14 +144,29 @@ export function useDeleteEvent(userId: string) {
   });
 }
 
-export function useExcludeRecurrenceOccurrence(userId: string) {
+export function useDeleteRecurrenceSeries(userId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (p: { eventId: string; occurrenceStart: string }) => {
+    mutationFn: (seriesId: string) => {
       if (!userId) throw new Error('Not signed in');
-      return EventsService.excludeRecurrenceOccurrence(p.eventId, userId, {
+      return EventsService.deleteRecurrenceSeries(seriesId, userId);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['events'] });
+    },
+  });
+}
+
+export function useTruncateRecurrenceSeries(userId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (p: { eventId: string; occurrenceStart: string; viewerTimeZone?: string }) => {
+      if (!userId) throw new Error('Not signed in');
+      return EventsService.truncateRecurrenceSeries(p.eventId, userId, {
         occurrenceStart: p.occurrenceStart,
+        viewerTimeZone: p.viewerTimeZone,
       });
     },
     onSuccess: (_data, vars) => {

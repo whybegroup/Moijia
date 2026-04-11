@@ -1,12 +1,19 @@
 // ── Date formatting ───────────────────────────────────────────────────────────
+// Event/API instants are UTC ISO strings (`…Z`). `formatLocalDateInput` / `fmtTime` interpret in the
+// system timezone. For explicit naming, see `utils/datetimeUtc.ts`.
 
-/** `YYYY-MM-DD` in the user's local calendar (for `<input type="date">` and `new Date(\`\${date}T\${time}\`)`). */
+/** Local calendar `YYYY-MM-DD` from a `Date` or from a UTC ISO string (displays in system TZ). */
 export function formatLocalDateInput(d: Date | string): string {
   const x = typeof d === 'string' ? new Date(d) : d;
   const y = x.getFullYear();
   const m = String(x.getMonth() + 1).padStart(2, '0');
   const day = String(x.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
+}
+
+/** Same as {@link formatLocalDateInput} but with `/` separators (e.g. `2026/04/11`). */
+export function formatLocalDateYmdSlashes(d: Date | string): string {
+  return formatLocalDateInput(d).replace(/-/g, '/');
 }
 
 const DAYS_SHORT  = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];

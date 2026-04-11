@@ -68,7 +68,7 @@ export function GroupAvatarPicker({
                 borderRadius: groupAvatarBorderRadius(44),
                 borderWidth: 2,
                 borderColor: Colors.border,
-                backgroundColor: Colors.bg,
+                backgroundColor: Colors.surface,
                 alignItems: 'center',
                 justifyContent: 'center',
                 overflow: 'hidden',

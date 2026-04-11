@@ -4,8 +4,10 @@ import {
   ScrollView, Modal, TextInput, KeyboardAvoidingView, Platform,
   type TextStyle,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Colors, Radius, Shadows, Fonts, Layout } from '../constants/theme';
+import { Colors, Radius, Shadows, Fonts } from '../constants/theme';
+import { modalTopBarStyles } from './modalTopBarStyles';
 import { avatarColor } from '../utils/helpers';
 
 /** Same as Field labels — Photos and other form-style section titles. */
@@ -148,22 +150,27 @@ export function Toggle({ value, onChange, label, style, small }: { value: boolea
 interface NavBarProps {
   /** Omit or pass empty string for no centered title */
   title?: string;
-  onBack?: () => void;
+  onClose?: () => void;
   right?: React.ReactNode;
   /**
    * When true, title is centered on the full bar width; left and right slots use equal flex so
-   * back + actions stay aligned without shifting the title.
+   * close + actions stay aligned without shifting the title.
    */
   centerTitle?: boolean;
 }
-export function NavBar({ title = '', onBack, right, centerTitle }: NavBarProps) {
+export function NavBar({ title = '', onClose, right, centerTitle }: NavBarProps) {
   if (centerTitle) {
     return (
-      <View style={styles.navBar}>
+      <View style={modalTopBarStyles.bar}>
         <View style={styles.navBarSide}>
-          {onBack ? (
-            <TouchableOpacity onPress={onBack} style={styles.navBack}>
-              <Text style={styles.navBackText}>← Back</Text>
+          {onClose ? (
+            <TouchableOpacity
+              onPress={onClose}
+              style={modalTopBarStyles.closeButton}
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+            >
+              <Ionicons name="close" size={26} color={Colors.textSub} />
             </TouchableOpacity>
           ) : (
             <View style={{ width: 70 }} />
@@ -182,10 +189,15 @@ export function NavBar({ title = '', onBack, right, centerTitle }: NavBarProps) 
   }
 
   return (
-    <View style={styles.navBar}>
-      {onBack ? (
-        <TouchableOpacity onPress={onBack} style={styles.navBack}>
-          <Text style={styles.navBackText}>← Back</Text>
+    <View style={modalTopBarStyles.bar}>
+      {onClose ? (
+        <TouchableOpacity
+          onPress={onClose}
+          style={modalTopBarStyles.closeButton}
+          accessibilityRole="button"
+          accessibilityLabel="Close"
+        >
+          <Ionicons name="close" size={26} color={Colors.textSub} />
         </TouchableOpacity>
       ) : (
         <View style={{ width: 70 }} />
@@ -330,17 +342,6 @@ const styles = StyleSheet.create({
   toggleThumbSmall: {
     width: 16, height: 16, borderRadius: 8,
   },
-  navBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    minHeight: Layout.tabHeaderMinHeight,
-    paddingHorizontal: 16,
-    paddingVertical: 13,
-    backgroundColor: Colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-    position: 'relative',
-  },
   navBarSide: {
     flex: 1,
     flexDirection: 'row',
@@ -365,8 +366,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     maxWidth: '100%',
   },
-  navBack: { width: 70, flexShrink: 0 },
-  navBackText: { fontSize: 14, color: Colors.textSub, fontFamily: Fonts.medium },
   navTitle: { flex: 1, fontSize: 16, fontFamily: Fonts.bold, color: Colors.text, textAlign: 'center', minWidth: 0 },
   navTitleSpacer: { flex: 1, minWidth: 0 },
   navRight: { alignItems: 'flex-end', justifyContent: 'center', flexShrink: 0 },

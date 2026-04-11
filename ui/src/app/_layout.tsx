@@ -52,12 +52,37 @@ function RootLayoutNav() {
     <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
       <Stack.Screen name="login" options={{ headerShown: false }} />
       <Stack.Screen name="(tabs)" />
-      <Stack.Screen name="event/[id]" />
-      <Stack.Screen name="event/edit/[id]" />
-      <Stack.Screen name="create-event" />
+      <Stack.Screen
+        name="event/[id]"
+        options={{
+          presentation: 'transparentModal',
+          animation: 'fade',
+          contentStyle: { backgroundColor: 'transparent' },
+        }}
+      />
+      <Stack.Screen
+        name="create-event"
+        options={{
+          presentation: 'transparentModal',
+          animation: 'fade',
+          contentStyle: { backgroundColor: 'transparent' },
+        }}
+      />
       <Stack.Screen
         name="create-group"
-        options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
+        options={{
+          presentation: 'transparentModal',
+          animation: 'fade',
+          contentStyle: { backgroundColor: 'transparent' },
+        }}
+      />
+      <Stack.Screen
+        name="groups/[id]"
+        options={{
+          presentation: 'transparentModal',
+          animation: 'fade',
+          contentStyle: { backgroundColor: 'transparent' },
+        }}
       />
     </Stack>
   );

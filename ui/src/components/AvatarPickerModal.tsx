@@ -108,7 +108,13 @@ export function AvatarPickerModal({
       <View style={[styles.card, { width: cardWidth, height: cardHeight }]}>
         <View style={styles.header}>
           <Text style={styles.title}>{title}</Text>
-          <TouchableOpacity onPress={onRequestClose} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }} activeOpacity={0.7}>
+          <TouchableOpacity
+            onPress={onRequestClose}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Close"
+          >
             <Ionicons name="close" size={22} color={Colors.textMuted} />
           </TouchableOpacity>
         </View>
@@ -175,7 +181,7 @@ const styles = StyleSheet.create({
   title:   { fontSize: 18, fontFamily: Fonts.semiBold, color: Colors.text },
   scroll:  { flex: 1, minHeight: 0 },
   scrollContent: { flexGrow: 1, paddingBottom: 8 },
-  input:   { padding: 10, paddingHorizontal: 12, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.bg, fontSize: 14, color: Colors.text, fontFamily: Fonts.regular },
+  input:   { padding: 10, paddingHorizontal: 12, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surface, fontSize: 14, color: Colors.text, fontFamily: Fonts.regular },
   saveBtn: { marginTop: 12, paddingVertical: 12, borderRadius: Radius.lg, backgroundColor: Colors.accent, alignItems: 'center', flexShrink: 0 },
   saveBtnDisabled: { backgroundColor: Colors.border },
   saveBtnText: { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.accentFg },

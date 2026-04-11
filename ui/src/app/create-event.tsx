@@ -1,12 +1,29 @@
-import { useState, useEffect, useRef, useMemo, type ChangeEvent } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, Alert, Platform, ActivityIndicator } from 'react-native';
+import { useState, useEffect, useRef, useMemo, useCallback, type ChangeEvent } from 'react';
+import {
+  View,
+  Text,
+  ScrollView,
+  TouchableOpacity,
+  TextInput,
+  StyleSheet,
+  Alert,
+  Platform,
+  ActivityIndicator,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams, type Href } from 'expo-router';
 import { Colors, Fonts, Radius } from '../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName, formatLocalDateInput } from '../utils/helpers';
+import {
+  localWallDateTimeToDate,
+  localWallDateTimeToUtcIso,
+  localWallDateStartOfDayToUtcIso,
+  localWallDateEndOfDayToUtcIso,
+  isValidEventFormTimeRange,
+} from '../utils/datetimeUtc';
 import { NavBar, Field, Toggle, formSectionTitleStyle } from '../components/ui';
+import { EventFormPopoverChrome } from '../components/EventFormPopoverChrome';
 import { RecurrenceField } from '../components/RecurrenceField';
 import { buildRecurrenceRule, defaultRecurrenceFormState, type RecurrenceFormState } from '../utils/recurrence';
 import { useGroups, useCreateEvent, useAllGroupMemberColors } from '../hooks/api';
@@ -21,10 +38,35 @@ import {
   coverPhotoDraftDisplayUri,
   type CoverPhotoDraft,
 } from '../services/pickAndUploadImage';
+import { firstSearchParam, parseReturnToParam, withReturnTo } from '../utils/navigationReturn';
+
+function webEventTimeInputStyle(errored: boolean): Record<string, string | number> {
+  return {
+    padding: '6px 10px',
+    borderRadius: 8,
+    border: errored ? '1.5px solid #EF4444' : '1.5px solid #E5E5E5',
+    backgroundColor: '#FAFAFA',
+    fontSize: 13,
+    color: '#1A1A1A',
+    fontFamily: 'DMSans_400Regular',
+    boxSizing: 'border-box',
+    outline: 'none',
+    minWidth: 0,
+    width: '100%',
+  };
+}
 
 export default function CreateEventScreen() {
   const router = useRouter();
-  const calendarParams = useLocalSearchParams<{ start?: string; end?: string }>();
+  const calendarParams = useLocalSearchParams<{
+    start?: string;
+    end?: string;
+    returnTo?: string | string[];
+  }>();
+  const createReturnTo = useMemo(
+    () => parseReturnToParam(firstSearchParam(calendarParams.returnTo)),
+    [calendarParams.returnTo]
+  );
   const { userId: currentUserId } = useCurrentUserContext();
   const today = formatLocalDateInput(new Date());
   const { data: groups = [] } = useGroups(currentUserId ?? '');
@@ -33,11 +75,10 @@ export default function CreateEventScreen() {
 
   const [form, setForm] = useState({
     title: '', description: '', groupId: '',
-    startDate: today, startTime: '19:00', startAllDay: false,
-    endDate: today, endTime: '21:00', endAllDay: false,
+    startDate: today, startTime: '19:00', endDate: today, endTime: '21:00', allDay: false,
     location: '', minAttendees: '1', maxAttendees: '',
     allowMaybe: false, enableWaitlist: false, coverPhotoDrafts: [] as CoverPhotoDraft[],
-    activityOptionDrafts: [''] as string[],
+    activityIdeasEnabled: false,
     recurrence: defaultRecurrenceFormState() as RecurrenceFormState,
   });
   const [errors, setErrors] = useState({
@@ -108,33 +149,54 @@ export default function CreateEventScreen() {
     });
   };
 
-  const ok  = !!form.title.trim() && !!form.startDate && !!form.endDate && !!form.groupId;
+  const timeRangeValid = useMemo(
+    () =>
+      isValidEventFormTimeRange({
+        allDay: form.allDay,
+        startDate: form.startDate,
+        endDate: form.endDate,
+        startTime: form.startTime,
+        endTime: form.endTime,
+      }),
+    [form.allDay, form.startDate, form.endDate, form.startTime, form.endTime]
+  );
 
-  const recurrenceAnchor = useMemo(() => {
-    const [sh, sm] = form.startTime.split(':').map(Number);
-    const d = new Date(
-      `${form.startDate}T${String(sh || 0).padStart(2, '0')}:${String(sm || 0).padStart(2, '0')}:00`
-    );
-    return Number.isNaN(d.getTime()) ? new Date() : d;
-  }, [form.startDate, form.startTime]);
+  const ok =
+    !!form.title.trim() &&
+    !!form.startDate &&
+    !!form.endDate &&
+    !!form.groupId &&
+    timeRangeValid &&
+    !errors.startDate &&
+    !errors.startTime &&
+    !errors.endDate &&
+    !errors.endTime;
+
+  const timeFieldsComplete =
+    !!form.startDate?.trim() &&
+    !!form.endDate?.trim() &&
+    (form.allDay || (!!form.startTime?.trim() && !!form.endTime?.trim()));
+  const showInvalidRangeHint =
+    timeFieldsComplete && !timeRangeValid && !errors.endDate && !errors.endTime;
+
+  const recurrenceAnchor = useMemo(
+    () => localWallDateTimeToDate(form.startDate, form.startTime),
+    [form.startDate, form.startTime]
+  );
 
   const submit = async () => {
     if (!ok) return;
     try {
-      const [sh, sm] = form.startTime.split(':').map(Number);
-      const [eh, em] = form.endTime.split(':').map(Number);
-      
-      const start = new Date(form.startDate + 'T' + String(sh).padStart(2, '0') + ':' + String(sm || 0).padStart(2, '0') + ':00');
-      const end   = new Date(form.endDate + 'T' + String(eh).padStart(2, '0') + ':' + String(em || 0).padStart(2, '0') + ':00');
-      
-      if (form.startAllDay) {
-        start.setHours(0, 0, 0, 0);
-      }
-      if (form.endAllDay) {
-        end.setHours(23, 59, 59, 999);
-      }
-      
-      const isAllDay = form.startAllDay && form.endAllDay && form.startDate === form.endDate;
+      const startIso = form.allDay
+        ? localWallDateStartOfDayToUtcIso(form.startDate)
+        : localWallDateTimeToUtcIso(form.startDate, form.startTime);
+      const endIso = form.allDay
+        ? localWallDateEndOfDayToUtcIso(form.endDate)
+        : localWallDateTimeToUtcIso(form.endDate, form.endTime);
+      const start = new Date(startIso);
+      const end = new Date(endIso);
+
+      const isAllDay = form.allDay && form.startDate === form.endDate;
 
       let coverPhotos: string[] = [];
       if (form.coverPhotoDrafts.length > 0) {
@@ -150,10 +212,6 @@ export default function CreateEventScreen() {
         }
       }
       
-      const activityOptionLabels = form.activityOptionDrafts
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
-
       const recurrenceRule = buildRecurrenceRule(form.recurrence, start);
 
       const newEvent = {
@@ -163,20 +221,22 @@ export default function CreateEventScreen() {
         title: form.title.trim(),
         description: form.description.trim() || undefined,
         coverPhotos,
-        start: start.toISOString(),
-        end: end.toISOString(),
+        start: startIso,
+        end: endIso,
         isAllDay: isAllDay || undefined,
         location: form.location.trim() || undefined,
         minAttendees: form.minAttendees.trim() ? parseInt(form.minAttendees, 10) : undefined,
         maxAttendees: form.maxAttendees.trim() ? parseInt(form.maxAttendees, 10) : undefined,
         enableWaitlist: form.maxAttendees.trim() ? form.enableWaitlist : undefined,
         allowMaybe: form.allowMaybe,
-        ...(activityOptionLabels.length > 0 ? { activityOptionLabels } : {}),
-        ...(recurrenceRule ? { recurrenceRule } : {}),
+        activityIdeasEnabled: form.activityIdeasEnabled,
+        ...(recurrenceRule
+          ? { recurrenceRule, viewerTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }
+          : {}),
       };
       
       await createEventMutation.mutateAsync(newEvent);
-      router.replace('/(tabs)/events');
+      router.replace(withReturnTo(`/event/${newEvent.id}`, createReturnTo));
     } catch {
       Alert.alert('Error', 'Failed to create event');
     }
@@ -246,7 +306,11 @@ export default function CreateEventScreen() {
     }
   };
 
-  const validateStartTime = (timeStr: string, dateStr: string) => {
+  const validateStartTime = (timeStr: string, dateStr: string, allDay: boolean) => {
+    if (allDay) {
+      setErrors((e) => ({ ...e, startTime: '' }));
+      return;
+    }
     if (!timeStr || !dateStr) {
       setErrors(e => ({ ...e, startTime: '' }));
       return;
@@ -271,27 +335,31 @@ export default function CreateEventScreen() {
     setErrors(e => ({ ...e, startTime: '' }));
   };
 
-  const validateEndTime = (endTimeStr: string, startTimeStr: string, endDateStr: string, startDateStr: string) => {
-    if (!endTimeStr || !startTimeStr) {
-      setErrors(e => ({ ...e, endTime: '' }));
+  const validateEndTime = (
+    endTimeStr: string,
+    startTimeStr: string,
+    endDateStr: string,
+    startDateStr: string,
+    allDay: boolean,
+  ) => {
+    if (allDay) {
+      setErrors((e) => ({ ...e, endTime: '' }));
       return;
     }
-    
-    if (startDateStr !== endDateStr) {
-      setErrors(e => ({ ...e, endTime: '' }));
+    if (!endTimeStr?.trim() || !startTimeStr?.trim() || !endDateStr?.trim() || !startDateStr?.trim()) {
+      setErrors((e) => ({ ...e, endTime: '' }));
       return;
     }
-    
-    const [sh, sm] = startTimeStr.split(':').map(Number);
-    const [eh, em] = endTimeStr.split(':').map(Number);
-    
-    const startMinutes = sh * 60 + sm;
-    const endMinutes = eh * 60 + em;
-    
-    if (endMinutes <= startMinutes) {
-      setErrors(e => ({ ...e, endTime: 'End time must be after start time' }));
-    } else {
-      setErrors(e => ({ ...e, endTime: '' }));
+    try {
+      const startIso = localWallDateTimeToUtcIso(startDateStr.trim(), startTimeStr.trim());
+      const endIso = localWallDateTimeToUtcIso(endDateStr.trim(), endTimeStr.trim());
+      if (new Date(endIso).getTime() <= new Date(startIso).getTime()) {
+        setErrors((e) => ({ ...e, endTime: 'End must be after start' }));
+      } else {
+        setErrors((e) => ({ ...e, endTime: '' }));
+      }
+    } catch {
+      setErrors((e) => ({ ...e, endTime: 'Invalid time' }));
     }
   };
 
@@ -303,9 +371,9 @@ export default function CreateEventScreen() {
       const dateStr = formatLocalDateInput(selectedDate);
       set('startDate', dateStr);
       validateStartDate(dateStr);
-      validateStartTime(form.startTime, dateStr);
+      validateStartTime(form.startTime, dateStr, form.allDay);
       validateEndDate(form.endDate, dateStr);
-      validateEndTime(form.endTime, form.startTime, form.endDate, dateStr);
+      validateEndTime(form.endTime, form.startTime, form.endDate, dateStr, form.allDay);
     }
   };
 
@@ -317,21 +385,22 @@ export default function CreateEventScreen() {
       const dateStr = formatLocalDateInput(selectedDate);
       set('endDate', dateStr);
       validateEndDate(dateStr, form.startDate);
-      validateEndTime(form.endTime, form.startTime, dateStr, form.startDate);
+      validateEndTime(form.endTime, form.startTime, dateStr, form.startDate, form.allDay);
     }
   };
 
   const handleStartDateInputChange = (dateStr: string) => {
     set('startDate', dateStr);
     validateStartDate(dateStr);
-    validateStartTime(form.startTime, dateStr);
+    validateStartTime(form.startTime, dateStr, form.allDay);
     validateEndDate(form.endDate, dateStr);
+    validateEndTime(form.endTime, form.startTime, form.endDate, dateStr, form.allDay);
   };
 
   const handleEndDateInputChange = (dateStr: string) => {
     set('endDate', dateStr);
     validateEndDate(dateStr, form.startDate);
-    validateEndTime(form.endTime, form.startTime, dateStr, form.startDate);
+    validateEndTime(form.endTime, form.startTime, dateStr, form.startDate, form.allDay);
   };
 
   const handleStartTimeChange = (_event: unknown, selectedTime?: Date) => {
@@ -343,15 +412,15 @@ export default function CreateEventScreen() {
       const minutes = String(selectedTime.getMinutes()).padStart(2, '0');
       const timeStr = `${hours}:${minutes}`;
       set('startTime', timeStr);
-      validateStartTime(timeStr, form.startDate);
-      validateEndTime(form.endTime, timeStr, form.endDate, form.startDate);
+      validateStartTime(timeStr, form.startDate, form.allDay);
+      validateEndTime(form.endTime, timeStr, form.endDate, form.startDate, form.allDay);
     }
   };
 
   const handleStartTimeInputChange = (timeStr: string) => {
     set('startTime', timeStr);
-    validateStartTime(timeStr, form.startDate);
-    validateEndTime(form.endTime, timeStr, form.endDate, form.startDate);
+    validateStartTime(timeStr, form.startDate, form.allDay);
+    validateEndTime(form.endTime, timeStr, form.endDate, form.startDate, form.allDay);
   };
 
   const handleEndTimeChange = (_event: unknown, selectedTime?: Date) => {
@@ -363,13 +432,24 @@ export default function CreateEventScreen() {
       const minutes = String(selectedTime.getMinutes()).padStart(2, '0');
       const timeStr = `${hours}:${minutes}`;
       set('endTime', timeStr);
-      validateEndTime(timeStr, form.startTime, form.endDate, form.startDate);
+      validateEndTime(timeStr, form.startTime, form.endDate, form.startDate, form.allDay);
     }
   };
 
   const handleEndTimeInputChange = (timeStr: string) => {
     set('endTime', timeStr);
-    validateEndTime(timeStr, form.startTime, form.endDate, form.startDate);
+    validateEndTime(timeStr, form.startTime, form.endDate, form.startDate, form.allDay);
+  };
+
+  const toggleAllDay = () => {
+    const next = !form.allDay;
+    set('allDay', next);
+    if (next) {
+      setErrors((e) => ({ ...e, startTime: '', endTime: '' }));
+    } else {
+      validateStartTime(form.startTime, form.startDate, false);
+      validateEndTime(form.endTime, form.startTime, form.endDate, form.startDate, false);
+    }
   };
 
   const calendarPresetAppliedRef = useRef(false);
@@ -397,8 +477,7 @@ export default function CreateEventScreen() {
       startTime,
       endDate,
       endTime,
-      startAllDay: false,
-      endAllDay: false,
+      allDay: false,
     }));
     setErrors((e) => ({
       ...e,
@@ -409,18 +488,42 @@ export default function CreateEventScreen() {
     }));
   }, [calendarParams.start, calendarParams.end]);
 
+  const dismiss = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+    if (createReturnTo) {
+      router.replace(createReturnTo as Href);
+      return;
+    }
+    router.replace('/(tabs)/events');
+  }, [router, createReturnTo]);
+
   return (
-    <SafeAreaView style={styles.safe}>
-      <NavBar title="New Event" onBack={() => router.replace('/(tabs)/events')}
+    <EventFormPopoverChrome onClose={dismiss}>
+      <View style={styles.inner}>
+      <NavBar title="New Event" onClose={dismiss}
         right={
-          <TouchableOpacity onPress={submit} style={[styles.headerBtn, !ok && styles.headerBtnDis]}>
-            <Text style={[styles.headerBtnText, !ok && { color: Colors.textMuted }]} numberOfLines={1}>
-              Create
-            </Text>
+          <TouchableOpacity
+            onPress={submit}
+            disabled={!ok || createEventMutation.isPending}
+            style={[styles.headerBtn, (!ok || createEventMutation.isPending) && styles.headerBtnDis]}
+          >
+            {createEventMutation.isPending ? (
+              <ActivityIndicator size="small" color={Colors.accentFg} />
+            ) : (
+              <Text style={[styles.headerBtnText, !ok && { color: Colors.textMuted }]} numberOfLines={1}>
+                Create
+              </Text>
+            )}
           </TouchableOpacity>
         }
       />
-      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={{ padding: 20, paddingBottom: 100, width: '100%', alignSelf: 'stretch' }}
+        showsVerticalScrollIndicator={false}
+      >
 
         <Field label="Group" required>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
@@ -460,241 +563,132 @@ export default function CreateEventScreen() {
           </View>
         </Field>
 
-        <View style={{ marginBottom: 8 }}>
-          <Text style={formSectionTitleStyle}>Activity ideas (optional)</Text>
-          <Text style={{ fontSize: 13, color: Colors.textMuted, fontFamily: Fonts.regular, marginBottom: 10 }}>
-            Add options for what to do; members can add more and vote on the event page.
-          </Text>
-          {form.activityOptionDrafts.map((line, i) => (
-            <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-              <TextInput
-                value={line}
-                onChangeText={(v) =>
-                  setForm((p) => ({
-                    ...p,
-                    activityOptionDrafts: p.activityOptionDrafts.map((x, j) => (j === i ? v : x)),
-                  }))
-                }
-                placeholder={`Option ${i + 1}`}
-                placeholderTextColor={Colors.textMuted}
-                style={[styles.input, { flex: 1 }]}
-              />
-              {form.activityOptionDrafts.length > 1 ? (
-                <TouchableOpacity
-                  onPress={() =>
-                    setForm((p) => ({
-                      ...p,
-                      activityOptionDrafts: p.activityOptionDrafts.filter((_, j) => j !== i),
-                    }))
-                  }
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <Ionicons name="close-circle-outline" size={22} color={Colors.textMuted} />
-                </TouchableOpacity>
+        <View style={styles.dateTimeSection}>
+          <View style={styles.sectionHeader}>
+            <Text style={[formSectionTitleStyle, styles.dateTimeHeading]}>Event time</Text>
+            <TouchableOpacity onPress={toggleAllDay} style={styles.allDayChip} activeOpacity={0.7}>
+              <Text style={[styles.allDayChipText, form.allDay && styles.allDayChipTextActive]}>All-day</Text>
+              <View style={[styles.allDayCheckbox, form.allDay && styles.allDayCheckboxActive]}>
+                {form.allDay && <Ionicons name="checkmark" size={12} color="#fff" />}
+              </View>
+            </TouchableOpacity>
+          </View>
+          <View style={styles.eventTimeStack}>
+            <View style={styles.eventTimeLine}>
+              <Text style={styles.eventTimeLineLabel}>From</Text>
+              <View style={styles.eventTimeRow}>
+                {Platform.OS === 'web' ? (
+                  <View style={[styles.eventTimeCell, styles.eventTimeFieldDate]}>
+                    <input
+                      type="date"
+                      value={form.startDate}
+                      min={today}
+                      onChange={(e: any) => handleStartDateInputChange(e.target.value)}
+                      style={webEventTimeInputStyle(!!errors.startDate)}
+                    />
+                  </View>
+                ) : (
+                  <View style={[styles.eventTimeCell, styles.eventTimeFieldDate]}>
+                    <TouchableOpacity
+                      onPress={() => setShowStartDatePicker(true)}
+                      activeOpacity={0.85}
+                      style={[styles.eventTimeSegment, errors.startDate && styles.inputError]}
+                    >
+                      <Text style={styles.eventTimeSegmentText} numberOfLines={1}>
+                        {form.startDate}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+                {!form.allDay &&
+                  (Platform.OS === 'web' ? (
+                    <View style={[styles.eventTimeCell, styles.eventTimeFieldTime]}>
+                      <input
+                        type="time"
+                        value={form.startTime}
+                        onChange={(e: any) => handleStartTimeInputChange(e.target.value)}
+                        style={webEventTimeInputStyle(!!errors.startTime)}
+                      />
+                    </View>
+                  ) : (
+                    <View style={[styles.eventTimeCell, styles.eventTimeFieldTime]}>
+                      <TouchableOpacity
+                        onPress={() => setShowStartTimePicker(true)}
+                        activeOpacity={0.85}
+                        style={[styles.eventTimeSegment, errors.startTime && styles.inputError]}
+                      >
+                        <Text style={styles.eventTimeSegmentText} numberOfLines={1}>
+                          {form.startTime}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+              </View>
+            </View>
+            <View style={styles.eventTimeLine}>
+              <Text style={styles.eventTimeLineLabel}>To</Text>
+              <View style={styles.eventTimeRow}>
+                {Platform.OS === 'web' ? (
+                  <View style={[styles.eventTimeCell, styles.eventTimeFieldDate]}>
+                    <input
+                      type="date"
+                      value={form.endDate}
+                      min={form.startDate}
+                      onChange={(e: any) => handleEndDateInputChange(e.target.value)}
+                      style={webEventTimeInputStyle(!!errors.endDate)}
+                    />
+                  </View>
+                ) : (
+                  <View style={[styles.eventTimeCell, styles.eventTimeFieldDate]}>
+                    <TouchableOpacity
+                      onPress={() => setShowEndDatePicker(true)}
+                      activeOpacity={0.85}
+                      style={[styles.eventTimeSegment, errors.endDate && styles.inputError]}
+                    >
+                      <Text style={styles.eventTimeSegmentText} numberOfLines={1}>
+                        {form.endDate}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+                {!form.allDay &&
+                  (Platform.OS === 'web' ? (
+                    <View style={[styles.eventTimeCell, styles.eventTimeFieldTime]}>
+                      <input
+                        type="time"
+                        value={form.endTime}
+                        onChange={(e: any) => handleEndTimeInputChange(e.target.value)}
+                        style={webEventTimeInputStyle(!!errors.endTime)}
+                      />
+                    </View>
+                  ) : (
+                    <View style={[styles.eventTimeCell, styles.eventTimeFieldTime]}>
+                      <TouchableOpacity
+                        onPress={() => setShowEndTimePicker(true)}
+                        activeOpacity={0.85}
+                        style={[styles.eventTimeSegment, errors.endTime && styles.inputError]}
+                      >
+                        <Text style={styles.eventTimeSegmentText} numberOfLines={1}>
+                          {form.endTime}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+              </View>
+            </View>
+          </View>
+          {[errors.startDate, errors.startTime, errors.endDate, errors.endTime].some(Boolean) ||
+          showInvalidRangeHint ? (
+            <View style={{ marginTop: 6 }}>
+              {errors.startDate ? <Text style={styles.errorText}>{errors.startDate}</Text> : null}
+              {errors.startTime ? <Text style={styles.errorText}>{errors.startTime}</Text> : null}
+              {errors.endDate ? <Text style={styles.errorText}>{errors.endDate}</Text> : null}
+              {errors.endTime ? <Text style={styles.errorText}>{errors.endTime}</Text> : null}
+              {showInvalidRangeHint ? (
+                <Text style={styles.errorText}>End must be after start</Text>
               ) : null}
             </View>
-          ))}
-          <TouchableOpacity
-            onPress={() => setForm((prev) => ({ ...prev, activityOptionDrafts: [...prev.activityOptionDrafts, ''] }))}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4 }}
-          >
-            <Ionicons name="add-circle-outline" size={20} color={Colors.textSub} />
-            <Text style={{ fontSize: 14, color: Colors.text, fontFamily: Fonts.medium }}>Add another option</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.dateTimeSection}>
-          <View style={styles.sectionHeader}>
-            <Text style={[formSectionTitleStyle, styles.dateTimeHeading]}>Start</Text>
-            <TouchableOpacity 
-              onPress={() => set('startAllDay', !form.startAllDay)}
-              style={styles.allDayChip}
-              activeOpacity={0.7}
-            >
-              <Text style={[styles.allDayChipText, form.startAllDay && styles.allDayChipTextActive]}>
-                All-day
-              </Text>
-              <View style={[styles.allDayCheckbox, form.startAllDay && styles.allDayCheckboxActive]}>
-                {form.startAllDay && <Ionicons name="checkmark" size={12} color="#fff" />}
-              </View>
-            </TouchableOpacity>
-          </View>
-          
-          <View style={{ flexDirection: 'row', gap: 12 }}>
-            <View style={{ flex: 1 }}>
-              <Field label="Date" required>
-                {errors.startDate ? <Text style={styles.errorText}>{errors.startDate}</Text> : null}
-                {Platform.OS === 'web' ? (
-                  <input
-                    type="date"
-                    value={form.startDate}
-                    min={today}
-                    onChange={(e: any) => handleStartDateInputChange(e.target.value)}
-                    style={{
-                      padding: '10px 14px',
-                      borderRadius: 10,
-                      border: errors.startDate ? '1.5px solid #EF4444' : '1.5px solid #E5E5E5',
-                      backgroundColor: '#FAFAFA',
-                      fontSize: 14,
-                      color: '#1A1A1A',
-                      fontFamily: 'DMSans_400Regular',
-                      width: '100%',
-                      boxSizing: 'border-box',
-                      outline: 'none',
-                    }}
-                  />
-                ) : (
-                  <TouchableOpacity onPress={() => setShowStartDatePicker(true)} activeOpacity={1}>
-                    <View pointerEvents="none">
-                      <TextInput 
-                        value={form.startDate} 
-                        placeholder="YYYY-MM-DD" 
-                        placeholderTextColor={Colors.textMuted} 
-                        style={[styles.input, errors.startDate && styles.inputError]}
-                        editable={false}
-                      />
-                    </View>
-                  </TouchableOpacity>
-                )}
-              </Field>
-            </View>
-            {!form.startAllDay && (
-              <View style={{ flex: 1 }}>
-                <Field label="Time" required>
-                  {errors.startTime ? <Text style={styles.errorText}>{errors.startTime}</Text> : null}
-                  {Platform.OS === 'web' ? (
-                    <input
-                      type="time"
-                      value={form.startTime}
-                      onChange={(e: any) => handleStartTimeInputChange(e.target.value)}
-                      style={{
-                        padding: '10px 14px',
-                        borderRadius: 10,
-                        border: errors.startTime ? '1.5px solid #EF4444' : '1.5px solid #E5E5E5',
-                        backgroundColor: '#FAFAFA',
-                        fontSize: 14,
-                        color: '#1A1A1A',
-                        fontFamily: 'DMSans_400Regular',
-                        width: '100%',
-                        boxSizing: 'border-box',
-                        outline: 'none',
-                      }}
-                    />
-                  ) : (
-                    <TouchableOpacity onPress={() => setShowStartTimePicker(true)} activeOpacity={1}>
-                      <View pointerEvents="none">
-                        <TextInput 
-                          value={form.startTime} 
-                          placeholder="HH:MM" 
-                          placeholderTextColor={Colors.textMuted} 
-                          style={[styles.input, errors.startTime && styles.inputError]}
-                          editable={false}
-                        />
-                      </View>
-                    </TouchableOpacity>
-                  )}
-                </Field>
-              </View>
-            )}
-          </View>
-        </View>
-
-        <View style={styles.divider} />
-
-        <View style={styles.dateTimeSection}>
-          <View style={styles.sectionHeader}>
-            <Text style={[formSectionTitleStyle, styles.dateTimeHeading]}>End</Text>
-            <TouchableOpacity 
-              onPress={() => set('endAllDay', !form.endAllDay)}
-              style={styles.allDayChip}
-              activeOpacity={0.7}
-            >
-              <Text style={[styles.allDayChipText, form.endAllDay && styles.allDayChipTextActive]}>
-                All-day
-              </Text>
-              <View style={[styles.allDayCheckbox, form.endAllDay && styles.allDayCheckboxActive]}>
-                {form.endAllDay && <Ionicons name="checkmark" size={12} color="#fff" />}
-              </View>
-            </TouchableOpacity>
-          </View>
-          
-          <View style={{ flexDirection: 'row', gap: 12 }}>
-            <View style={{ flex: 1 }}>
-              <Field label="Date" required>
-                {errors.endDate ? <Text style={styles.errorText}>{errors.endDate}</Text> : null}
-                {Platform.OS === 'web' ? (
-                  <input
-                    type="date"
-                    value={form.endDate}
-                    min={form.startDate}
-                    onChange={(e: any) => handleEndDateInputChange(e.target.value)}
-                    style={{
-                      padding: '10px 14px',
-                      borderRadius: 10,
-                      border: errors.endDate ? '1.5px solid #EF4444' : '1.5px solid #E5E5E5',
-                      backgroundColor: '#FAFAFA',
-                      fontSize: 14,
-                      color: '#1A1A1A',
-                      fontFamily: 'DMSans_400Regular',
-                      width: '100%',
-                      boxSizing: 'border-box',
-                      outline: 'none',
-                    }}
-                  />
-                ) : (
-                  <TouchableOpacity onPress={() => setShowEndDatePicker(true)} activeOpacity={1}>
-                    <View pointerEvents="none">
-                      <TextInput 
-                        value={form.endDate} 
-                        placeholder="YYYY-MM-DD" 
-                        placeholderTextColor={Colors.textMuted} 
-                        style={[styles.input, errors.endDate && styles.inputError]}
-                        editable={false}
-                      />
-                    </View>
-                  </TouchableOpacity>
-                )}
-              </Field>
-            </View>
-            {!form.endAllDay && (
-              <View style={{ flex: 1 }}>
-                <Field label="Time" required>
-                  {errors.endTime ? <Text style={styles.errorText}>{errors.endTime}</Text> : null}
-                  {Platform.OS === 'web' ? (
-                    <input
-                      type="time"
-                      value={form.endTime}
-                      onChange={(e: any) => handleEndTimeInputChange(e.target.value)}
-                      style={{
-                        padding: '10px 14px',
-                        borderRadius: 10,
-                        border: errors.endTime ? '1.5px solid #EF4444' : '1.5px solid #E5E5E5',
-                        backgroundColor: '#FAFAFA',
-                        fontSize: 14,
-                        color: '#1A1A1A',
-                        fontFamily: 'DMSans_400Regular',
-                        width: '100%',
-                        boxSizing: 'border-box',
-                        outline: 'none',
-                      }}
-                    />
-                  ) : (
-                    <TouchableOpacity onPress={() => setShowEndTimePicker(true)} activeOpacity={1}>
-                      <View pointerEvents="none">
-                        <TextInput 
-                          value={form.endTime} 
-                          placeholder="HH:MM" 
-                          placeholderTextColor={Colors.textMuted} 
-                          style={[styles.input, errors.endTime && styles.inputError]}
-                          editable={false}
-                        />
-                      </View>
-                    </TouchableOpacity>
-                  )}
-                </Field>
-              </View>
-            )}
-          </View>
+          ) : null}
         </View>
 
         {Platform.OS !== 'web' && showStartDatePicker && (
@@ -853,7 +847,6 @@ export default function CreateEventScreen() {
                 </View>
               </TouchableOpacity>
             </View>
-            <Text style={styles.photosDeferHint}>Photos upload when you create the event.</Text>
           </View>
         </View>
 
@@ -863,21 +856,35 @@ export default function CreateEventScreen() {
             {form.maxAttendees.trim() ? (
               <Toggle value={form.enableWaitlist} onChange={v => set('enableWaitlist', v)} label="Enable waitlist" />
             ) : null}
+            <Toggle
+              value={form.activityIdeasEnabled}
+              onChange={(v) => set('activityIdeasEnabled', v)}
+              label="Enable activity ideas"
+            />
           </View>
         </Field>
 
-        <TouchableOpacity onPress={submit} style={[styles.submitBtn, !ok && { backgroundColor: Colors.border }]} disabled={!ok}>
-          <Text style={[styles.submitBtnText, !ok && { color: Colors.textMuted }]} numberOfLines={1}>
-            Create Event
-          </Text>
+        <TouchableOpacity
+          onPress={submit}
+          style={[styles.submitBtn, (!ok || createEventMutation.isPending) && { backgroundColor: Colors.border }]}
+          disabled={!ok || createEventMutation.isPending}
+        >
+          {createEventMutation.isPending ? (
+            <ActivityIndicator color={Colors.accentFg} />
+          ) : (
+            <Text style={[styles.submitBtnText, !ok && { color: Colors.textMuted }]} numberOfLines={1}>
+              Create event
+            </Text>
+          )}
         </TouchableOpacity>
       </ScrollView>
-    </SafeAreaView>
+      </View>
+    </EventFormPopoverChrome>
   );
 }
 
 const styles = StyleSheet.create({
-  safe:          { flex: 1, backgroundColor: Colors.bg },
+  inner:         { flex: 1, backgroundColor: Colors.bg },
   headerBtn:     { paddingHorizontal: 16, paddingVertical: 8, borderRadius: Radius.lg, backgroundColor: Colors.accent, flexShrink: 0 },
   headerBtnDis:  { backgroundColor: Colors.border },
   headerBtnText: { fontSize: 13, fontFamily: Fonts.semiBold, color: Colors.accentFg },
@@ -901,13 +908,76 @@ const styles = StyleSheet.create({
   removeThumb:   { position: 'absolute', top: -5, right: -5, width: 18, height: 18, borderRadius: 9, backgroundColor: Colors.text, borderWidth: 2, borderColor: Colors.surface, alignItems: 'center', justifyContent: 'center' },
   submitBtn:     { paddingVertical: 14, paddingHorizontal: 20, borderRadius: Radius.lg, backgroundColor: Colors.accent, alignItems: 'center', justifyContent: 'center', marginTop: 8, minHeight: 48 },
   submitBtnText: { fontSize: 15, fontFamily: Fonts.bold, color: Colors.accentFg, textAlign: 'center' },
-  dateTimeSection: { marginBottom: 12 },
+  dateTimeSection: { marginBottom: 12, width: '100%', alignSelf: 'stretch' },
   dateTimeHeading: { marginBottom: 0 },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+    width: '100%',
+    alignSelf: 'stretch',
+  },
   allDayChip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 3, paddingHorizontal: 9, borderRadius: Radius.full, backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border },
   allDayChipText: { fontSize: 12, fontFamily: Fonts.medium, color: Colors.textSub },
   allDayChipTextActive: { color: Colors.text },
   allDayCheckbox: { width: 18, height: 18, borderRadius: 4, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.bg, alignItems: 'center', justifyContent: 'center' },
   allDayCheckboxActive: { backgroundColor: Colors.accent, borderColor: Colors.accent },
-  divider: { height: 1, backgroundColor: Colors.border, marginVertical: 5 },
+  eventTimeStack: {
+    width: '100%',
+    alignSelf: 'stretch',
+    gap: 14,
+    marginTop: 4,
+  },
+  eventTimeLine: {
+    width: '100%',
+    alignSelf: 'stretch',
+  },
+  eventTimeLineLabel: {
+    fontSize: 12,
+    fontFamily: Fonts.medium,
+    color: Colors.textMuted,
+    marginBottom: 4,
+  },
+  eventTimeRow: {
+    width: '100%',
+    alignSelf: 'stretch',
+    flexDirection: 'row',
+    flexWrap: 'nowrap',
+    alignItems: 'stretch',
+    gap: 6,
+  },
+  eventTimeCell: {
+    minWidth: 0,
+    justifyContent: 'center',
+  },
+  /** ~60% / 40% split when date + time share a row; single child (all-day) grows to full row width. */
+  eventTimeFieldDate: {
+    flexGrow: 3,
+    flexShrink: 1,
+    flexBasis: 0,
+    alignSelf: 'stretch',
+  },
+  eventTimeFieldTime: {
+    flexGrow: 2,
+    flexShrink: 1,
+    flexBasis: 0,
+    alignSelf: 'stretch',
+  },
+  eventTimeSegment: {
+    width: '100%',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: Radius.md,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    backgroundColor: Colors.bg,
+    justifyContent: 'center',
+    minHeight: 40,
+  },
+  eventTimeSegmentText: {
+    fontSize: 13,
+    fontFamily: Fonts.medium,
+    color: Colors.text,
+  },
 });

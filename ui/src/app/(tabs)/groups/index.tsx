@@ -10,7 +10,8 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, usePathname } from 'expo-router';
+import { withReturnTo } from '../../../utils/navigationReturn';
 import { Colors, Fonts, Layout, Radius } from '../../../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName, groupAvatarBorderRadius } from '../../../utils/helpers';
 import {
@@ -29,6 +30,7 @@ import { CreateOrJoinButton } from '../../../components/CreateOrJoinButton';
 
 export default function GroupsScreen() {
   const router = useRouter();
+  const pathname = usePathname();
   const { userId: currentUserId } = useCurrentUserContext();
   const [showNotifs, setShowNotifs] = useState(false);
 
@@ -107,7 +109,7 @@ export default function GroupsScreen() {
                   return (
                     <TouchableOpacity
                       key={g.id}
-                      onPress={() => router.push(`/groups/${g.id}`)}
+                      onPress={() => router.push(withReturnTo(`/groups/${g.id}`, pathname))}
                       style={[styles.row, hasMore && styles.rowBorder]}
                       activeOpacity={0.7}
                     >
@@ -156,7 +158,7 @@ export default function GroupsScreen() {
                     return (
                       <TouchableOpacity
                         key={g.id}
-                        onPress={() => router.push(`/groups/${g.id}`)}
+                        onPress={() => router.push(withReturnTo(`/groups/${g.id}`, pathname))}
                         style={[styles.row, styles.deletedRow, i < deletedGroups.length - 1 && styles.rowBorder]}
                         activeOpacity={0.7}
                       >
@@ -258,7 +260,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: Colors.surface,
+    backgroundColor: Colors.bg,
   },
   groupName: { fontSize: 15, fontFamily: Fonts.semiBold, color: Colors.text, marginBottom: 2 },
   groupMeta: { fontSize: 12, color: Colors.textMuted, fontFamily: Fonts.regular },

@@ -1,5 +1,15 @@
-import { useState, useMemo, useEffect } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Platform, Alert } from 'react-native';
+import { useState, useMemo, useEffect, useCallback } from 'react';
+import {
+  View,
+  Text,
+  ScrollView,
+  TouchableOpacity,
+  StyleSheet,
+  Platform,
+  Alert,
+  Modal,
+  ActivityIndicator,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -16,7 +26,7 @@ if (Platform.OS === 'web') {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   require('./react-datepicker-overrides.css');
 }
-import { useRouter, type Href } from 'expo-router';
+import { useRouter, usePathname, type Href } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { Colors, Fonts, Layout, Radius } from '../../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName } from '../../utils/helpers';
@@ -43,18 +53,16 @@ import {
   type EventsScreenPersistedV1,
   type CalendarScopeMode,
 } from '../../utils/eventsScreenPrefs';
-import { expandRecurringEventsInRange } from '../../utils/recurrence';
-import type { EventDetailed } from '@moija/client';
-
-function eventDetailHref(ev: EventDetailed & { __occurrenceKey?: number }) {
-  const base = `/event/${ev.id}`;
-  if (!ev.recurrenceRule?.trim()) return base;
-  const start = typeof ev.start === 'string' ? ev.start : new Date(ev.start as string).toISOString();
-  return `${base}?at=${encodeURIComponent(start)}`;
-}
+import { EventUpdate, type EventDetailed } from '@moija/client';
+import {
+  SERIES_SCOPE_OPTIONS,
+  type SeriesUpdateScope,
+} from '../../utils/seriesUpdateScopeOptions';
+import { withReturnTo } from '../../utils/navigationReturn';
 
 export default function EventsScreen() {
   const router = useRouter();
+  const pathname = usePathname();
   const queryClient = useQueryClient();
   const { userId: currentUserId } = useCurrentUserContext();
   
@@ -63,6 +71,12 @@ export default function EventsScreen() {
   const { data: notifs = [], isLoading: notifsLoading } = useNotifications(currentUserId || '');
   const { data: groupColors = {} } = useAllGroupMemberColors(currentUserId || '');
   const weekEventTimeMove = useWeekEventTimeMove(currentUserId ?? '');
+  const [weekMoveDraft, setWeekMoveDraft] = useState<null | { ev: EventDetailed; start: Date; end: Date }>(
+    null
+  );
+  const [weekMoveScope, setWeekMoveScope] = useState<SeriesUpdateScope>(
+    EventUpdate.seriesUpdateScope.THIS_OCCURRENCE
+  );
   const groups = allGroups.filter(g => g.membershipStatus === 'member' || g.membershipStatus === 'admin');
   
   // Manual polling for notifications every 5 seconds
@@ -137,6 +151,9 @@ export default function EventsScreen() {
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
   const [calendarScopeMode, setCalendarScopeMode] = useState<CalendarScopeMode>('week');
   const [calendarFocusDate, setCalendarFocusDate] = useState(() => new Date());
+  const [calendarBodyScrollY, setCalendarBodyScrollY] = useState<
+    Partial<Record<CalendarScopeMode, number>>
+  >({});
   const [prefsReady, setPrefsReady] = useState(false);
   const unread = notifs.filter(n => !n.read).length;
 
@@ -151,6 +168,7 @@ export default function EventsScreen() {
         if (partial.calendarFocusIso !== undefined) {
           setCalendarFocusDate(parseCalendarFocusIso(partial.calendarFocusIso));
         }
+        if (partial.calendarBodyScrollY) setCalendarBodyScrollY(partial.calendarBodyScrollY);
         if (partial.selectedGroupIds !== undefined) setSelectedGroupIds(partial.selectedGroupIds);
         if (partial.filterRsvp !== undefined) setFilterRsvp(partial.filterRsvp);
         if (partial.filterNeeds !== undefined) setFilterNeeds(partial.filterNeeds);
@@ -174,6 +192,7 @@ export default function EventsScreen() {
       viewMode,
       calendarScopeMode,
       calendarFocusIso: calendarFocusDate.toISOString(),
+      calendarBodyScrollY: Object.keys(calendarBodyScrollY).length ? calendarBodyScrollY : undefined,
       selectedGroupIds,
       filterRsvp,
       filterNeeds,
@@ -189,6 +208,7 @@ export default function EventsScreen() {
     viewMode,
     calendarScopeMode,
     calendarFocusDate,
+    calendarBodyScrollY,
     selectedGroupIds,
     filterRsvp,
     filterNeeds,
@@ -198,6 +218,10 @@ export default function EventsScreen() {
     startMode,
     endMode,
   ]);
+
+  const onCalendarBodyScrollYCommit = useCallback((mode: CalendarScopeMode, y: number) => {
+    setCalendarBodyScrollY((prev) => ({ ...prev, [mode]: y }));
+  }, []);
 
   const filtered = useMemo(() => {
     const parseBound = (txt: string): Date | null => {
@@ -237,15 +261,22 @@ export default function EventsScreen() {
           ? parseBound(endDateText)
           : null; // allTime → no upper bound
 
-    const now = new Date();
-    const expandWinStart =
-      startBound ?? new Date(now.getFullYear() - 2, now.getMonth(), now.getDate());
-    const expandWinEnd =
-      endBound ?? new Date(now.getFullYear() + 3, now.getMonth(), now.getDate());
+    /** Date picker default is 00:00 — treat as “through that calendar day”, not “before midnight”. */
+    const inclusiveEndCutoff = (b: Date): Date => {
+      if (
+        b.getHours() === 0 &&
+        b.getMinutes() === 0 &&
+        b.getSeconds() === 0 &&
+        b.getMilliseconds() === 0
+      ) {
+        return new Date(b.getFullYear(), b.getMonth(), b.getDate(), 23, 59, 59, 999);
+      }
+      return b;
+    };
 
-    const expanded = expandRecurringEventsInRange(events, expandWinStart, expandWinEnd);
+    const endFilterCutoff = endBound != null ? inclusiveEndCutoff(endBound) : null;
 
-    return expanded.filter(ev => {
+    return events.filter(ev => {
       if (!groups.some(g => g.id === ev.groupId)) return false;
       if (selectedGroupIds.length > 0 && !selectedGroupIds.includes(ev.groupId)) return false;
 
@@ -254,8 +285,8 @@ export default function EventsScreen() {
       
       // Use end time for start bound (so ongoing events show up)
       if (startBound && evEnd.getTime() <= startBound.getTime()) return false;
-      // Use start time for end bound
-      if (endBound && evStart.getTime() >= endBound.getTime()) return false;
+      // Inclusive end: hide only when start is after the cutoff instant
+      if (endFilterCutoff && evStart.getTime() > endFilterCutoff.getTime()) return false;
 
       const rsvps = ev.rsvps || [];
       const myGoing    = !!rsvps.find(r => r.userId === currentUserId && r.status === 'going');
@@ -651,64 +682,88 @@ export default function EventsScreen() {
 
       {/* Events */}
       <View style={styles.eventsContent}>
-        {filtered.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Ionicons name="calendar-outline" size={56} color={Colors.textMuted} style={styles.emptyGlyph} />
-            <Text style={styles.emptyTitle}>No events</Text>
-            <Text style={styles.emptyDesc}>
-              {hasFilters ? 'Try adjusting your filters' : 'Create an event to get started'}
-            </Text>
-          </View>
-        ) : viewMode === 'list' ? (
-          <ListView
-            events={filtered}
-            groups={groups}
-            groupColors={groupColors}
-            onSelect={(ev) =>
-              router.push(eventDetailHref(ev as EventDetailed & { __occurrenceKey?: number }) as Href)
-            }
-            onSelectGroup={groupId => router.push(`/groups/${groupId}`)}
-          />
+        {viewMode === 'list' ? (
+          filtered.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Ionicons name="calendar-outline" size={56} color={Colors.textMuted} style={styles.emptyGlyph} />
+              <Text style={styles.emptyTitle}>No events</Text>
+              <Text style={styles.emptyDesc}>
+                {hasFilters ? 'Try adjusting your filters' : 'Create an event to get started'}
+              </Text>
+            </View>
+          ) : (
+            <ListView
+              events={filtered}
+              groups={groups}
+              groupColors={groupColors}
+              onSelect={(ev) =>
+                router.push(withReturnTo(`/event/${(ev as EventDetailed).id}`, pathname))
+              }
+              onSelectGroup={groupId => router.push(withReturnTo(`/groups/${groupId}`, pathname))}
+            />
+          )
         ) : (
           <CalendarView
             events={filtered}
             groups={groups}
             groupColors={groupColors}
             onSelectEvent={(ev) =>
-              router.push(eventDetailHref(ev as EventDetailed & { __occurrenceKey?: number }) as Href)
+              router.push(withReturnTo(`/event/${(ev as EventDetailed).id}`, pathname))
             }
-            onSelectGroup={groupId => router.push(`/groups/${groupId}`)}
+            onSelectGroup={groupId => router.push(withReturnTo(`/groups/${groupId}`, pathname))}
             calendarFocusDate={calendarFocusDate}
             onCalendarFocusDateChange={setCalendarFocusDate}
             calendarScopeMode={calendarScopeMode}
             onCalendarScopeModeChange={setCalendarScopeMode}
-            onWeekCreateEvent={(start, end) =>
+            calendarBodyScrollY={calendarBodyScrollY}
+            onCalendarBodyScrollYCommit={onCalendarBodyScrollYCommit}
+            calendarScrollPrefsReady={prefsReady}
+            onWeekCreateEvent={(start, end) => {
+              if (groups.length === 0) {
+                Alert.alert(
+                  'No Groups',
+                  'You need to join or create a group before creating an event.'
+                );
+                return;
+              }
               router.push(
-                `/create-event?start=${encodeURIComponent(start.toISOString())}&end=${encodeURIComponent(end.toISOString())}`
-              )
-            }
+                withReturnTo(
+                  `/create-event?start=${encodeURIComponent(start.toISOString())}&end=${encodeURIComponent(end.toISOString())}`,
+                  pathname
+                )
+              );
+            }}
             onWeekEventTimeMove={
               currentUserId
                 ? async (ev, start, end) => {
-                    try {
-                      await weekEventTimeMove.mutateAsync({
-                        eventId: ev.id,
-                        start: start.toISOString(),
-                        end: end.toISOString(),
-                      });
-                      setCalendarFocusDate(
-                        new Date(start.getFullYear(), start.getMonth(), start.getDate())
-                      );
-                    } catch {
-                      Alert.alert('Error', 'Could not update event time');
+                    const detailed = ev as EventDetailed;
+                    const inSeries = !!detailed.recurrenceSeriesId?.trim();
+                    if (!inSeries) {
+                      try {
+                        await weekEventTimeMove.mutateAsync({
+                          eventId: ev.id,
+                          start: start.toISOString(),
+                          end: end.toISOString(),
+                          viewerTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                        });
+                        setCalendarFocusDate(
+                          new Date(start.getFullYear(), start.getMonth(), start.getDate())
+                        );
+                      } catch {
+                        Alert.alert('Error', 'Could not update event time');
+                      }
+                      return;
                     }
+                    setWeekMoveScope(EventUpdate.seriesUpdateScope.THIS_OCCURRENCE);
+                    setWeekMoveDraft({ ev: detailed, start, end });
                   }
                 : undefined
             }
             weekEventMovePendingId={
-              weekEventTimeMove.isPending && weekEventTimeMove.variables
+              weekMoveDraft?.ev.id ??
+              (weekEventTimeMove.isPending && weekEventTimeMove.variables
                 ? weekEventTimeMove.variables.eventId
-                : null
+                : null)
             }
           />
         )}
@@ -767,6 +822,97 @@ export default function EventsScreen() {
         groups={groups.map((g) => ({ id: g.id, name: g.name }))}
         groupColors={groupColors}
       />
+
+      <Modal
+        visible={!!weekMoveDraft}
+        transparent
+        animationType="fade"
+        onRequestClose={() => !weekEventTimeMove.isPending && setWeekMoveDraft(null)}
+      >
+        <View style={styles.weekMoveOverlay}>
+          <View style={styles.weekMoveBox}>
+            <Text style={styles.weekMoveTitle}>Move repeating event</Text>
+            <Text style={styles.weekMoveMessage}>
+              Choose which occurrences get the new time from the calendar.
+            </Text>
+            <View style={styles.weekMoveSettingsCard}>
+              {SERIES_SCOPE_OPTIONS.map((opt, i) => {
+                const sel = weekMoveScope === opt.key;
+                return (
+                  <TouchableOpacity
+                    key={opt.key}
+                    onPress={() => !weekEventTimeMove.isPending && setWeekMoveScope(opt.key)}
+                    style={[
+                      styles.weekMoveScopeRow,
+                      i > 0 && styles.weekMoveScopeRowBorder,
+                      sel && styles.weekMoveScopeRowSelected,
+                    ]}
+                    activeOpacity={0.85}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: sel }}
+                  >
+                    <View style={[styles.weekMoveRadioOuter, sel && styles.weekMoveRadioOuterOn]}>
+                      {sel ? <View style={styles.weekMoveRadioInner} /> : null}
+                    </View>
+                    <View style={styles.weekMoveScopeTextCol}>
+                      <Text style={styles.weekMoveScopeTitle}>{opt.title}</Text>
+                      <Text style={styles.weekMoveScopeSub}>{opt.sub}</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <View style={styles.weekMoveActions}>
+              <TouchableOpacity
+                onPress={() => setWeekMoveDraft(null)}
+                style={[styles.weekMoveCancelBtn, { flex: 1 }]}
+                disabled={weekEventTimeMove.isPending}
+              >
+                <Text style={styles.weekMoveCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => {
+                  if (!weekMoveDraft || !currentUserId) return;
+                  const draft = weekMoveDraft;
+                  void (async () => {
+                    try {
+                      await weekEventTimeMove.mutateAsync({
+                        eventId: draft.ev.id,
+                        start: draft.start.toISOString(),
+                        end: draft.end.toISOString(),
+                        seriesUpdateScope: weekMoveScope,
+                        viewerTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                      });
+                      setWeekMoveDraft(null);
+                      setCalendarFocusDate(
+                        new Date(
+                          draft.start.getFullYear(),
+                          draft.start.getMonth(),
+                          draft.start.getDate()
+                        )
+                      );
+                    } catch {
+                      Alert.alert('Error', 'Could not update event time');
+                    }
+                  })();
+                }}
+                style={[
+                  styles.weekMoveSaveBtn,
+                  { flex: 1 },
+                  weekEventTimeMove.isPending && styles.weekMoveSaveBtnDis,
+                ]}
+                disabled={weekEventTimeMove.isPending}
+              >
+                {weekEventTimeMove.isPending ? (
+                  <ActivityIndicator size="small" color={Colors.accentFg} />
+                ) : (
+                  <Text style={styles.weekMoveSaveText}>Apply</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
     </SafeAreaView>
   );
@@ -1048,4 +1194,88 @@ const styles = StyleSheet.create({
   emptyDesc:   { fontSize: 14, fontFamily: Fonts.regular, color: Colors.textMuted, textAlign: 'center', marginBottom: 24, lineHeight: 20 },
   emptyBtn:    { paddingHorizontal: 24, paddingVertical: 12, borderRadius: Radius.lg, backgroundColor: Colors.accent },
   emptyBtnText:{ fontSize: 15, fontFamily: Fonts.semiBold, color: Colors.accentFg },
+  weekMoveOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  weekMoveBox: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius['2xl'],
+    padding: 24,
+    width: '100%',
+    maxWidth: 400,
+  },
+  weekMoveTitle: { fontSize: 18, fontFamily: Fonts.bold, color: Colors.text, marginBottom: 8 },
+  weekMoveMessage: {
+    fontSize: 14,
+    color: Colors.textSub,
+    fontFamily: Fonts.regular,
+    lineHeight: 20,
+    marginBottom: 12,
+  },
+  weekMoveSettingsCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.xl,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    overflow: 'hidden',
+  },
+  weekMoveScopeRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+  },
+  weekMoveScopeRowBorder: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.border,
+  },
+  weekMoveScopeRowSelected: { backgroundColor: Colors.bg },
+  weekMoveRadioOuter: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: Colors.border,
+    marginTop: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  weekMoveRadioOuterOn: { borderColor: Colors.accent },
+  weekMoveRadioInner: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: Colors.accent,
+  },
+  weekMoveScopeTextCol: { flex: 1, minWidth: 0 },
+  weekMoveScopeTitle: { fontSize: 15, fontFamily: Fonts.semiBold, color: Colors.text },
+  weekMoveScopeSub: {
+    fontSize: 13,
+    fontFamily: Fonts.regular,
+    color: Colors.textMuted,
+    marginTop: 4,
+    lineHeight: 18,
+  },
+  weekMoveActions: { flexDirection: 'row', gap: 12, alignItems: 'stretch', marginTop: 18 },
+  weekMoveCancelBtn: {
+    paddingVertical: 12,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    alignItems: 'center',
+  },
+  weekMoveCancelText: { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.text },
+  weekMoveSaveBtn: {
+    paddingVertical: 12,
+    borderRadius: Radius.lg,
+    backgroundColor: Colors.accent,
+    alignItems: 'center',
+  },
+  weekMoveSaveBtnDis: { backgroundColor: Colors.border },
+  weekMoveSaveText: { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.accentFg },
 });

@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { View, Text, StyleSheet, FlatList } from 'react-native';
-import { Colors, Fonts, Radius } from '../constants/theme';
+import { Colors, Fonts } from '../constants/theme';
+import { dayShort, fmtDateShort } from '../utils/helpers';
 import { EventRow } from './EventRow';
 import { useUsers } from '../hooks/api';
 import { useCurrentUserContext } from '../contexts/CurrentUserContext';
@@ -16,10 +17,36 @@ interface ListViewProps {
 }
 
 type Row =
-  | { key: string; type: 'year'; year: number }
-  | { key: string; type: 'nowDivider' }
-  | { key: string; type: 'upcomingDivider' }
-  | { key: string; type: 'event'; event: EventDetailed; isPast: boolean };
+  | { key: string; type: 'dateDivider'; date: Date }
+  | { key: string; type: 'event'; event: EventDetailed };
+
+function startDateKeyLocal(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function dateFromLocalKey(key: string): Date {
+  const [ys, ms, ds] = key.split('-').map(Number);
+  return new Date(ys, ms - 1, ds);
+}
+
+function insertTodayInOrder(keys: string[], todayKey: string): string[] {
+  if (keys.includes(todayKey)) return keys;
+  const i = keys.findIndex(k => k > todayKey);
+  if (i === -1) return [...keys, todayKey];
+  return [...keys.slice(0, i), todayKey, ...keys.slice(i)];
+}
+
+function isLocalToday(d: Date): boolean {
+  const t = new Date();
+  return (
+    d.getFullYear() === t.getFullYear() &&
+    d.getMonth() === t.getMonth() &&
+    d.getDate() === t.getDate()
+  );
+}
 
 export function ListView({
   events,
@@ -31,7 +58,7 @@ export function ListView({
 }: ListViewProps) {
   const { data: allUsers = [] } = useUsers();
   const { userId: meId } = useCurrentUserContext();
-  
+
   const groupsMap = useMemo(() => {
     const map: Record<string, GroupScoped> = {};
     groups.forEach(g => map[g.id] = g);
@@ -39,139 +66,54 @@ export function ListView({
   }, [groups]);
 
   const rows: Row[] = useMemo(() => {
-    const past: EventDetailed[] = [];
-    const ongoing: EventDetailed[] = [];
-    const upcoming: EventDetailed[] = [];
-    const now = new Date();
-    const nowTime = now.getTime();
+    if (events.length === 0) return [];
 
-    for (const ev of events) {
-      const evStart = new Date(ev.start);
-      const evEnd = new Date(ev.end);
-      
-      if (evEnd.getTime() <= nowTime) {
-        past.push(ev);
-      } else if (evStart.getTime() <= nowTime && evEnd.getTime() > nowTime) {
-        ongoing.push(ev);
-      } else {
-        upcoming.push(ev);
-      }
+    const sorted = [...events].sort(
+      (a, b) => new Date(a.start).getTime() - new Date(b.start).getTime(),
+    );
+
+    const buckets = new Map<string, EventDetailed[]>();
+    for (const ev of sorted) {
+      const key = startDateKeyLocal(new Date(ev.start));
+      const list = buckets.get(key);
+      if (list) list.push(ev);
+      else buckets.set(key, [ev]);
     }
 
-    // Sort each bucket by start time
-    past.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
-    ongoing.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
-    upcoming.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+    const now = new Date();
+    const todayLocal = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayKey = startDateKeyLocal(todayLocal);
 
-    // Past section by year
-    const pastByYear = past.reduce((acc, ev) => {
-      const evStart = new Date(ev.start);
-      const y = evStart.getFullYear();
-      if (!acc.has(y)) acc.set(y, [] as EventDetailed[]);
-      acc.get(y)!.push(ev);
-      return acc;
-    }, new Map<number, EventDetailed[]>());
+    const dayKeys = insertTodayInOrder([...buckets.keys()].sort(), todayKey);
 
     const r: Row[] = [];
-
-    if (past.length) {
-      for (const [year, yearEvents] of Array.from(pastByYear.entries()).sort(
-        (a, b) => a[0] - b[0],
-      )) {
-        r.push({ key: `past-year-${year}`, type: 'year', year });
-        for (const ev of yearEvents) {
-          r.push({
-            key: `past-${ev.id}-${new Date(ev.start).getTime()}`,
-            type: 'event',
-            event: ev,
-            isPast: true,
-          });
-        }
-      }
-    }
-
-    // Now divider (only if there are ongoing events)
-    if (ongoing.length > 0) {
-      r.push({ key: 'now-divider', type: 'nowDivider' });
-      for (const ev of ongoing) {
+    for (const dayKey of dayKeys) {
+      const dividerDate = dateFromLocalKey(dayKey);
+      r.push({ key: `div-${dayKey}`, type: 'dateDivider', date: dividerDate });
+      for (const ev of buckets.get(dayKey) ?? []) {
         r.push({
-          key: `ongoing-${ev.id}-${new Date(ev.start).getTime()}`,
+          key: `ev-${ev.id}-${new Date(ev.start).getTime()}`,
           type: 'event',
           event: ev,
-          isPast: false,
         });
       }
     }
-
-    // Upcoming divider
-    if (upcoming.length > 0) {
-      r.push({ key: 'upcoming-divider', type: 'upcomingDivider' });
-      
-      // Group upcoming by year
-      const upcomingByYear = upcoming.reduce((acc, ev) => {
-        const evStart = new Date(ev.start);
-        const y = evStart.getFullYear();
-        if (!acc.has(y)) acc.set(y, [] as EventDetailed[]);
-        acc.get(y)!.push(ev);
-        return acc;
-      }, new Map<number, EventDetailed[]>());
-      
-      const currentYear = now.getFullYear();
-      const upcomingYears = Array.from(upcomingByYear.keys()).sort((a, b) => a - b);
-      
-      for (const year of upcomingYears) {
-        if (year > currentYear) {
-          r.push({ key: `upcoming-year-${year}`, type: 'year', year });
-        }
-        for (const ev of upcomingByYear.get(year)!) {
-          r.push({
-            key: `upcoming-${ev.id}-${new Date(ev.start).getTime()}`,
-            type: 'event',
-            event: ev,
-            isPast: false,
-          });
-        }
-      }
-    }
-
     return r;
   }, [events]);
 
   const renderItem = ({ item }: { item: Row }) => {
-    if (item.type === 'nowDivider') {
+    if (item.type === 'dateDivider') {
+      const d = item.date;
+      const label = `${dayShort(d)} · ${fmtDateShort(d)}, ${d.getFullYear()}`;
+      const today = isLocalToday(d);
       return (
-        <View style={styles.divider}>
-          <View style={styles.dividerLine} />
-          <View style={styles.nowBadge}>
-            <Text style={styles.nowText}>Now</Text>
-          </View>
-          <View style={styles.dividerLine} />
+        <View style={styles.dateDividerRow}>
+          <View style={[styles.dividerLine, today && styles.dividerLineToday]} />
+          <Text style={[styles.dateDividerLabel, today && styles.dateDividerLabelToday]}>{label}</Text>
+          <View style={[styles.dividerLine, today && styles.dividerLineToday]} />
         </View>
       );
     }
-    if (item.type === 'upcomingDivider') {
-      return (
-        <View style={styles.divider}>
-          <View style={styles.dividerLine} />
-          <View style={styles.upcomingBadge}>
-            <Text style={styles.upcomingText}>Upcoming</Text>
-          </View>
-          <View style={styles.dividerLine} />
-        </View>
-      );
-    }
-    if (item.type === 'year') {
-      return (
-        <View style={styles.yearDivider}>
-          <View style={styles.dividerLine} />
-          <View style={styles.yearBadge}>
-            <Text style={styles.yearText}>{item.year}</Text>
-          </View>
-          <View style={styles.dividerLine} />
-        </View>
-      );
-    }
-    // event
     const group = groupsMap[item.event.groupId];
     const userColorHex = groupColors[item.event.groupId];
     return (
@@ -212,61 +154,29 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     marginBottom: 0.5,
   },
-  divider: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 4,
-  },
-  dividerLine: { 
-    flex: 1, 
-    height: 1, 
+  dividerLine: {
+    flex: 1,
+    height: 1,
     backgroundColor: Colors.border,
   },
-  yearDivider: {
+  dateDividerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingVertical: 12,
+    gap: 10,
+    paddingVertical: 10,
     paddingHorizontal: 4,
   },
-  yearBadge: {},
-  yearText: {
+  dateDividerLabel: {
     fontSize: 11,
-    fontFamily: Fonts.semiBold,
+    fontFamily: Fonts.medium,
     color: Colors.textMuted,
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
+    flexShrink: 0,
   },
-  nowBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: Radius.full,
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.border,
+  dividerLineToday: {
+    backgroundColor: Colors.todayRed,
   },
-  nowText: {
-    fontSize: 11,
+  dateDividerLabelToday: {
+    color: Colors.todayRed,
     fontFamily: Fonts.semiBold,
-    color: Colors.textSub,
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
-  },
-  upcomingBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: Radius.full,
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  upcomingText: {
-    fontSize: 11,
-    fontFamily: Fonts.semiBold,
-    color: Colors.textSub,
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
   },
 });

@@ -27,7 +27,9 @@ import {
 } from '../utils/commentMentions';
 import { LocalUploadService } from './LocalUploadService';
 import { normalizeRecurrenceRule } from '../utils/recurrenceRuleValidate';
-import { parseRecurrenceExdatesJson, serializeRecurrenceExdatesJson } from '../utils/recurrenceExdates';
+import { listOccurrenceStartsForRule } from '../utils/recurrenceTruncate';
+import { utcInstantFromClient } from '../utils/utcInstantFromClient';
+import { seriesOccurrenceStartEndFromForm } from '../utils/seriesOccurrenceScheduleFromForm';
 
 const prisma = new PrismaClient();
 const notificationService = new NotificationService();
@@ -36,6 +38,57 @@ const localUploads = new LocalUploadService();
 const COMMENT_MENTION_NOTIFICATION_TITLE = 'You were mentioned';
 /** Shown when a group admin removes someone else's comment (soft-delete). */
 export const COMMENT_DELETED_BY_ADMIN_TEXT = 'This message was deleted by admin';
+
+/** Match a calendar row to a series member when truncating (ISO vs DB skew). */
+const MS_SERIES_OCCURRENCE_MATCH = 120000;
+
+type ResolvedSeriesScope =
+  | 'none'
+  | 'legacy_single_row'
+  | 'this_occurrence'
+  | 'this_and_following'
+  | 'all_occurrences';
+
+function resolveSeriesUpdateScope(
+  seriesId: string | null | undefined,
+  seriesUpdateScope: EventUpdate['seriesUpdateScope']
+): ResolvedSeriesScope {
+  if (!seriesId) return 'none';
+  if (seriesUpdateScope) return seriesUpdateScope;
+  return 'legacy_single_row';
+}
+
+/** Prisma where for rows touched when `seriesUpdateScope` is `this_and_following`: this occurrence + same series with start strictly after the edited row. */
+function seriesThisAndFollowingWhere(seriesId: string, eventId: string, anchorStart: Date) {
+  return {
+    recurrenceSeriesId: seriesId,
+    OR: [{ id: eventId }, { start: { gt: anchorStart } }],
+  } as const;
+}
+
+async function seriesSiblingIdsAll(seriesId: string): Promise<string[]> {
+  const rows = await prisma.event.findMany({
+    where: { recurrenceSeriesId: seriesId },
+    select: { id: true },
+  });
+  return rows.map((r) => r.id);
+}
+
+function normalizeRsvpDeadlineFromClient(raw: string | null | undefined): Date | null {
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  if (s === '') return null;
+  return utcInstantFromClient(s);
+}
+
+/** Same offset from `occStart` as `anchorDeadline` has from `firstAnchor` (recurring series). */
+function shiftRsvpDeadlineForOccurrence(
+  anchorDeadline: Date,
+  occStart: Date,
+  firstAnchor: Date
+): Date {
+  return new Date(anchorDeadline.getTime() + (occStart.getTime() - firstAnchor.getTime()));
+}
 
 export class EventService {
   /**
@@ -219,11 +272,20 @@ export class EventService {
     );
   }
 
+  /** Only the event host (creator) may update event fields, even if no longer a group member. */
+  private async assertCanUpdateEvent(
+    event: { groupId: string; createdBy: string },
+    actorId: string,
+  ): Promise<void> {
+    if (event.createdBy === actorId) return;
+    throw Object.assign(new Error('Only the event host can update this event'), { status: 403 });
+  }
+
   /**
-   * Creator may always edit/delete their event (even if no longer a member).
-   * Admins and superadmins may edit/delete other members' events while they remain active in the group.
+   * Host may always delete their event. Active group admins/superadmins may delete any member's event
+   * in the group (but cannot update it).
    */
-  private async assertCanMutateEvent(
+  private async assertCanDeleteEvent(
     event: { groupId: string; createdBy: string },
     actorId: string,
   ): Promise<void> {
@@ -231,7 +293,7 @@ export class EventService {
     const role = await this.getActiveMemberRole(event.groupId, actorId);
     if (role && this.isAdminOrSuperadminRole(role)) return;
     throw Object.assign(
-      new Error('Only the event creator or group admins can update or delete this event'),
+      new Error('Only the event host or group admins can delete this event'),
       { status: 403 },
     );
   }
@@ -269,7 +331,13 @@ export class EventService {
     if (userId && !(await this.userCanReadEvent(event, userId))) {
       return null;
     }
-    const detailed = this.mapEventDetailed(event);
+    let recurrenceSeriesMemberCount: number | undefined;
+    if (event.recurrenceSeriesId) {
+      recurrenceSeriesMemberCount = await prisma.event.count({
+        where: { recurrenceSeriesId: event.recurrenceSeriesId },
+      });
+    }
+    const detailed = this.mapEventDetailed(event, { recurrenceSeriesMemberCount });
     if (userId) {
       const withWatch = await this.enrichWithViewerWatch(detailed, id, userId);
       const voteRows = await prisma.eventActivityVote.findMany({
@@ -461,11 +529,20 @@ export class EventService {
   }
 
   /**
-   * Create a new event
+   * Create a new event (materializes every occurrence as its own row when recurrenceRule is set).
    */
-  public async create(input: EventInput): Promise<Event> {
-    const { coverPhotos = [], createdBy, activityOptionLabels, recurrenceRule: rrIn, ...eventData } =
-      input;
+  public async create(input: EventInput & { viewerTimeZone?: string }): Promise<Event> {
+    const {
+      coverPhotos = [],
+      createdBy,
+      activityOptionLabels,
+      recurrenceRule: rrIn,
+      id: clientId,
+      viewerTimeZone,
+      rsvpDeadline: rsvpDeadlineIn,
+      ...eventData
+    } = input;
+    const anchorRsvpDeadline = normalizeRsvpDeadlineFromClient(rsvpDeadlineIn);
 
     await this.assertCanCreateEvent(eventData.groupId, createdBy);
     const recurrenceRule = normalizeRecurrenceRule(rrIn ?? null);
@@ -474,38 +551,114 @@ export class EventService {
       .map((s) => (typeof s === 'string' ? s.trim() : ''))
       .filter((s) => s.length > 0);
 
-    const event = await prisma.event.create({
-      data: {
-        ...eventData,
-        createdBy,
-        updatedBy: createdBy,
-        start: new Date(eventData.start),
-        end: new Date(eventData.end),
-        allowMaybe: eventData.allowMaybe ?? true,
-        recurrenceRule,
-        coverPhotos: {
-          create: coverPhotos.map((photoUrl) => ({ photoUrl })),
+    const start = utcInstantFromClient(String(eventData.start));
+    const end = utcInstantFromClient(String(eventData.end));
+    const durationMs = end.getTime() - start.getTime();
+
+    const photoRows = coverPhotos.map((photoUrl) => ({ photoUrl }));
+
+    const baseScalars = {
+      groupId: eventData.groupId,
+      title: eventData.title,
+      description: eventData.description ?? null,
+      location:
+        eventData.location == null || String(eventData.location).trim() === ''
+          ? null
+          : String(eventData.location).trim(),
+      minAttendees: eventData.minAttendees ?? null,
+      maxAttendees: eventData.maxAttendees ?? null,
+      enableWaitlist: eventData.enableWaitlist ?? false,
+      allowMaybe: eventData.allowMaybe ?? true,
+      isAllDay: eventData.isAllDay ?? false,
+      activityIdeasEnabled: eventData.activityIdeasEnabled ?? false,
+    };
+
+    let event: Awaited<ReturnType<typeof prisma.event.create>> & { coverPhotos: { photoUrl: string }[] };
+
+    if (recurrenceRule) {
+      let dates: Date[];
+      try {
+        dates = listOccurrenceStartsForRule(start, recurrenceRule, viewerTimeZone?.trim());
+      } catch {
+        throw Object.assign(new Error('Invalid recurrence rule'), { status: 400 });
+      }
+      if (dates.length === 0) {
+        throw Object.assign(new Error('Recurrence produced no occurrences'), { status: 400 });
+      }
+      const seriesId = randomUUID();
+      const firstId = clientId?.trim() ? clientId : randomUUID();
+
+      event = await prisma.$transaction(async (tx) => {
+        let first: typeof event | null = null;
+        for (let i = 0; i < dates.length; i++) {
+          const occStart = dates[i]!;
+          const occEnd = new Date(occStart.getTime() + durationMs);
+          const eid = i === 0 ? firstId : randomUUID();
+          const firstOcc = dates[0]!;
+          const row = await tx.event.create({
+            data: {
+              id: eid,
+              ...baseScalars,
+              createdBy,
+              updatedBy: createdBy,
+              start: occStart,
+              end: occEnd,
+              rsvpDeadline:
+                anchorRsvpDeadline == null
+                  ? null
+                  : shiftRsvpDeadlineForOccurrence(anchorRsvpDeadline, occStart, firstOcc),
+              recurrenceRule,
+              recurrenceSeriesId: seriesId,
+              coverPhotos: { create: [...photoRows] },
+              ...(labels.length > 0
+                ? {
+                    activityOptions: {
+                      create: labels.map((label) => ({
+                        id: randomUUID(),
+                        label,
+                        createdBy,
+                      })),
+                    },
+                  }
+                : {}),
+            },
+            include: { coverPhotos: true },
+          });
+          if (i === 0) first = row as typeof event;
+        }
+        return first!;
+      });
+    } else {
+      event = await prisma.event.create({
+        data: {
+          id: clientId?.trim() ? clientId : randomUUID(),
+          ...baseScalars,
+          createdBy,
+          updatedBy: createdBy,
+          start,
+          end,
+          rsvpDeadline: anchorRsvpDeadline,
+          recurrenceRule: null,
+          recurrenceSeriesId: null,
+          coverPhotos: { create: [...photoRows] },
+          ...(labels.length > 0
+            ? {
+                activityOptions: {
+                  create: labels.map((label) => ({
+                    id: randomUUID(),
+                    label,
+                    createdBy,
+                  })),
+                },
+              }
+            : {}),
         },
-        ...(labels.length > 0
-          ? {
-              activityOptions: {
-                create: labels.map((label) => ({
-                  id: randomUUID(),
-                  label,
-                  createdBy,
-                })),
-              },
-            }
-          : {}),
-      },
-      include: {
-        coverPhotos: true,
-        group: true,
-      },
-    });
+        include: { coverPhotos: true, group: true },
+      });
+    }
 
     // Create in-app notifications for all group members
-    const startDate = new Date(eventData.start);
+    const startDate = start;
     const dateStr = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     const timeStr = startDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
     
@@ -539,7 +692,8 @@ export class EventService {
    * Update an event
    */
   public async update(id: string, input: EventUpdate): Promise<Event> {
-    const { coverPhotos, updatedBy, ...eventData } = input;
+    const { coverPhotos, updatedBy, seriesUpdateScope, viewerTimeZone, rsvpDeadline, ...eventData } =
+      input;
 
     const existing = await prisma.event.findUnique({
       where: { id },
@@ -549,60 +703,261 @@ export class EventService {
         title: true,
         start: true,
         end: true,
+        isAllDay: true,
         location: true,
         recurrenceRule: true,
+        recurrenceSeriesId: true,
         coverPhotos: { select: { photoUrl: true } },
       },
     });
     if (!existing) {
       throw Object.assign(new Error('Event not found'), { status: 404 });
     }
-    await this.assertCanMutateEvent(existing, updatedBy);
+    await this.assertCanUpdateEvent(existing, updatedBy);
 
-    if (coverPhotos !== undefined) {
-      const previousUrls = existing.coverPhotos.map((p) => p.photoUrl);
+    const seriesId = existing.recurrenceSeriesId;
+    const scope = resolveSeriesUpdateScope(seriesId, seriesUpdateScope);
+    const appliesSeriesBulk =
+      !!seriesId && (scope === 'all_occurrences' || scope === 'this_and_following');
+
+    let subsetIdsThisAndFollowing: string[] | undefined;
+    if (scope === 'this_and_following' && seriesId) {
+      const sub = await prisma.event.findMany({
+        where: seriesThisAndFollowingWhere(seriesId, id, existing.start) as any,
+        select: { id: true },
+      });
+      subsetIdsThisAndFollowing = sub.map((r) => r.id);
+    }
+    const newSeriesIdForSplit =
+      scope === 'this_and_following' && subsetIdsThisAndFollowing?.length
+        ? randomUUID()
+        : undefined;
+
+    if (scope === 'this_occurrence' && seriesId) {
+      await prisma.event.update({
+        where: { id },
+        data: { recurrenceSeriesId: null, recurrenceRule: null, updatedBy },
+      });
+    }
+
+    if (eventData.recurrenceRule !== undefined && seriesId && scope !== 'this_occurrence') {
+      const nextRr = normalizeRecurrenceRule(eventData.recurrenceRule);
+      const rrWhere =
+        scope === 'this_and_following' && subsetIdsThisAndFollowing?.length
+          ? { id: { in: subsetIdsThisAndFollowing } }
+          : { recurrenceSeriesId: seriesId };
+      await prisma.event.updateMany({
+        where: rrWhere as any,
+        data: { recurrenceRule: nextRr, updatedBy },
+      });
+    }
+
+    let siblingIds: string[] = [id];
+    if (coverPhotos !== undefined && seriesId && appliesSeriesBulk) {
+      if (scope === 'all_occurrences') {
+        siblingIds = await seriesSiblingIdsAll(seriesId);
+      } else if (subsetIdsThisAndFollowing?.length) {
+        siblingIds = [...subsetIdsThisAndFollowing];
+      }
+    }
+
+    const replacePhotosForEvent = async (eventId: string, prevRows: { photoUrl: string }[]) => {
+      if (coverPhotos === undefined) return;
+      const previousUrls = prevRows.map((p) => p.photoUrl);
       const nextSet = new Set(coverPhotos);
       const removedUrls = previousUrls.filter((u) => !nextSet.has(u));
-
       await prisma.$transaction(async (tx) => {
-        await tx.eventPhoto.deleteMany({
-          where: { eventId: id },
-        });
-
+        await tx.eventPhoto.deleteMany({ where: { eventId } });
         if (coverPhotos.length > 0) {
           await tx.eventPhoto.createMany({
-            data: coverPhotos.map((photoUrl) => ({ eventId: id, photoUrl })),
+            data: coverPhotos.map((photoUrl) => ({ eventId, photoUrl })),
           });
         }
       });
-
       await Promise.all(removedUrls.map((u) => localUploads.deleteManagedUploadBestEffort(u)));
+    };
+
+    if (coverPhotos !== undefined) {
+      for (const eid of siblingIds) {
+        const prev =
+          eid === id
+            ? existing.coverPhotos
+            : (
+                await prisma.event.findUnique({
+                  where: { id: eid },
+                  select: { coverPhotos: { select: { photoUrl: true } } },
+                })
+              )?.coverPhotos ?? [];
+        await replacePhotosForEvent(eid, prev);
+      }
     }
 
-    // Update event data
-    const updateData: any = { ...eventData, updatedBy };
-    if (updateData.start !== undefined) updateData.start = new Date(updateData.start);
-    if (updateData.end !== undefined) updateData.end = new Date(updateData.end);
+    const updateData: Record<string, unknown> = { ...eventData, updatedBy };
+    if (eventData.recurrenceRule !== undefined) {
+      if (scope === 'this_occurrence') {
+        delete updateData.recurrenceRule;
+      } else if (!seriesId) {
+        updateData.recurrenceRule = normalizeRecurrenceRule(eventData.recurrenceRule);
+      } else {
+        delete updateData.recurrenceRule;
+      }
+    }
+    if (updateData.start !== undefined) {
+      updateData.start = utcInstantFromClient(String(updateData.start));
+    }
+    if (updateData.end !== undefined) {
+      updateData.end = utcInstantFromClient(String(updateData.end));
+    }
     if (updateData.location !== undefined) {
       const s = updateData.location;
       updateData.location =
-        s == null || (typeof s === 'string' && s.trim() === '') ? null : String(s).trim();
+        s == null || (typeof s === 'string' && String(s).trim() === '')
+          ? null
+          : String(s).trim();
     }
     if (updateData.description !== undefined) {
       const s = updateData.description;
       updateData.description =
-        s == null || (typeof s === 'string' && s.trim() === '') ? null : String(s).trim();
+        s == null || (typeof s === 'string' && String(s).trim() === '')
+          ? null
+          : String(s).trim();
     }
-    if (eventData.recurrenceRule !== undefined) {
-      updateData.recurrenceRule = normalizeRecurrenceRule(eventData.recurrenceRule);
-      const prevRr = (existing.recurrenceRule ?? null) as string | null;
-      const nextRr = updateData.recurrenceRule ?? null;
-      if (prevRr !== nextRr) {
-        updateData.recurrenceExdates = null;
+
+    if (rsvpDeadline !== undefined) {
+      if (appliesSeriesBulk && seriesId) {
+        const patchWhere =
+          scope === 'all_occurrences'
+            ? { recurrenceSeriesId: seriesId }
+            : { id: { in: subsetIdsThisAndFollowing?.length ? subsetIdsThisAndFollowing : [] } };
+        const rows = await prisma.event.findMany({
+          where: patchWhere as any,
+          select: { id: true, start: true },
+        });
+        const anchorNew = normalizeRsvpDeadlineFromClient(
+          rsvpDeadline === null ? null : String(rsvpDeadline)
+        );
+        const firstStart = existing.start;
+        if (rows.length > 0) {
+          await prisma.$transaction(
+            rows.map((row) =>
+              prisma.event.update({
+                where: { id: row.id },
+                data: {
+                  rsvpDeadline:
+                    anchorNew == null
+                      ? null
+                      : shiftRsvpDeadlineForOccurrence(anchorNew, row.start, firstStart),
+                  updatedBy,
+                },
+              })
+            )
+          );
+        }
+      } else {
+        updateData.rsvpDeadline = normalizeRsvpDeadlineFromClient(
+          rsvpDeadline === null ? null : String(rsvpDeadline)
+        );
       }
     }
-    const nextStart = eventData.start !== undefined ? new Date(eventData.start) : null;
-    const nextEnd = eventData.end !== undefined ? new Date(eventData.end) : null;
+
+    if (appliesSeriesBulk) {
+      const seriesPatch: Record<string, unknown> = { updatedBy };
+      if (eventData.title !== undefined) seriesPatch.title = eventData.title;
+      if (eventData.description !== undefined) seriesPatch.description = updateData.description;
+      if (eventData.location !== undefined) seriesPatch.location = updateData.location;
+      if (eventData.minAttendees !== undefined) seriesPatch.minAttendees = eventData.minAttendees;
+      if (eventData.maxAttendees !== undefined) seriesPatch.maxAttendees = eventData.maxAttendees;
+      if (eventData.enableWaitlist !== undefined) seriesPatch.enableWaitlist = eventData.enableWaitlist;
+      if (eventData.allowMaybe !== undefined) seriesPatch.allowMaybe = eventData.allowMaybe;
+      if (eventData.isAllDay !== undefined) seriesPatch.isAllDay = eventData.isAllDay;
+      if (eventData.activityIdeasEnabled !== undefined) {
+        seriesPatch.activityIdeasEnabled = eventData.activityIdeasEnabled;
+      }
+      if (Object.keys(seriesPatch).length > 1) {
+        const canPatchThisAndFollowing = scope !== 'this_and_following' || !!subsetIdsThisAndFollowing?.length;
+        if (canPatchThisAndFollowing) {
+          const patchWhere =
+            scope === 'all_occurrences'
+              ? { recurrenceSeriesId: seriesId }
+              : { id: { in: subsetIdsThisAndFollowing! } };
+          await prisma.event.updateMany({
+            where: patchWhere as any,
+            data: seriesPatch as any,
+          });
+        }
+      }
+      for (const k of [
+        'title',
+        'description',
+        'location',
+        'minAttendees',
+        'maxAttendees',
+        'enableWaitlist',
+        'allowMaybe',
+        'isAllDay',
+        'activityIdeasEnabled',
+        'rsvpDeadline',
+      ] as const) {
+        if (k in updateData) delete updateData[k];
+      }
+    }
+
+    if (
+      appliesSeriesBulk &&
+      eventData.start !== undefined &&
+      eventData.end !== undefined &&
+      (scope !== 'this_and_following' || !!subsetIdsThisAndFollowing?.length)
+    ) {
+      const timeWhere =
+        scope === 'all_occurrences'
+          ? { recurrenceSeriesId: seriesId }
+          : { id: { in: subsetIdsThisAndFollowing! } };
+      const rows = await prisma.event.findMany({
+        where: timeWhere as any,
+        select: { id: true, start: true, end: true },
+      });
+
+      const formStartUtc = utcInstantFromClient(String(eventData.start));
+      const formEndUtc = utcInstantFromClient(String(eventData.end));
+      const zone = viewerTimeZone?.trim() || 'UTC';
+      const allDay = Boolean(eventData.isAllDay ?? existing.isAllDay ?? false);
+
+      await prisma.$transaction(
+        rows.map((row) => {
+          if (row.id === id) {
+            return prisma.event.update({
+              where: { id: row.id },
+              data: { start: formStartUtc, end: formEndUtc, updatedBy },
+            });
+          }
+          const { start: nextS, end: nextE } = seriesOccurrenceStartEndFromForm({
+            rowStartUtc: row.start,
+            formStartUtc,
+            formEndUtc,
+            zone,
+            isAllDay: allDay,
+          });
+          return prisma.event.update({
+            where: { id: row.id },
+            data: { start: nextS, end: nextE, updatedBy },
+          });
+        })
+      );
+
+      delete updateData.start;
+      delete updateData.end;
+    }
+
+    if (newSeriesIdForSplit && subsetIdsThisAndFollowing?.length) {
+      await prisma.event.updateMany({
+        where: { id: { in: subsetIdsThisAndFollowing } },
+        data: { recurrenceSeriesId: newSeriesIdForSplit, updatedBy },
+      });
+    }
+
+    const nextStart =
+      eventData.start !== undefined ? utcInstantFromClient(String(eventData.start)) : null;
+    const nextEnd = eventData.end !== undefined ? utcInstantFromClient(String(eventData.end)) : null;
     const startChanged =
       nextStart !== null && !EventService.eventInstantUnchanged(existing.start, nextStart);
     const endChanged = nextEnd !== null && !EventService.eventInstantUnchanged(existing.end, nextEnd);
@@ -610,10 +965,8 @@ export class EventService {
 
     const event = await prisma.event.update({
       where: { id },
-      data: updateData,
-      include: {
-        coverPhotos: true,
-      },
+      data: updateData as any,
+      include: { coverPhotos: true },
     });
 
     const normLoc = (l: string | null | undefined) => (l ?? '').trim();
@@ -635,44 +988,96 @@ export class EventService {
   }
 
   /**
-   * Exclude one occurrence from a recurring series (client expansion skips these instants).
+   * Delete every event row sharing a recurrence series id.
    */
-  public async excludeRecurrenceOccurrence(
+  public async deleteRecurrenceSeries(seriesId: string, actorUserId: string): Promise<void> {
+    const anchor = await prisma.event.findFirst({
+      where: { recurrenceSeriesId: seriesId },
+      select: { groupId: true, createdBy: true },
+    });
+    if (!anchor) {
+      throw Object.assign(new Error('Series not found'), { status: 404 });
+    }
+    await this.assertCanDeleteEvent(anchor, actorUserId);
+    const rows = await prisma.event.findMany({
+      where: { recurrenceSeriesId: seriesId },
+      select: { id: true },
+    });
+    for (const r of rows) {
+      await this.delete(r.id, actorUserId);
+    }
+  }
+
+  /**
+   * Delete this occurrence and all later ones in the same series (by event start time).
+   * If the chosen occurrence is the earliest in the series, deletes the entire series.
+   */
+  public async truncateRecurrenceSeriesFrom(
     id: string,
     actorUserId: string,
-    occurrenceStartIso: string
-  ): Promise<Event> {
+    occurrenceStartIso: string,
+    _viewerTimeZone?: string
+  ): Promise<{ deleted: true } | { deleted: false; event: Event }> {
     const existing = await prisma.event.findUnique({
       where: { id },
       select: {
         groupId: true,
         createdBy: true,
+        recurrenceSeriesId: true,
         recurrenceRule: true,
-        recurrenceExdates: true,
       },
     });
     if (!existing) {
       throw Object.assign(new Error('Event not found'), { status: 404 });
     }
-    await this.assertCanMutateEvent(existing, actorUserId);
-    if (!existing.recurrenceRule?.trim()) {
-      throw Object.assign(new Error('Event is not recurring'), { status: 400 });
+    await this.assertCanDeleteEvent(existing, actorUserId);
+    if (!existing.recurrenceSeriesId || !existing.recurrenceRule?.trim()) {
+      throw Object.assign(new Error('Event is not part of a recurring series'), { status: 400 });
     }
-    const ts = new Date(occurrenceStartIso).getTime();
-    if (!Number.isFinite(ts)) {
+    const truncateMs = new Date(occurrenceStartIso).getTime();
+    if (!Number.isFinite(truncateMs)) {
       throw Object.assign(new Error('Invalid occurrenceStart'), { status: 400 });
     }
-    const prev = parseRecurrenceExdatesJson(existing.recurrenceExdates ?? null) ?? [];
-    const next = [...new Set([...prev, ts])].sort((a, b) => a - b);
-    const event = await prisma.event.update({
-      where: { id },
-      data: {
-        recurrenceExdates: serializeRecurrenceExdatesJson(next),
-        updatedBy: actorUserId,
-      },
+    const siblings = await prisma.event.findMany({
+      where: { recurrenceSeriesId: existing.recurrenceSeriesId },
+      orderBy: { start: 'asc' },
+      select: { id: true, start: true },
+    });
+    let hit = siblings.findIndex((e) => Math.abs(e.start.getTime() - truncateMs) <= MS_SERIES_OCCURRENCE_MATCH);
+    if (hit < 0) {
+      let best = -1;
+      let bestDiff = Infinity;
+      siblings.forEach((e, i) => {
+        const d = Math.abs(e.start.getTime() - truncateMs);
+        if (d < bestDiff) {
+          bestDiff = d;
+          best = i;
+        }
+      });
+      if (best >= 0 && bestDiff <= MS_SERIES_OCCURRENCE_MATCH) hit = best;
+    }
+    if (hit < 0) {
+      throw Object.assign(new Error('That date is not part of this repeating event.'), { status: 400 });
+    }
+    const toRemove = siblings.slice(hit);
+    const keepFirst = siblings[0]!;
+    if (hit === 0) {
+      for (const row of toRemove) {
+        await this.delete(row.id, actorUserId);
+      }
+      return { deleted: true };
+    }
+    for (const row of toRemove) {
+      await this.delete(row.id, actorUserId);
+    }
+    const kept = await prisma.event.findUnique({
+      where: { id: keepFirst.id },
       include: { coverPhotos: true },
     });
-    return this.mapEventWithPhotos(event);
+    if (!kept) {
+      return { deleted: true };
+    }
+    return { deleted: false, event: this.mapEventWithPhotos(kept) };
   }
 
   /**
@@ -695,7 +1100,7 @@ export class EventService {
     if (!existing) {
       throw Object.assign(new Error('Event not found'), { status: 404 });
     }
-    await this.assertCanMutateEvent(existing, actorUserId);
+    await this.assertCanDeleteEvent(existing, actorUserId);
     const coverUrls = existing.coverPhotos.map((p) => p.photoUrl);
     const commentPhotoUrls = existing.comments.flatMap((c) => c.photos.map((p) => p.photoUrl));
     const urlsToPurge = [...new Set([...coverUrls, ...commentPhotoUrls])];
@@ -716,6 +1121,13 @@ export class EventService {
         const event = await tx.event.findUnique({ where: { id: eventId } });
         if (!event) {
           throw { status: 404, message: 'Event not found' };
+        }
+
+        if (event.rsvpDeadline) {
+          const dl = new Date(event.rsvpDeadline);
+          if (Number.isFinite(dl.getTime()) && Date.now() > dl.getTime()) {
+            throw { status: 400, message: 'The RSVP deadline for this event has passed' };
+          }
         }
 
         // Serialize RSVP updates per event (SQLite: writer lock; Postgres: row update locks parent)
@@ -1059,15 +1471,33 @@ export class EventService {
       throw { status: 400, message: 'This comment cannot be edited' };
     }
 
-    const nextText = (input.text || '').trim();
-    if (!nextText) {
-      throw { status: 400, message: 'Comment text cannot be empty' };
+    const existingUrls = (comment.photos as { photoUrl: string }[]).map((p) => p.photoUrl);
+    const nextPhotos = input.photos !== undefined ? input.photos : existingUrls;
+    const nextText =
+      input.text !== undefined ? (input.text || '').trim() : (comment.text || '').trim();
+
+    if (!nextText && nextPhotos.length === 0) {
+      throw { status: 400, message: 'Comment cannot be empty' };
     }
-    const updated = await prisma.comment.update({
-      where: { id },
-      data: { text: nextText },
-      include: { photos: true },
-    });
+
+    let updated;
+    if (input.photos !== undefined) {
+      await prisma.commentPhoto.deleteMany({ where: { commentId: id } });
+      updated = await prisma.comment.update({
+        where: { id },
+        data: {
+          text: nextText || null,
+          photos: { create: nextPhotos.map((photoUrl) => ({ photoUrl })) },
+        },
+        include: { photos: true },
+      });
+    } else {
+      updated = await prisma.comment.update({
+        where: { id },
+        data: { text: nextText || null },
+        include: { photos: true },
+      });
+    }
     return this.mapCommentWithPhotos(updated);
   }
 
@@ -1080,7 +1510,10 @@ export class EventService {
   public async deleteComment(id: string, input: CommentDeleteInput): Promise<void> {
     const comment = await prisma.comment.findUnique({
       where: { id },
-      include: { event: true },
+      include: {
+        event: true,
+        photos: { select: { photoUrl: true } },
+      },
     });
     if (!comment) {
       throw { status: 404, message: 'Comment not found' };
@@ -1108,21 +1541,30 @@ export class EventService {
 
     const isPlaceholder = comment.text === COMMENT_DELETED_BY_ADMIN_TEXT;
 
+    const photoUrls = [...new Set(comment.photos.map((p) => p.photoUrl?.trim()).filter(Boolean))] as string[];
+
+    const purgeCommentPhotos = async () => {
+      await Promise.all(photoUrls.map((u) => localUploads.deleteManagedUploadBestEffort(u)));
+    };
+
     if (isPlaceholder) {
       if (!isAuthor && !isAdmin) {
         throw { status: 403, message: 'Not allowed to delete this comment' };
       }
       await prisma.comment.delete({ where: { id } });
+      await purgeCommentPhotos();
       return;
     }
 
     if (isAuthor) {
       await prisma.comment.delete({ where: { id } });
+      await purgeCommentPhotos();
       return;
     }
 
     if (isAdmin && !isAuthor) {
       await prisma.commentPhoto.deleteMany({ where: { commentId: id } });
+      await purgeCommentPhotos();
       await prisma.comment.update({
         where: { id },
         data: { text: COMMENT_DELETED_BY_ADMIN_TEXT },
@@ -1139,10 +1581,13 @@ export class EventService {
   ): Promise<EventActivityOption> {
     const event = await prisma.event.findUnique({
       where: { id: eventId },
-      select: { groupId: true, createdBy: true },
+      select: { groupId: true, createdBy: true, activityIdeasEnabled: true },
     });
     if (!event) {
       throw Object.assign(new Error('Event not found'), { status: 404 });
+    }
+    if (!event.activityIdeasEnabled) {
+      throw Object.assign(new Error('Activity ideas are not enabled for this event'), { status: 400 });
     }
     await this.assertActiveMemberForEventEventRow(event, input.userId);
     const label = (input.label || '').trim();
@@ -1177,22 +1622,20 @@ export class EventService {
     const option = await prisma.eventActivityOption.findFirst({
       where: { id: optionId, eventId },
       include: {
-        event: { select: { groupId: true, createdBy: true } },
+        event: { select: { groupId: true, createdBy: true, activityIdeasEnabled: true } },
       },
     });
     if (!option) {
       throw Object.assign(new Error('Activity option not found'), { status: 404 });
     }
+    if (!option.event.activityIdeasEnabled) {
+      throw Object.assign(new Error('Activity ideas are not enabled for this event'), { status: 400 });
+    }
     const isAuthor = option.createdBy === actorId;
     const isHost = option.event.createdBy === actorId;
-    let isAdmin = false;
     if (!isAuthor && !isHost) {
-      const role = await this.getActiveMemberRole(option.event.groupId, actorId);
-      isAdmin = !!role && this.isAdminOrSuperadminRole(role);
-    }
-    if (!isAuthor && !isHost && !isAdmin) {
       throw Object.assign(
-        new Error('Only the option author, event host, or group admins can remove this option'),
+        new Error('Only the option author or event host can remove this option'),
         { status: 403 },
       );
     }
@@ -1202,10 +1645,13 @@ export class EventService {
   public async setActivityVote(eventId: string, input: EventActivityVoteInput): Promise<void> {
     const event = await prisma.event.findUnique({
       where: { id: eventId },
-      select: { groupId: true },
+      select: { groupId: true, activityIdeasEnabled: true },
     });
     if (!event) {
       throw Object.assign(new Error('Event not found'), { status: 404 });
+    }
+    if (!event.activityIdeasEnabled) {
+      throw Object.assign(new Error('Activity ideas are not enabled for this event'), { status: 400 });
     }
     await this.assertActiveMemberForEventEventRow(event, input.userId);
     const opt = await prisma.eventActivityOption.findFirst({
@@ -1242,10 +1688,13 @@ export class EventService {
   public async clearActivityVote(eventId: string, userId: string): Promise<void> {
     const event = await prisma.event.findUnique({
       where: { id: eventId },
-      select: { groupId: true },
+      select: { groupId: true, activityIdeasEnabled: true },
     });
     if (!event) {
       throw Object.assign(new Error('Event not found'), { status: 404 });
+    }
+    if (!event.activityIdeasEnabled) {
+      throw Object.assign(new Error('Activity ideas are not enabled for this event'), { status: 400 });
     }
     await this.assertActiveMemberForEventEventRow(event, userId);
     await prisma.eventActivityVote.deleteMany({
@@ -1265,8 +1714,8 @@ export class EventService {
       throw Object.assign(new Error('Event not found'), { status: 404 });
     }
     await this.assertActiveMemberForEventEventRow(event, input.userId);
-    const start = new Date(input.start);
-    const end = new Date(input.end);
+    const start = utcInstantFromClient(String(input.start));
+    const end = utcInstantFromClient(String(input.end));
     if (!(start.getTime() < end.getTime())) {
       throw Object.assign(new Error('End time must be after start time'), { status: 400 });
     }
@@ -1429,11 +1878,10 @@ export class EventService {
       maxAttendees: event.maxAttendees,
       enableWaitlist: event.enableWaitlist,
       allowMaybe: event.allowMaybe,
+      rsvpDeadline: event.rsvpDeadline ?? null,
+      activityIdeasEnabled: Boolean(event.activityIdeasEnabled),
       recurrenceRule: event.recurrenceRule ?? null,
-      recurrenceExdates: (() => {
-        const x = parseRecurrenceExdatesJson(event.recurrenceExdates ?? null);
-        return x && x.length > 0 ? x : undefined;
-      })(),
+      recurrenceSeriesId: event.recurrenceSeriesId ?? null,
       createdAt: event.createdAt,
       updatedAt: event.updatedAt,
     };
@@ -1442,7 +1890,10 @@ export class EventService {
   /**
    * Map Prisma event with all details to EventDetailed model
    */
-  private mapEventDetailed(event: any): EventDetailed {
+  private mapEventDetailed(
+    event: any,
+    extras?: { recurrenceSeriesMemberCount?: number }
+  ): EventDetailed {
     const activityOptions: EventActivityOption[] = (event.activityOptions ?? []).map((o: any) => ({
       id: o.id,
       label: o.label,
@@ -1461,6 +1912,9 @@ export class EventService {
     }));
     return {
       ...this.mapEventWithPhotos(event),
+      ...(extras?.recurrenceSeriesMemberCount != null
+        ? { recurrenceSeriesMemberCount: extras.recurrenceSeriesMemberCount }
+        : {}),
       rsvps: event.rsvps.map((r: any) => ({
         userId: r.userId,
         status: r.status,
@@ -1481,7 +1935,7 @@ export class EventService {
     return {
       id: comment.id,
       userId: comment.userId,
-      text: comment.text,
+      text: comment.text ?? '',
       photos: comment.photos.map((p: any) => p.photoUrl),
       createdAt: comment.createdAt,
       updatedAt: comment.updatedAt,

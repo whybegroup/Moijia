@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,14 +12,19 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Fonts, Radius } from '../constants/theme';
+import { formatLocalDateInput, isSameDay } from '../utils/helpers';
 import { formSectionTitleStyle } from './ui';
 import {
   type RecurrenceFormState,
   type RecurrencePreset,
   type RecurrenceEndType,
-  buildRecurrenceRule,
-  formatRecurrenceSummary,
+  type MonthlyRecurrencePattern,
+  formatRecurrenceFormSummary,
   defaultRecurrenceFormState,
+  normalizeRecurrenceCount,
+  formatMonthlyPatternSummary,
+  getRecurrenceUntilMaxCalendarDate,
+  clampRecurrenceUntilYmd,
 } from '../utils/recurrence';
 
 type Props = {
@@ -27,6 +32,124 @@ type Props = {
   value: RecurrenceFormState;
   onChange: (next: RecurrenceFormState) => void;
 };
+
+const UNTIL_CAL_WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'] as const;
+
+function getUntilMonthGrid(year: number, month: number): (Date | null)[][] {
+  const first = new Date(year, month, 1);
+  const last = new Date(year, month + 1, 0);
+  const startWeekday = first.getDay();
+  const daysInMo = last.getDate();
+  const rows: (Date | null)[][] = [];
+  let row: (Date | null)[] = [];
+  for (let i = 0; i < startWeekday; i++) row.push(null);
+  for (let d = 1; d <= daysInMo; d++) {
+    row.push(new Date(year, month, d));
+    if (row.length === 7) {
+      rows.push(row);
+      row = [];
+    }
+  }
+  if (row.length) {
+    while (row.length < 7) row.push(null);
+    rows.push(row);
+  }
+  return rows;
+}
+
+function untilLocalDayMs(d: Date): number {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
+function UntilEndDateCalendar({
+  viewYear,
+  viewMonth,
+  onPrevMonth,
+  onNextMonth,
+  minDate,
+  maxDate,
+  selectedYmd,
+  onSelectYmd,
+}: {
+  viewYear: number;
+  viewMonth: number;
+  onPrevMonth: () => void;
+  onNextMonth: () => void;
+  minDate: Date;
+  maxDate: Date;
+  selectedYmd: string;
+  onSelectYmd: (ymd: string) => void;
+}) {
+  const grid = useMemo(() => getUntilMonthGrid(viewYear, viewMonth), [viewYear, viewMonth]);
+  const selectedDate = useMemo(() => parseYmdToLocalDate(selectedYmd), [selectedYmd]);
+  const minT = untilLocalDayMs(minDate);
+  const maxT = untilLocalDayMs(maxDate);
+  const monthTitle = new Date(viewYear, viewMonth, 1).toLocaleString('default', {
+    month: 'long',
+    year: 'numeric',
+  });
+
+  return (
+    <View style={styles.untilCal}>
+      <View style={styles.untilCalHeader}>
+        <TouchableOpacity onPress={onPrevMonth} hitSlop={10} style={styles.untilCalNav} accessibilityLabel="Previous month">
+          <Ionicons name="chevron-back" size={22} color={Colors.text} />
+        </TouchableOpacity>
+        <Text style={styles.untilCalTitle}>{monthTitle}</Text>
+        <TouchableOpacity onPress={onNextMonth} hitSlop={10} style={styles.untilCalNav} accessibilityLabel="Next month">
+          <Ionicons name="chevron-forward" size={22} color={Colors.text} />
+        </TouchableOpacity>
+      </View>
+      <View style={styles.untilCalWeekdayRow}>
+        {UNTIL_CAL_WEEKDAYS.map((w, i) => (
+          <Text key={i} style={styles.untilCalWeekday}>
+            {w}
+          </Text>
+        ))}
+      </View>
+      {grid.map((grow, ri) => (
+        <View key={ri} style={styles.untilCalRow}>
+          {grow.map((cell, ci) => {
+            if (!cell) return <View key={ci} style={styles.untilCalCell} />;
+            const t = untilLocalDayMs(cell);
+            const disabled = t < minT || t > maxT;
+            const selected = !!selectedDate && !disabled && isSameDay(cell, selectedDate);
+            const label = (
+              <Text
+                style={[
+                  styles.untilCalCellText,
+                  disabled && styles.untilCalCellTextDisabled,
+                  selected && styles.untilCalCellTextSelected,
+                ]}
+              >
+                {cell.getDate()}
+              </Text>
+            );
+            if (disabled) {
+              return (
+                <View key={ci} style={[styles.untilCalCell, styles.untilCalCellDisabled]}>
+                  {label}
+                </View>
+              );
+            }
+            return (
+              <TouchableOpacity
+                key={ci}
+                style={[styles.untilCalCell, selected && styles.untilCalCellSelected]}
+                onPress={() => onSelectYmd(formatLocalDateInput(cell))}
+                activeOpacity={0.75}
+                accessibilityRole="button"
+                accessibilityState={{ selected }}
+              >
+                {label}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      ))}
+    </View>
+  );
+}
 
 const PRESET_ROWS: { preset: RecurrencePreset; label: string }[] = [
   { preset: 'none', label: 'Does not repeat' },
@@ -43,17 +166,91 @@ function toggleDay(days: number[], d: number): number[] {
   return [...days, d].sort((a, b) => a - b);
 }
 
+function parseYmdToLocalDate(s: string): Date | null {
+  const [y, m, d] = s.trim().split('-').map((x) => parseInt(x, 10));
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null;
+  const dt = new Date(y, m - 1, d);
+  if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) return null;
+  return dt;
+}
+
+function startOfLocalDay(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+function MonthlyPatternSection({
+  anchorDate,
+  pattern,
+  interval,
+  onPattern,
+}: {
+  anchorDate: Date;
+  pattern: MonthlyRecurrencePattern;
+  interval: number;
+  onPattern: (p: MonthlyRecurrencePattern) => void;
+}) {
+  const iv = Math.max(1, interval);
+  return (
+    <View style={styles.section}>
+      <TouchableOpacity
+        style={[styles.endRow, pattern === 'monthDay' && styles.endRowOn]}
+        onPress={() => onPattern('monthDay')}
+      >
+        <Text style={[styles.endRowText, styles.monthlyOptionSummary]}>
+          {formatMonthlyPatternSummary('monthDay', iv, anchorDate)}
+        </Text>
+        {pattern === 'monthDay' ? (
+          <Ionicons name="radio-button-on" size={20} color={Colors.accent} />
+        ) : (
+          <Ionicons name="radio-button-off" size={20} color={Colors.textMuted} />
+        )}
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.endRow, pattern === 'weekdayOfMonth' && styles.endRowOn]}
+        onPress={() => onPattern('weekdayOfMonth')}
+      >
+        <Text style={[styles.endRowText, styles.monthlyOptionSummary]}>
+          {formatMonthlyPatternSummary('weekdayOfMonth', iv, anchorDate)}
+        </Text>
+        {pattern === 'weekdayOfMonth' ? (
+          <Ionicons name="radio-button-on" size={20} color={Colors.accent} />
+        ) : (
+          <Ionicons name="radio-button-off" size={20} color={Colors.textMuted} />
+        )}
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 export function RecurrenceField({ anchorDate, value, onChange }: Props) {
   const [open, setOpen] = useState(false);
-  const summary = useMemo(
-    () => formatRecurrenceSummary(buildRecurrenceRule(value, anchorDate) ?? '', anchorDate),
-    [value, anchorDate]
-  );
+  const [untilViewMonth, setUntilViewMonth] = useState(() => ({
+    y: anchorDate.getFullYear(),
+    m: anchorDate.getMonth(),
+  }));
+  const summary = useMemo(() => formatRecurrenceFormSummary(value, anchorDate), [value, anchorDate]);
+
+  const untilMinDate = useMemo(() => startOfLocalDay(anchorDate), [anchorDate]);
+  const untilMaxDate = useMemo(() => getRecurrenceUntilMaxCalendarDate(anchorDate), [anchorDate]);
+  const untilPickerValue = useMemo(() => {
+    const raw = parseYmdToLocalDate(value.untilDate) ?? untilMinDate;
+    const t = startOfLocalDay(raw).getTime();
+    const minT = untilMinDate.getTime();
+    const maxT = untilMaxDate.getTime();
+    if (t < minT) return untilMinDate;
+    if (t > maxT) return untilMaxDate;
+    return raw;
+  }, [value.untilDate, untilMinDate, untilMaxDate]);
+
+  useEffect(() => {
+    if (!open || value.endType !== 'until') return;
+    const r = untilPickerValue;
+    setUntilViewMonth({ y: r.getFullYear(), m: r.getMonth() });
+  }, [open, value.endType, untilPickerValue]);
 
   const applyPreset = (preset: RecurrencePreset) => {
     if (preset === 'none') {
       onChange(defaultRecurrenceFormState());
-      setOpen(false);
       return;
     }
     const next: RecurrenceFormState = {
@@ -64,14 +261,12 @@ export function RecurrenceField({ anchorDate, value, onChange }: Props) {
       next.customInterval = value.customInterval >= 1 ? value.customInterval : 1;
       next.customUnit = value.customUnit;
       next.weeklyDays = value.weeklyDays.length ? value.weeklyDays : [anchorDate.getDay()];
+      next.monthlyPattern = value.monthlyPattern;
       next.endType = value.endType;
-      next.untilDate = value.untilDate;
+      next.untilDate = clampRecurrenceUntilYmd(value.untilDate || '', anchorDate);
       next.count = value.count || '10';
     }
     onChange(next);
-    if (preset !== 'custom') {
-      setOpen(false);
-    }
   };
 
   const setEndType = (endType: RecurrenceEndType) => {
@@ -141,6 +336,15 @@ export function RecurrenceField({ anchorDate, value, onChange }: Props) {
                 </View>
               )}
 
+              {value.preset === 'monthly' && (
+                <MonthlyPatternSection
+                  anchorDate={anchorDate}
+                  pattern={value.monthlyPattern}
+                  interval={1}
+                  onPattern={(monthlyPattern) => onChange({ ...value, monthlyPattern })}
+                />
+              )}
+
               {value.preset === 'custom' && (
                 <View style={styles.section}>
                   <Text style={styles.sectionLabel}>Every</Text>
@@ -181,6 +385,15 @@ export function RecurrenceField({ anchorDate, value, onChange }: Props) {
                 </View>
               )}
 
+              {value.preset === 'custom' && value.customUnit === 'month' && (
+                <MonthlyPatternSection
+                  anchorDate={anchorDate}
+                  pattern={value.monthlyPattern}
+                  interval={value.customInterval >= 1 ? value.customInterval : 1}
+                  onPattern={(monthlyPattern) => onChange({ ...value, monthlyPattern })}
+                />
+              )}
+
               {value.preset !== 'none' && (
                 <View style={styles.section}>
                   <Text style={styles.sectionLabel}>Ends</Text>
@@ -207,20 +420,44 @@ export function RecurrenceField({ anchorDate, value, onChange }: Props) {
                     )}
                   </TouchableOpacity>
                   {value.endType === 'until' ? (
-                    <TextInput
-                      style={styles.dateInput}
-                      placeholder="YYYY-MM-DD"
-                      placeholderTextColor={Colors.textMuted}
-                      value={value.untilDate}
-                      onChangeText={(t) => onChange({ ...value, untilDate: t })}
+                    <UntilEndDateCalendar
+                      viewYear={untilViewMonth.y}
+                      viewMonth={untilViewMonth.m}
+                      onPrevMonth={() =>
+                        setUntilViewMonth(({ y, m }) => {
+                          const d = new Date(y, m - 1, 1);
+                          return { y: d.getFullYear(), m: d.getMonth() };
+                        })
+                      }
+                      onNextMonth={() =>
+                        setUntilViewMonth(({ y, m }) => {
+                          const d = new Date(y, m + 1, 1);
+                          return { y: d.getFullYear(), m: d.getMonth() };
+                        })
+                      }
+                      minDate={untilMinDate}
+                      maxDate={untilMaxDate}
+                      selectedYmd={value.untilDate}
+                      onSelectYmd={(ymd) =>
+                        onChange({ ...value, untilDate: clampRecurrenceUntilYmd(ymd, anchorDate) })
+                      }
                     />
                   ) : null}
                   {value.endType === 'count' ? (
                     <TextInput
-                      style={styles.dateInput}
+                      style={[styles.dateInput, styles.countInputMargin]}
                       keyboardType="number-pad"
                       value={value.count}
-                      onChangeText={(t) => onChange({ ...value, count: t.replace(/\D/g, '') || '1' })}
+                      onChangeText={(t) => onChange({ ...value, count: t.replace(/\D/g, '') })}
+                      onBlur={() => {
+                        const raw = value.count.replace(/\D/g, '');
+                        const parsed = parseInt(raw, 10);
+                        const n =
+                          !raw || !Number.isFinite(parsed) || parsed < 1
+                            ? normalizeRecurrenceCount(10)
+                            : normalizeRecurrenceCount(parsed);
+                        if (String(n) !== value.count) onChange({ ...value, count: String(n) });
+                      }}
                     />
                   ) : null}
                 </View>
@@ -243,7 +480,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: Colors.bg,
+    backgroundColor: Colors.surface,
     borderWidth: 1.5,
     borderColor: Colors.border,
     borderRadius: Radius.lg,
@@ -258,7 +495,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   sheet: {
-    backgroundColor: Colors.bg,
+    backgroundColor: Colors.surface,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     maxHeight: Platform.OS === 'web' ? ('85vh' as any) : '88%',
@@ -304,7 +541,7 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: Colors.surface,
+    backgroundColor: Colors.bg,
   },
   dowCellOn: { backgroundColor: Colors.accent, borderColor: Colors.accent },
   dowText: { fontSize: 13, fontFamily: Fonts.semiBold, color: Colors.text },
@@ -320,7 +557,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: Fonts.medium,
     color: Colors.text,
-    backgroundColor: Colors.surface,
+    backgroundColor: Colors.bg,
     textAlign: 'center',
   },
   unitScroll: { flexGrow: 0, flexShrink: 1 },
@@ -331,7 +568,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
     marginRight: 8,
-    backgroundColor: Colors.surface,
+    backgroundColor: Colors.bg,
   },
   unitChipOn: { backgroundColor: Colors.accent, borderColor: Colors.accent },
   unitChipText: { fontSize: 14, fontFamily: Fonts.medium, color: Colors.text },
@@ -345,6 +582,57 @@ const styles = StyleSheet.create({
   },
   endRowOn: {},
   endRowText: { fontSize: 16, fontFamily: Fonts.regular, color: Colors.text },
+  monthlyOptionSummary: { flex: 1, marginRight: 8 },
+  untilCal: {
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: Radius.lg,
+    padding: 10,
+    backgroundColor: Colors.bg,
+  },
+  untilCalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  untilCalNav: { padding: 4 },
+  untilCalTitle: { fontSize: 15, fontFamily: Fonts.semiBold, color: Colors.text },
+  untilCalWeekdayRow: { flexDirection: 'row', marginBottom: 6 },
+  untilCalWeekday: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 11,
+    fontFamily: Fonts.medium,
+    color: Colors.textMuted,
+  },
+  untilCalRow: { flexDirection: 'row' },
+  untilCalCell: {
+    flex: 1,
+    minHeight: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: Radius.md,
+  },
+  untilCalCellDisabled: {
+    opacity: 0.38,
+  },
+  untilCalCellSelected: {
+    backgroundColor: Colors.accent,
+  },
+  untilCalCellText: {
+    fontSize: 15,
+    fontFamily: Fonts.medium,
+    color: Colors.text,
+    textAlign: 'center',
+  },
+  untilCalCellTextDisabled: {
+    color: Colors.textMuted,
+  },
+  untilCalCellTextSelected: {
+    color: Colors.accentFg,
+  },
   dateInput: {
     borderWidth: 1,
     borderColor: Colors.border,
@@ -353,9 +641,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: Fonts.regular,
     color: Colors.text,
-    backgroundColor: Colors.surface,
-    marginTop: 8,
+    backgroundColor: Colors.bg,
   },
+  countInputMargin: { marginTop: 8 },
   doneBtn: {
     marginTop: 20,
     marginHorizontal: 12,

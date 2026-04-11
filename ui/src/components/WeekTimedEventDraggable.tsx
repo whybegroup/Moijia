@@ -49,7 +49,8 @@ function applyDragToEventTimes(
   const stride =
     Number.isFinite(columnStride) && columnStride > 0 ? columnStride : 0;
   const colDelta = stride > 0 ? Math.round(translationX / stride) : 0;
-  const toIndex = Math.max(0, Math.min(6, safeFrom + colDelta));
+  const maxCol = Math.max(0, weekDays.length - 1);
+  const toIndex = Math.max(0, Math.min(maxCol, safeFrom + colDelta));
   const targetDay = weekDays[toIndex];
 
   // Vertical drag: shift time-of-day along the grid; carry whole days when crossing midnight.

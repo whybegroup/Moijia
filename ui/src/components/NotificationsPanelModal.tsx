@@ -8,12 +8,13 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, usePathname } from 'expo-router';
 import { Notification } from '@moija/client';
 import { Colors, Fonts, Layout, Radius } from '../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName } from '../utils/helpers';
 import { NotificationListIcon } from './NotificationListIcon';
 import { useUpdateNotification, useMarkAllNotificationsRead } from '../hooks/api';
+import { withReturnTo } from '../utils/navigationReturn';
 
 export type NotificationsPanelGroup = { id: string; name: string };
 
@@ -38,6 +39,7 @@ export function NotificationsPanelModal({
 }: NotificationsPanelModalProps) {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const pathname = usePathname();
   const updateNotification = useUpdateNotification();
   const markAllAsRead = useMarkAllNotificationsRead();
 
@@ -87,9 +89,9 @@ export function NotificationsPanelModal({
                       if (!n.navigable) return;
                       onClose();
                       if (n.dest === Notification.dest.EVENT && n.eventId) {
-                        router.push(`/event/${n.eventId}`);
+                        router.push(withReturnTo(`/event/${n.eventId}`, pathname));
                       } else if (n.dest === Notification.dest.GROUP && n.groupId) {
-                        router.push(`/groups/${n.groupId}`);
+                        router.push(withReturnTo(`/groups/${n.groupId}`, pathname));
                       }
                     }}
                     style={[
@@ -172,8 +174,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    height: Layout.modalTopBarHeight,
+    paddingHorizontal: 20,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },

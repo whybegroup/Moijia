@@ -1,7 +1,7 @@
 import { UploadsService } from '@moija/client';
 
 export function isDirectRenderableImageUrl(url: string): boolean {
-  if (!url) return true;
+  if (!url?.trim()) return false;
   return (
     /^(blob:|file:|content:|ph:|data:)/i.test(url) ||
     url.startsWith('assets-library:')

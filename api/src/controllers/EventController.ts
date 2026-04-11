@@ -23,12 +23,12 @@ import {
   Comment,
   CommentInput,
   CommentUpdateInput,
-  CommentDeleteInput,
   EventWatchInput,
   EventActivityOptionInput,
   EventActivityVoteInput,
   EventTimeSuggestionInput,
-  RecurrenceExcludeOccurrenceInput,
+  RecurrenceTruncateSeriesInput,
+  RecurrenceTruncateResult,
 } from '../models';
 import { EventService } from '../services/EventService';
 
@@ -158,19 +158,46 @@ export class EventController extends Controller {
   }
 
   /**
-   * Remove a single occurrence from a recurring series (other instances unchanged).
+   * Delete every occurrence in a series (same `recurrenceSeriesId`).
    */
-  @Post('{id}/recurrence/exclude')
-  public async excludeRecurrenceOccurrence(
-    @Path() id: string,
-    @Query() userId: string,
-    @Body() body: RecurrenceExcludeOccurrenceInput
-  ): Promise<Event> {
+  @Delete('recurrence-series/{seriesId}')
+  @SuccessResponse('204', 'No Content')
+  public async deleteRecurrenceSeries(
+    @Path() seriesId: string,
+    @Query() userId: string
+  ): Promise<void> {
     if (!userId) {
       this.setStatus(400);
       throw new Error('userId is required');
     }
-    return this.eventService.excludeRecurrenceOccurrence(id, userId, body.occurrenceStart);
+    await this.eventService.deleteRecurrenceSeries(seriesId, userId);
+    this.setStatus(204);
+  }
+
+  /**
+   * Remove this occurrence and all later ones in the same series (by start time).
+   * If the chosen occurrence is the first, deletes the entire series.
+   */
+  @Post('{id}/recurrence/truncate')
+  public async truncateRecurrenceSeries(
+    @Path() id: string,
+    @Query() userId: string,
+    @Body() body: RecurrenceTruncateSeriesInput
+  ): Promise<RecurrenceTruncateResult> {
+    if (!userId) {
+      this.setStatus(400);
+      throw new Error('userId is required');
+    }
+    const r = await this.eventService.truncateRecurrenceSeriesFrom(
+      id,
+      userId,
+      body.occurrenceStart,
+      body.viewerTimeZone
+    );
+    if (r.deleted) {
+      return { deleted: true };
+    }
+    return { deleted: false, event: r.event };
   }
 
   /**
@@ -376,11 +403,8 @@ export class CommentController extends Controller {
    */
   @Delete('{id}')
   @SuccessResponse('204', 'No Content')
-  public async deleteComment(
-    @Path() id: string,
-    @Body() body: CommentDeleteInput
-  ): Promise<void> {
-    await this.eventService.deleteComment(id, body);
+  public async deleteComment(@Path() id: string, @Query() actorId: string): Promise<void> {
+    await this.eventService.deleteComment(id, { actorId });
     this.setStatus(204);
   }
 }

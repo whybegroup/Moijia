@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-export type CalendarScopeMode = 'week' | 'month' | 'year';
+export type CalendarScopeMode = 'day' | 'week' | 'month' | 'year';
 
 const STORAGE_KEY = '@moija/eventsScreenPrefs';
 
@@ -9,6 +9,8 @@ export type EventsScreenPersistedV1 = {
   viewMode: 'list' | 'calendar';
   calendarScopeMode: CalendarScopeMode;
   calendarFocusIso: string;
+  /** Vertical scroll offset for each calendar scope (day/week timeline, month grid, year grid). */
+  calendarBodyScrollY?: Partial<Record<CalendarScopeMode, number>>;
   selectedGroupIds: string[];
   filterRsvp: string[];
   filterNeeds: boolean;
@@ -22,11 +24,23 @@ export type EventsScreenPersistedV1 = {
 const RSVP_KEYS = new Set(['going', 'maybe', 'notGoing', 'none']);
 
 function isScopeMode(x: unknown): x is CalendarScopeMode {
-  return x === 'week' || x === 'month' || x === 'year';
+  return x === 'day' || x === 'week' || x === 'month' || x === 'year';
 }
 
 function isDateMode(x: unknown): x is 'specific' | 'now' | 'allTime' {
   return x === 'specific' || x === 'now' || x === 'allTime';
+}
+
+function parseCalendarBodyScrollY(raw: unknown): Partial<Record<CalendarScopeMode, number>> | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const o = raw as Record<string, unknown>;
+  const out: Partial<Record<CalendarScopeMode, number>> = {};
+  for (const k of ['day', 'week', 'month', 'year'] as const) {
+    const v = o[k];
+    if (typeof v === 'number' && Number.isFinite(v) && v >= 0) out[k] = Math.round(v);
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 export function parseCalendarFocusIso(iso: string | undefined): Date {
@@ -45,6 +59,8 @@ export async function loadEventsScreenPrefs(): Promise<Partial<EventsScreenPersi
     if (p.viewMode === 'list' || p.viewMode === 'calendar') out.viewMode = p.viewMode;
     if (isScopeMode(p.calendarScopeMode)) out.calendarScopeMode = p.calendarScopeMode;
     if (typeof p.calendarFocusIso === 'string') out.calendarFocusIso = p.calendarFocusIso;
+    const scrollY = parseCalendarBodyScrollY(p.calendarBodyScrollY);
+    if (scrollY) out.calendarBodyScrollY = scrollY;
     if (Array.isArray(p.selectedGroupIds) && p.selectedGroupIds.every((id) => typeof id === 'string'))
       out.selectedGroupIds = p.selectedGroupIds;
     if (Array.isArray(p.filterRsvp) && p.filterRsvp.every((k) => typeof k === 'string' && RSVP_KEYS.has(k)))

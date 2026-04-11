@@ -13,9 +13,10 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
-import { useRouter } from 'expo-router';
+import { useRouter, usePathname } from 'expo-router';
 import { Colors, Fonts, Radius } from '../constants/theme';
 import { useJoinByInviteCode } from '../hooks/api';
+import { withReturnTo } from '../utils/navigationReturn';
 
 const webInputNoFocusRing = {
   outlineWidth: 0,
@@ -30,6 +31,7 @@ type Props = {
 
 export function CreateOrJoinButton({ userId, eventEligibleGroupCount }: Props) {
   const router = useRouter();
+  const pathname = usePathname();
   const joinByCode = useJoinByInviteCode();
   const [menuOpen, setMenuOpen] = useState(false);
   const [noGroupOpen, setNoGroupOpen] = useState(false);
@@ -43,12 +45,12 @@ export function CreateOrJoinButton({ userId, eventEligibleGroupCount }: Props) {
       setNoGroupOpen(true);
       return;
     }
-    router.push('/create-event');
+    router.push(withReturnTo('/create-event', pathname));
   };
 
   const onNewGroup = () => {
     closeMenu();
-    router.push('/create-group');
+    router.push(withReturnTo('/create-group', pathname));
   };
 
   const onJoinSubmit = () => {
@@ -217,7 +219,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: Colors.bg,
+    backgroundColor: Colors.surface,
     borderWidth: 1,
     borderColor: Colors.border,
     alignItems: 'center',
@@ -242,7 +244,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.lg,
     borderWidth: 1,
     borderColor: Colors.border,
-    backgroundColor: Colors.bg,
+    backgroundColor: Colors.surface,
     fontSize: 14,
     color: Colors.text,
     fontFamily: Fonts.regular,

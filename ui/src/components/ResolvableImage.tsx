@@ -22,11 +22,15 @@ type Props = {
 
 export function ResolvableImage({ storedUrl, style, resizeMode = 'cover', urlMap, onError }: Props) {
   const [singleUri, setSingleUri] = useState<string | null>(() =>
-    isDirectRenderableImageUrl(storedUrl) ? storedUrl : null,
+    storedUrl?.trim() && isDirectRenderableImageUrl(storedUrl) ? storedUrl : null,
   );
 
   useEffect(() => {
     if (urlMap) return;
+    if (!storedUrl?.trim()) {
+      setSingleUri(null);
+      return;
+    }
     if (isDirectRenderableImageUrl(storedUrl)) {
       setSingleUri(storedUrl);
       return;
@@ -39,6 +43,10 @@ export function ResolvableImage({ storedUrl, style, resizeMode = 'cover', urlMap
       cancelled = true;
     };
   }, [storedUrl, urlMap]);
+
+  if (!storedUrl?.trim()) {
+    return null;
+  }
 
   if (isDirectRenderableImageUrl(storedUrl)) {
     return <Image source={{ uri: storedUrl }} style={style} resizeMode={resizeMode} onError={onError} />;
@@ -53,10 +61,13 @@ export function ResolvableImage({ storedUrl, style, resizeMode = 'cover', urlMap
         </View>
       );
     }
+    if (!uri.trim()) {
+      return null;
+    }
     return <Image source={{ uri }} style={style} resizeMode={resizeMode} onError={onError} />;
   }
 
-  if (!singleUri) {
+  if (!singleUri?.trim()) {
     return (
       <View style={[style, styles.ph]}>
         <ActivityIndicator size="small" color={Colors.textMuted} />

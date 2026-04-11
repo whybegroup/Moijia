@@ -6,7 +6,10 @@ import {
   TouchableOpacity,
   ScrollView,
   StyleSheet,
+  Platform,
+  type StyleProp,
   type TextInputProps,
+  type ViewStyle,
 } from 'react-native';
 import { Colors, Fonts, Radius } from '../constants/theme';
 import {
@@ -41,6 +44,12 @@ type Props = Omit<TextInputProps, 'value' | 'onChangeText'> & {
   onChangeText: (t: string) => void;
   members: MentionMember[];
   currentUserId?: string | null;
+  /** Merged onto the outer wrapper (composer: flex row; omit when using `stacked`). */
+  wrapperStyle?: StyleProp<ViewStyle>;
+  /**
+   * Intrinsic-height column for inline edit. Never merges `flex:1` (avoids web textarea overlapping siblings).
+   */
+  stacked?: boolean;
 };
 
 type SuggestionRow =
@@ -53,6 +62,8 @@ export function CommentMentionInput({
   members,
   currentUserId,
   style,
+  wrapperStyle,
+  stacked = false,
   ...rest
 }: Props) {
   const ctx = useMemo(() => getActiveMentionAtEnd(value), [value]);
@@ -82,8 +93,23 @@ export function CommentMentionInput({
     onChangeText(`${before}@${token} ${after}`);
   };
 
+  const rootStyle = stacked
+    ? [styles.wrapStacked, wrapperStyle]
+    : [styles.wrapComposer, wrapperStyle];
+
+  const textField = (
+    <TextInput
+      value={value}
+      onChangeText={onChangeText}
+      style={style}
+      autoCorrect={false}
+      autoCapitalize="sentences"
+      {...rest}
+    />
+  );
+
   return (
-    <View style={styles.wrap}>
+    <View style={rootStyle}>
       {showList ? (
         <View style={styles.suggestPanel}>
           <Text style={styles.suggestHint}>Mention</Text>
@@ -123,20 +149,37 @@ export function CommentMentionInput({
           </ScrollView>
         </View>
       ) : null}
-      <TextInput
-        value={value}
-        onChangeText={onChangeText}
-        style={style}
-        autoCorrect={false}
-        autoCapitalize="sentences"
-        {...rest}
-      />
+      {stacked ? <View style={styles.stackedInputMount}>{textField}</View> : textField}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  wrap: { flex: 1, minWidth: 0 },
+  /** Bottom bar: grow horizontally in the row. */
+  wrapComposer: { flex: 1, minWidth: 0, flexDirection: 'column' },
+  /** Inline comment edit: strict column flow — do not use flex:1 here (breaks RN Web multiline). */
+  wrapStacked: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    alignSelf: 'stretch',
+    width: '100%',
+    flexGrow: 0,
+    flexShrink: 0,
+  },
+  /** Binds RN Web textarea layout to this box so the next sibling renders below, not on top. */
+  stackedInputMount: {
+    alignSelf: 'stretch',
+    ...(Platform.OS === 'web'
+      ? ({
+          position: 'relative',
+          display: 'flex',
+          flexDirection: 'column',
+          flexGrow: 0,
+          flexShrink: 0,
+          minHeight: 0,
+        } as const)
+      : {}),
+  },
   suggestPanel: {
     marginBottom: 8,
     maxHeight: 320,

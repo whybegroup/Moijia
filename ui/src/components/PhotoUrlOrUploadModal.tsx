@@ -298,7 +298,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.lg,
     borderWidth: 1,
     borderColor: Colors.border,
-    backgroundColor: Colors.bg,
+    backgroundColor: Colors.surface,
     overflow: 'hidden',
     minHeight: 160,
     maxHeight: 220,

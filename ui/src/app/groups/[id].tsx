@@ -1,11 +1,12 @@
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Modal, TextInput, Alert, ActivityIndicator, Platform } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Colors, Fonts, Radius, Shadows } from '../../../constants/theme';
-import { getGroupColor, getDefaultGroupThemeFromName, groupAvatarBorderRadius } from '../../../utils/helpers';
-import { NavBar, Toggle, formSectionTitleStyle } from '../../../components/ui';
+import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
+import { EventFormPopoverChrome } from '../../components/EventFormPopoverChrome';
+import { firstSearchParam, parseReturnToParam } from '../../utils/navigationReturn';
+import { Colors, Fonts, Radius, Shadows } from '../../constants/theme';
+import { getGroupColor, getDefaultGroupThemeFromName, groupAvatarBorderRadius } from '../../utils/helpers';
+import { NavBar, Toggle, formSectionTitleStyle, Avatar } from '../../components/ui';
 import {
   useGroup,
   useUsers,
@@ -22,26 +23,42 @@ import {
   useRemoveMember,
   useSetMemberRole,
   useSetSuperAdmin,
-} from '../../../hooks/api';
+} from '../../hooks/api';
 import { MembershipRequestAction } from '@moija/client';
-import { useCurrentUserContext } from '../../../contexts/CurrentUserContext';
+import { useCurrentUserContext } from '../../contexts/CurrentUserContext';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path, Rect } from 'react-native-svg';
-import { GroupAvatar } from '../../../components/GroupAvatar';
-import { GroupMemberThemeAndNotifications } from '../../../components/GroupMemberThemeAndNotifications';
-import { AvatarPickerModal } from '../../../components/AvatarPickerModal';
-import { UserAvatar } from '../../../components/UserAvatar';
-import { deleteManagedUploadFireAndForget } from '../../../services/managedUploadDelete';
-import { ResolvableImage } from '../../../components/ResolvableImage';
-import { pickAndUploadCoverPhoto } from '../../../services/pickAndUploadImage';
+import { GroupAvatar } from '../../components/GroupAvatar';
+import { GroupMemberThemeAndNotifications } from '../../components/GroupMemberThemeAndNotifications';
+import { AvatarPickerModal } from '../../components/AvatarPickerModal';
+import { UserAvatar } from '../../components/UserAvatar';
+import { deleteManagedUploadFireAndForget } from '../../services/managedUploadDelete';
+import { ResolvableImage } from '../../components/ResolvableImage';
+import { pickAndUploadCoverPhoto } from '../../services/pickAndUploadImage';
 
 const AVATAR_SIZE = 56;
 
 export default function GroupDetailScreen() {
-  const { id }   = useLocalSearchParams<{ id: string }>();
-  const router   = useRouter();
+  const params = useLocalSearchParams<{ id: string; returnTo?: string | string[] }>();
+  const router = useRouter();
+  const returnToHref = useMemo(
+    () => parseReturnToParam(firstSearchParam(params.returnTo)),
+    [params.returnTo]
+  );
+  const dismiss = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+    if (returnToHref) {
+      router.replace(returnToHref as Href);
+      return;
+    }
+    router.replace('/(tabs)/groups');
+  }, [router, returnToHref]);
   const { userId: currentUserId } = useCurrentUserContext();
-  
+
+  const id = params.id;
   const groupId = Array.isArray(id) ? id[0] : id;
 
   if (!groupId) {
@@ -73,6 +90,7 @@ export default function GroupDetailScreen() {
   const [draftDesc, setDraftDesc] = useState('');
   const [coverPhotoBusy, setCoverPhotoBusy] = useState(false);
   const [localCoverPhotos, setLocalCoverPhotos] = useState<string[]>([]);
+  const [groupPhotoLightbox, setGroupPhotoLightbox] = useState<{ urls: string[]; index: number } | null>(null);
   const coverHydratedRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -98,7 +116,7 @@ export default function GroupDetailScreen() {
 
   useEffect(() => {
     if (isError || (group && group.membershipStatus === 'none')) {
-      router.replace('/groups');
+      router.replace('/(tabs)/groups');
     }
   }, [isError, group?.membershipStatus, router]);
   const [memberMenu,  setMemberMenu]  = useState<{ userId: string } | null>(null);
@@ -152,15 +170,11 @@ export default function GroupDetailScreen() {
   const isPending = group.membershipStatus === 'pending';
   const isSoftDeleted = !!group.deletedAt;
 
-  const handleBack = () => {
-    router.replace('/groups');
-  };
-
   const leaveGroup = async () => {
     if (!currentUserId) return;
     try {
       await leaveGroupMutation.mutateAsync({ groupId, userId: currentUserId });
-      handleBack();
+      dismiss();
     } catch (e: any) {
       const msg = e?.body?.error ?? e?.response?.data?.error ?? e?.message ?? 'Failed to leave group';
       if (Platform.OS === 'web') window.alert(msg);
@@ -172,7 +186,7 @@ export default function GroupDetailScreen() {
     setShowDeactivateConfirm(false);
     try {
       await softDeleteMutation.mutateAsync(groupId);
-      handleBack();
+      dismiss();
     } catch (e: any) {
       const msg = e?.body?.error ?? e?.response?.data?.error ?? e?.message ?? 'Failed to deactivate';
       if (Platform.OS === 'web') window.alert(msg);
@@ -184,7 +198,7 @@ export default function GroupDetailScreen() {
     setShowDeleteConfirm(false);
     try {
       await hardDeleteMutation.mutateAsync(groupId);
-      handleBack();
+      dismiss();
     } catch (e: any) {
       const msg = e?.body?.error ?? e?.response?.data?.error ?? e?.message ?? 'Failed to delete';
       if (Platform.OS === 'web') window.alert(msg);
@@ -365,44 +379,78 @@ export default function GroupDetailScreen() {
     }
   };
 
-  const groupPhotosSection = showGroupCoverSection ? (
-    <View style={styles.photosSectionLower}>
-      <Text style={formSectionTitleStyle}>
-        Photos{coverPhotosForDisplay.length > 0 ? ` · ${coverPhotosForDisplay.length}` : ''}
-      </Text>
-      <View style={[styles.card, styles.photosCard]}>
-        {coverPhotosForDisplay.length > 0 && (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={{ borderBottomWidth: isAdmin && !isPending ? 1 : 0, borderBottomColor: Colors.border }}
-            contentContainerStyle={{ gap: 4, padding: 10 }}
-          >
-            {coverPhotosForDisplay.map((uri, i) => (
-              <View key={`${uri}-${i}`} style={{ position: 'relative' }}>
+  const groupPhotosBlock = showGroupCoverSection ? (
+    <View
+      style={{
+        marginTop: isAdmin || draftDesc.trim() || group.desc?.trim() ? 4 : 10,
+        marginBottom:
+          isAdmin && !isPending
+            ? 0
+            : coverPhotosForDisplay.length > 0
+              ? 16
+              : 0,
+      }}
+    >
+      <View style={{ paddingHorizontal: 16 }}>
+        <Text style={formSectionTitleStyle}>
+          Photos{coverPhotosForDisplay.length > 0 ? ` · ${coverPhotosForDisplay.length}` : ''}
+        </Text>
+      </View>
+      {coverPhotosForDisplay.length > 0 ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={{
+            borderBottomWidth: isAdmin && !isPending ? StyleSheet.hairlineWidth : 0,
+            borderBottomColor: Colors.border,
+          }}
+          contentContainerStyle={{ gap: 4, paddingVertical: 10, paddingHorizontal: 16 }}
+        >
+          {coverPhotosForDisplay.map((uri, i) => (
+            <View key={`${uri}-${i}`} style={{ position: 'relative' }}>
+              <TouchableOpacity
+                onPress={() => setGroupPhotoLightbox({ urls: coverPhotosForDisplay, index: i })}
+                activeOpacity={0.9}
+              >
                 <ResolvableImage
                   storedUrl={uri}
-                  style={{ width: 80, height: 80, borderRadius: Radius.lg }}
+                  style={{
+                    width: 80,
+                    height: 80,
+                    borderRadius: Radius.lg,
+                    backgroundColor: Colors.bg,
+                    borderWidth: StyleSheet.hairlineWidth,
+                    borderColor: Colors.border,
+                  }}
                   resizeMode="cover"
                 />
-                {isAdmin && !isPending && (
-                  <TouchableOpacity
-                    onPress={() => void removeCoverPhotoAt(i)}
-                    style={styles.coverRemoveThumb}
-                  >
-                    <Ionicons name="close" size={11} color="#fff" />
-                  </TouchableOpacity>
-                )}
-              </View>
-            ))}
-          </ScrollView>
-        )}
-        {isAdmin && !isPending && (
-          <View style={[styles.coverToolbar, coverPhotosForDisplay.length === 0 && { borderTopWidth: 0 }]}>
+              </TouchableOpacity>
+              {isAdmin && !isPending && (
+                <TouchableOpacity
+                  onPress={() => void removeCoverPhotoAt(i)}
+                  style={styles.coverRemoveThumb}
+                >
+                  <Ionicons name="close" size={11} color="#fff" />
+                </TouchableOpacity>
+              )}
+            </View>
+          ))}
+        </ScrollView>
+      ) : null}
+      {isAdmin && !isPending ? (
+        <View
+          style={{
+            paddingHorizontal: 16,
+            marginTop: coverPhotosForDisplay.length > 0 ? 4 : 0,
+            marginBottom: 16,
+          }}
+        >
+          <View style={[styles.groupPhotosAddCard, styles.groupPhotosAddCardNested]}>
             <TouchableOpacity
               onPress={() => void addCoverPhotoFromPicker()}
-              style={styles.coverPhotoBtn}
+              style={styles.groupPhotosAddBtn}
               disabled={coverPhotoBusy}
+              activeOpacity={0.85}
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                 {coverPhotoBusy ? (
@@ -414,15 +462,16 @@ export default function GroupDetailScreen() {
               </View>
             </TouchableOpacity>
           </View>
-        )}
-      </View>
+        </View>
+      ) : null}
     </View>
   ) : null;
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <EventFormPopoverChrome onClose={dismiss}>
+    <View style={styles.safe}>
       <NavBar
-        onBack={handleBack}
+        onClose={dismiss}
         right={
           profileDirty ? (
             <View style={styles.navEditActions}>
@@ -454,10 +503,14 @@ export default function GroupDetailScreen() {
         }
       />
 
-      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
-        {/* Group header */}
-        <View style={[styles.headerBlock, { borderBottomColor: Colors.border }]}>
-          <View style={styles.avatarNameRow}>
+      <ScrollView
+        style={styles.groupScrollView}
+        contentContainerStyle={styles.groupScrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.groupMainCardWrap}>
+          <View style={styles.groupMainCard}>
+          <View style={{ paddingHorizontal: 16, paddingTop: 18 }}>
             <TouchableOpacity
               onPress={() => {
                 if (!isAdmin) return;
@@ -467,6 +520,8 @@ export default function GroupDetailScreen() {
               style={[
                 styles.groupThumb,
                 {
+                  alignSelf: 'flex-start',
+                  marginBottom: 10,
                   backgroundColor: getGroupColor(memberColorData?.colorHex || getDefaultGroupThemeFromName(group.name)).row,
                   borderColor: getGroupColor(memberColorData?.colorHex || getDefaultGroupThemeFromName(group.name)).cal,
                   borderRadius: groupAvatarBorderRadius(AVATAR_SIZE),
@@ -483,118 +538,116 @@ export default function GroupDetailScreen() {
                 style={{ width: AVATAR_SIZE, height: AVATAR_SIZE }}
               />
             </TouchableOpacity>
-            <View style={styles.nameFieldWrap}>
-              {isAdmin ? (
+            {isAdmin ? (
+              <TextInput
+                value={draftName}
+                onChangeText={setDraftName}
+                placeholder="Group name"
+                placeholderTextColor={Colors.textMuted}
+                style={styles.groupTitleInput}
+                autoCapitalize="words"
+                autoCorrect={false}
+              />
+            ) : (
+              <Text
+                style={[styles.groupTitleReadOnly, !group.name.trim() && styles.readOnlyPlaceholder]}
+                numberOfLines={3}
+              >
+                {group.name.trim() ? group.name : 'No name'}
+              </Text>
+            )}
+            {isAdmin ? (
+              <View style={[styles.groupDescBox, { marginTop: 10 }]}>
                 <TextInput
-                  value={draftName}
-                  onChangeText={setDraftName}
-                  placeholder="No name"
+                  value={draftDesc}
+                  onChangeText={setDraftDesc}
+                  placeholder="Description"
                   placeholderTextColor={Colors.textMuted}
-                  style={styles.nameInput}
-                  autoCapitalize="words"
-                  autoCorrect={false}
+                  style={styles.groupDescInput}
+                  multiline
                 />
-              ) : (
-                <View style={styles.nameReadOnlyCenter}>
-                  <Text
-                    style={[styles.nameReadOnly, !group.name.trim() && styles.readOnlyPlaceholder]}
-                    numberOfLines={2}
-                  >
-                    {group.name.trim() ? group.name : 'No name'}
-                  </Text>
-                </View>
-              )}
-            </View>
+              </View>
+            ) : group.desc?.trim() ? (
+              <View style={[styles.groupDescBox, { marginTop: 10 }]}>
+                <Text style={styles.groupDescText}>{group.desc}</Text>
+              </View>
+            ) : null}
           </View>
 
-          {isAdmin ? (
-            <TextInput
-              value={draftDesc}
-              onChangeText={setDraftDesc}
-              placeholder="Description"
-              placeholderTextColor={Colors.textMuted}
-              style={styles.descInputFull}
-              multiline
-            />
-          ) : group.desc?.trim() ? (
-            <View style={styles.descReadOnlyWrap}>
-              <Text style={styles.groupDescFull}>{group.desc}</Text>
-            </View>
-          ) : null}
+          {groupPhotosBlock}
 
-          {groupPhotosSection}
-
-          {(!isPending && inviteCode) || (isAdmin || isSuperAdmin) ? (
-            <View style={styles.inviteSection}>
-              {(isAdmin || isSuperAdmin) && (
-                <View style={[styles.inviteRow, styles.inviteToggleRow, { borderTopWidth: 1, borderTopColor: Colors.border }]}>
-                  <View style={{ flex: 1 }}>
-                    <Toggle
-                      value={group.requireApprovalToJoin}
-                      style={{ borderBottomWidth: 0 }}
-                      onChange={async (v) => {
-                        if (updateGroup.isPending) return;
-                        try {
-                          await updateGroup.mutateAsync({
-                            requireApprovalToJoin: v,
-                            updatedBy: currentUserId ?? '',
-                          });
-                        } catch {
-                          if (Platform.OS === 'web') window.alert('Failed to update join approval setting');
-                          else Alert.alert('Error', 'Failed to update join approval setting');
-                        }
-                      }}
-                      label="Require approval to join?"
-                    />
-                  </View>
-                </View>
-              )}
-              {!isPending && inviteCode && (
-                <View style={[styles.inviteRow, (isAdmin || isSuperAdmin) && { borderTopWidth: 0, paddingVertical: 4 }]}>
-                  <Text style={styles.inviteLabel}>Invite code</Text>
-                  <View style={styles.inviteValueRow}>
-                    {(isAdmin || isSuperAdmin) && (
-                      <TouchableOpacity
-                        onPress={confirmRegenerateInviteCode}
-                        disabled={regenerateInviteCodeMutation.isPending || !currentUserId}
-                        style={styles.regenerateInviteIconBtn}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                        accessibilityLabel="Generate new invite code"
-                      >
-                        {regenerateInviteCodeMutation.isPending ? (
-                          <ActivityIndicator size="small" color={Colors.textMuted} />
-                        ) : (
-                          <Ionicons name="refresh-outline" size={20} color={Colors.textMuted} />
-                        )}
-                      </TouchableOpacity>
-                    )}
-                    <Text style={styles.inviteValue}>{inviteCode}</Text>
+          {!isPending && inviteCode ? (
+            <View style={[styles.inviteSection, styles.inviteSectionInset]}>
+              <View style={[styles.inviteRow, { borderTopWidth: 1, borderTopColor: Colors.border, paddingVertical: 4 }]}>
+                <Text style={styles.inviteLabel}>Invite code</Text>
+                <View style={styles.inviteValueRow}>
+                  {(isAdmin || isSuperAdmin) && (
                     <TouchableOpacity
-                      onPress={copyInviteCode}
-                      style={styles.copyIconBtn}
+                      onPress={confirmRegenerateInviteCode}
+                      disabled={regenerateInviteCodeMutation.isPending || !currentUserId}
+                      style={styles.regenerateInviteIconBtn}
                       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      accessibilityLabel="Generate new invite code"
                     >
-                      <View style={styles.copyIconWrap}>
-                        {inviteCopied ? (
-                          <Ionicons name="checkmark" size={18} color={Colors.going} />
-                        ) : (
-                          <Svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke={Colors.textMuted} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                            <Rect x="9" y="9" width="13" height="13" rx="2" />
-                            <Path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                          </Svg>
-                        )}
-                      </View>
+                      {regenerateInviteCodeMutation.isPending ? (
+                        <ActivityIndicator size="small" color={Colors.textMuted} />
+                      ) : (
+                        <Ionicons name="refresh-outline" size={20} color={Colors.textMuted} />
+                      )}
                     </TouchableOpacity>
-                  </View>
+                  )}
+                  <Text style={styles.inviteValue}>{inviteCode}</Text>
+                  <TouchableOpacity
+                    onPress={copyInviteCode}
+                    style={styles.copyIconBtn}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <View style={styles.copyIconWrap}>
+                      {inviteCopied ? (
+                        <Ionicons name="checkmark" size={18} color={Colors.going} />
+                      ) : (
+                        <Svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke={Colors.textMuted} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                          <Rect x="9" y="9" width="13" height="13" rx="2" />
+                          <Path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                        </Svg>
+                      )}
+                    </View>
+                  </TouchableOpacity>
                 </View>
-              )}
+              </View>
             </View>
           ) : null}
+          </View>
         </View>
+
+        {(isAdmin || isSuperAdmin) && !isPending ? (
+          <View style={styles.groupSettingsSection}>
+            <Text style={styles.sectionLabel}>Settings</Text>
+            <View style={[styles.card, { marginBottom: 16 }]}>
+              <Toggle
+                value={group.requireApprovalToJoin}
+                style={{ borderBottomWidth: 0, paddingHorizontal: 16 }}
+                onChange={async (v) => {
+                  if (updateGroup.isPending) return;
+                  try {
+                    await updateGroup.mutateAsync({
+                      requireApprovalToJoin: v,
+                      updatedBy: currentUserId ?? '',
+                    });
+                  } catch {
+                    if (Platform.OS === 'web') window.alert('Failed to update join approval setting');
+                    else Alert.alert('Error', 'Failed to update join approval setting');
+                  }
+                }}
+                label="Require approval to join?"
+              />
+            </View>
+          </View>
+        ) : null}
 
         {isPending ? (
           <View style={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 100 }}>
-            <View style={[styles.card, { borderColor: '#FDE68A', backgroundColor: '#FFFBEB', padding: 24, alignItems: 'center' }]}>
+            <View style={[styles.card, styles.cardPendingNotice, { padding: 24, alignItems: 'center' }]}>
               <Ionicons name="hourglass-outline" size={28} color="#92400E" style={{ marginBottom: 8 }} />
               <Text style={{ fontSize: 16, fontFamily: Fonts.semiBold, color: Colors.text, marginBottom: 8 }}>
                 Request pending
@@ -608,7 +661,7 @@ export default function GroupDetailScreen() {
             </View>
             <View style={{ height: 16 }} />
             <Text style={styles.sectionLabel}>LEAVE</Text>
-            <View style={[styles.card, { borderColor: '#FECACA' }]}>
+            <View style={[styles.card, styles.cardDanger]}>
               <TouchableOpacity onPress={() => setShowLeave(true)} style={styles.memberRow} activeOpacity={0.8}>
                 <Ionicons name="log-out-outline" size={22} color={Colors.textSub} />
                 <View style={{ flex: 1 }}>
@@ -747,17 +800,13 @@ export default function GroupDetailScreen() {
           )}
 
           {(group.membershipStatus === 'member' || group.membershipStatus === 'admin') && !!currentUserId && (
-            <>
-              <View style={{ height: 16 }} />
-              <GroupMemberThemeAndNotifications groupId={groupId} userId={currentUserId} groupName={group.name} />
-            </>
+            <GroupMemberThemeAndNotifications groupId={groupId} userId={currentUserId} groupName={group.name} />
           )}
 
           {group.membershipStatus !== 'none' && (
           <>
-            <View style={{ height: 16 }} />
-              <Text style={styles.sectionLabel}>DANGER ZONE</Text>
-              <View style={[styles.card, { borderColor: '#FECACA' }]}>
+            <Text style={[styles.sectionLabel, styles.sectionLabelSpaced]}>DANGER ZONE</Text>
+              <View style={[styles.card, styles.cardDanger]}>
                 {isSuperAdmin ? (
                   <>
                     {isSoftDeleted ? (
@@ -805,6 +854,81 @@ export default function GroupDetailScreen() {
         </View>
         )}
       </ScrollView>
+
+      {groupPhotoLightbox !== null && (
+        <Modal
+          visible
+          transparent
+          animationType="fade"
+          onRequestClose={() => setGroupPhotoLightbox(null)}
+        >
+          <View style={styles.groupPhotoLightbox}>
+            <View style={styles.groupPhotoLightboxHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <Avatar name={group.name} size={28} />
+                <View>
+                  <Text style={styles.groupPhotoLightboxName}>{group.name}</Text>
+                  <Text style={styles.groupPhotoLightboxSub}>
+                    {groupPhotoLightbox.urls.length > 1
+                      ? `Cover photos · ${groupPhotoLightbox.index + 1} of ${groupPhotoLightbox.urls.length}`
+                      : 'Cover photo'}
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                onPress={() => setGroupPhotoLightbox(null)}
+                style={styles.groupPhotoLightboxClose}
+              >
+                <Ionicons name="close" size={22} color="#fff" />
+              </TouchableOpacity>
+            </View>
+            {groupPhotoLightbox.urls.length > 1 ? (
+              <>
+                <TouchableOpacity
+                  accessibilityLabel="Previous photo"
+                  onPress={() =>
+                    setGroupPhotoLightbox((prev) =>
+                      prev && prev.index > 0 ? { ...prev, index: prev.index - 1 } : prev
+                    )
+                  }
+                  disabled={groupPhotoLightbox.index <= 0}
+                  style={[
+                    styles.groupPhotoLightboxNavBtn,
+                    styles.groupPhotoLightboxNavPrev,
+                    groupPhotoLightbox.index <= 0 && styles.groupPhotoLightboxNavBtnDisabled,
+                  ]}
+                >
+                  <Ionicons name="chevron-back" size={28} color="#fff" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  accessibilityLabel="Next photo"
+                  onPress={() =>
+                    setGroupPhotoLightbox((prev) =>
+                      prev && prev.index < prev.urls.length - 1
+                        ? { ...prev, index: prev.index + 1 }
+                        : prev
+                    )
+                  }
+                  disabled={groupPhotoLightbox.index >= groupPhotoLightbox.urls.length - 1}
+                  style={[
+                    styles.groupPhotoLightboxNavBtn,
+                    styles.groupPhotoLightboxNavNext,
+                    groupPhotoLightbox.index >= groupPhotoLightbox.urls.length - 1 &&
+                      styles.groupPhotoLightboxNavBtnDisabled,
+                  ]}
+                >
+                  <Ionicons name="chevron-forward" size={28} color="#fff" />
+                </TouchableOpacity>
+              </>
+            ) : null}
+            <ResolvableImage
+              storedUrl={groupPhotoLightbox.urls[groupPhotoLightbox.index] ?? ''}
+              style={styles.groupPhotoLightboxImg}
+              resizeMode="contain"
+            />
+          </View>
+        </Modal>
+      )}
 
       <AvatarPickerModal
         variant="group"
@@ -908,63 +1032,72 @@ export default function GroupDetailScreen() {
         </Modal>
       )}
 
-    </SafeAreaView>
+    </View>
+    </EventFormPopoverChrome>
   );
 }
 
 const styles = StyleSheet.create({
   safe:             { flex: 1, backgroundColor: Colors.bg },
-  headerBlock:      { backgroundColor: Colors.surface, padding: 20, borderBottomWidth: 1 },
-  avatarNameRow:    { flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 16 },
-  nameFieldWrap:    {
-    flex: 1,
-    minWidth: 0,
-    height: AVATAR_SIZE,
-    justifyContent: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  /** Non-admins: title is vertically centered in the avatar row */
-  nameReadOnlyCenter: {
-    flex: 1,
-    minWidth: 0,
-    justifyContent: 'center',
-  },
-  nameInput:        {
-    flex: 1,
-    minWidth: 0,
-    paddingVertical: Platform.OS === 'ios' ? 10 : 0,
+  groupScrollView:  { flex: 1, backgroundColor: Colors.bg },
+  groupScrollContent: { flexGrow: 1, backgroundColor: Colors.bg, paddingBottom: 8 },
+  groupMainCardWrap:{ marginHorizontal: 20, marginTop: 10, marginBottom: 4 },
+  groupMainCard:    { backgroundColor: Colors.surface, borderRadius: Radius['2xl'], overflow: 'hidden' },
+  groupSettingsSection: { marginHorizontal: 20, marginTop: 14 },
+  groupTitleInput:  {
+    width: '100%',
+    paddingVertical: Platform.OS === 'ios' ? 8 : 4,
     paddingHorizontal: 0,
     margin: 0,
+    marginBottom: 4,
     borderWidth: 0,
     backgroundColor: 'transparent',
-    fontSize: 19,
+    fontSize: 21,
     fontFamily: Fonts.extraBold,
     color: Colors.text,
-    textAlignVertical: 'center',
+    lineHeight: 28,
     ...(Platform.OS === 'web' ? ({ outlineStyle: 'none', outlineWidth: 0 } as any) : null),
   },
-  nameReadOnly: {
-    fontSize: 19,
+  groupTitleReadOnly: {
+    fontSize: 21,
     fontFamily: Fonts.extraBold,
     color: Colors.text,
+    lineHeight: 28,
+    marginBottom: 4,
   },
   readOnlyPlaceholder: {
     color: Colors.textMuted,
     fontFamily: Fonts.regular,
   },
-  nameInputSlot:    { flex: 1, minWidth: 0 },
-  /** No horizontal padding — parent ScrollView column already uses paddingHorizontal: 20 */
-  photosSectionLower: {
-    marginTop: 22,
-    paddingTop: 22,
-    marginBottom: 18,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: Colors.border,
+  /** Match event detail `descBox` / `eventDescInput` */
+  groupDescBox:     { backgroundColor: Colors.bg, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border, padding: 12, marginBottom: 16 },
+  groupDescInput:   {
+    width: '100%',
+    minHeight: 88,
+    padding: 0,
+    margin: 0,
+    fontSize: 14,
+    fontFamily: Fonts.regular,
+    color: Colors.text,
+    lineHeight: 22,
+    textAlignVertical: 'top',
+    ...(Platform.OS === 'web' ? ({ outlineStyle: 'none', outlineWidth: 0 } as any) : null),
   },
-  photosCard:       { overflow: 'hidden' },
-  coverToolbar:     { flexDirection: 'row', alignItems: 'center', padding: 8, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: Colors.border },
-  coverPhotoBtn:    { paddingHorizontal: 10, paddingVertical: 5, borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.bg },
+  groupDescText:    { fontSize: 14, color: Colors.text, fontFamily: Fonts.regular, lineHeight: 22 },
+  groupPhotosAddCard: {
+    backgroundColor: Colors.bg,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  groupPhotosAddCardNested: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+  },
+  groupPhotosAddBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    alignItems: 'flex-start',
+  },
   coverRemoveThumb: {
     position: 'absolute',
     top: -5,
@@ -978,31 +1111,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  descInputFull:    {
-    width: '100%',
-    minHeight: 88,
-    marginTop: 0,
-    paddingTop: 8,
-    paddingBottom: 8,
-    paddingHorizontal: 0,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-    backgroundColor: 'transparent',
-    fontSize: 13,
-    fontFamily: Fonts.regular,
-    color: Colors.text,
-    textAlignVertical: 'top',
-    ...(Platform.OS === 'web' ? ({ outlineStyle: 'none', outlineWidth: 0 } as any) : null),
-  },
-  descReadOnlyWrap: {
-    width: '100%',
-    minHeight: 88,
-    paddingTop: 8,
-    paddingBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  groupDescFull:    { width: '100%', fontSize: 13, color: Colors.textSub, fontFamily: Fonts.regular, lineHeight: 18 },
   navEditActions:   { flexDirection: 'row', alignItems: 'center', gap: 8 },
   draftBarBtnSecondary: {
     paddingHorizontal: 14,
@@ -1025,11 +1133,9 @@ const styles = StyleSheet.create({
   draftBarBtnPrimaryDisabled: { opacity: 0.45 },
   draftBarBtnPrimaryText: { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.accentFg },
   groupThumb:       { width: AVATAR_SIZE, height: AVATAR_SIZE, borderWidth: 1, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  groupName:        { fontSize: 19, fontFamily: Fonts.extraBold, color: Colors.text },
-  groupDesc:        { fontSize: 13, color: Colors.textSub, fontFamily: Fonts.regular, lineHeight: 18 },
   inviteSection:    { marginTop: 0, paddingBottom: 0 },
+  inviteSectionInset: { paddingHorizontal: 16, paddingBottom: 16 },
   inviteRow:        { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  inviteToggleRow:  { paddingVertical: 0 },
   inviteLabel:      { fontSize: 14, fontFamily: Fonts.regular, color: Colors.textMuted, opacity: 0.65 },
   inviteValueRow:   { flexDirection: 'row', alignItems: 'center', gap: 0, flexWrap: 'wrap' },
   inviteValue:      { fontSize: 14, fontFamily: Fonts.medium, color: Colors.textMuted, opacity: 0.65 },
@@ -1042,10 +1148,20 @@ const styles = StyleSheet.create({
   copyIconBtn:      { padding: 4 },
   copyIconWrap:     { width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
   copyIconText:     { fontSize: 16, fontFamily: Fonts.bold },
-  card:             { backgroundColor: Colors.surface, borderRadius: 16, borderWidth: 1, borderColor: Colors.border, overflow: 'hidden' },
-  sectionLabel:     { fontSize: 12, fontFamily: Fonts.semiBold, color: Colors.textSub, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 6 },
-  pendingCard:      { borderColor: '#FDE68A', marginBottom: 16 },
-  memberRow:        { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12 },
+  card:             { backgroundColor: Colors.surface, borderRadius: Radius['2xl'], overflow: 'hidden' },
+  cardPendingNotice:{ backgroundColor: '#FFFBEB', borderWidth: StyleSheet.hairlineWidth, borderColor: '#FDE68A' },
+  cardDanger:       { borderWidth: StyleSheet.hairlineWidth, borderColor: '#FECACA' },
+  sectionLabel:     {
+    fontSize: 11,
+    fontFamily: Fonts.semiBold,
+    color: Colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 10,
+  },
+  sectionLabelSpaced: { marginTop: 24 },
+  pendingCard:      { borderWidth: StyleSheet.hairlineWidth, borderColor: '#FDE68A', marginBottom: 16 },
+  memberRow:        { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, paddingHorizontal: 16 },
   rowBorder:        { borderBottomWidth: 1, borderBottomColor: Colors.border },
   memberName:       { fontSize: 14, fontFamily: Fonts.medium, color: Colors.text },
   memberHandle:     { fontSize: 12, color: Colors.textMuted, fontFamily: Fonts.regular },
@@ -1070,4 +1186,47 @@ const styles = StyleSheet.create({
   confirmBody:      { fontSize: 14, color: Colors.textSub, fontFamily: Fonts.regular, lineHeight: 22, marginBottom: 20 },
   confirmBtn:       { flex: 1, paddingVertical: 10, borderRadius: Radius.lg, borderWidth: 1, alignItems: 'center' },
   dangerIconWrap:   { width: 28, alignItems: 'center', justifyContent: 'center' },
+  groupPhotoLightbox: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.93)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  groupPhotoLightboxHeader: {
+    position: 'absolute',
+    top: 60,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+  },
+  groupPhotoLightboxName: { fontSize: 13, fontFamily: Fonts.semiBold, color: '#fff' },
+  groupPhotoLightboxSub: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.45)',
+    fontFamily: Fonts.regular,
+  },
+  groupPhotoLightboxClose: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: Radius.lg,
+    backgroundColor: 'rgba(255,255,255,0.14)',
+  },
+  groupPhotoLightboxImg: { width: '100%', height: '70%' },
+  groupPhotoLightboxNavBtn: {
+    position: 'absolute',
+    top: '42%',
+    zIndex: 2,
+    paddingVertical: 14,
+    paddingHorizontal: 10,
+    borderRadius: Radius.full,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  groupPhotoLightboxNavBtnDisabled: { opacity: 0.28 },
+  groupPhotoLightboxNavPrev: { left: 10 },
+  groupPhotoLightboxNavNext: { right: 10 },
 });
