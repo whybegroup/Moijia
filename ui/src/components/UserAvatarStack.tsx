@@ -1,7 +1,7 @@
 import { View, Text, StyleSheet } from 'react-native';
 import { Colors, Fonts } from '../constants/theme';
 import { UserAvatar } from './UserAvatar';
-import type { User } from '@moija/client';
+import type { User } from '@moijia/client';
 
 type DotUserIds = Set<string> | readonly string[];
 

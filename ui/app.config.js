@@ -15,8 +15,8 @@ const plugins = [
   [
     'expo-image-picker',
     {
-      photosPermission: 'Moija needs access to your photos to upload images to events.',
-      cameraPermission: 'Moija can use the camera to add photos to events.',
+      photosPermission: 'moijia needs access to your photos to upload images to events.',
+      cameraPermission: 'moijia can use the camera to add photos to events.',
     },
   ],
 ];
@@ -26,12 +26,12 @@ if (iosUrlScheme) {
 
 module.exports = {
   expo: {
-    name: 'Moija',
-    slug: 'moija',
+    name: 'moijia',
+    slug: 'moijia',
     version: '1.0.0',
     orientation: 'portrait',
     icon: './assets/favicon.png',
-    scheme: 'moija',
+    scheme: 'moijia',
     userInterfaceStyle: 'light',
     splash: {
       image: './assets/favicon.png',
@@ -40,13 +40,13 @@ module.exports = {
     },
     ios: {
       supportsTablet: false,
-      bundleIdentifier: 'com.whybe.moija',
+      bundleIdentifier: 'com.whybe.moijia',
     },
     android: {
       adaptiveIcon: {
         backgroundColor: '#FAFAF9',
       },
-      package: 'com.whybe.moija',
+      package: 'com.whybe.moijia',
       /** Lets bottom sheets / modals shrink above the keyboard instead of covering inputs */
       softwareKeyboardLayoutMode: 'resize',
     },

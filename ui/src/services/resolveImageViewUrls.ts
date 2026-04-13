@@ -1,4 +1,4 @@
-import { UploadsService } from '@moija/client';
+import { UploadsService } from '@moijia/client';
 
 export function isDirectRenderableImageUrl(url: string): boolean {
   if (!url?.trim()) return false;

@@ -1,4 +1,4 @@
-import { EventUpdate } from '@moija/client';
+import { EventUpdate } from '@moijia/client';
 
 /** OpenAPI string enum — use these keys in UI state and API payloads. */
 export type SeriesUpdateScope = EventUpdate.seriesUpdateScope;

@@ -70,6 +70,7 @@ CREATE TABLE "events" (
     "allowMaybe" BOOLEAN NOT NULL DEFAULT true,
     "rsvpDeadline" DATETIME,
     "activityIdeasEnabled" BOOLEAN NOT NULL DEFAULT false,
+    "activityVotesAnonymous" BOOLEAN NOT NULL DEFAULT false,
     "recurrenceRule" TEXT,
     "recurrenceSeriesId" TEXT,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -156,10 +157,23 @@ CREATE TABLE "comments" (
     "eventId" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
     "text" TEXT,
+    "replyToCommentId" TEXT,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
     CONSTRAINT "comments_eventId_fkey" FOREIGN KEY ("eventId") REFERENCES "events" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
-    CONSTRAINT "comments_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+    CONSTRAINT "comments_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT "comments_replyToCommentId_fkey" FOREIGN KEY ("replyToCommentId") REFERENCES "comments" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "comment_reactions" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "commentId" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "emoji" TEXT NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "comment_reactions_commentId_fkey" FOREIGN KEY ("commentId") REFERENCES "comments" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "comment_reactions_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
@@ -170,6 +184,45 @@ CREATE TABLE "comment_photos" (
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
     CONSTRAINT "comment_photos_commentId_fkey" FOREIGN KEY ("commentId") REFERENCES "comments" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "polls" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "groupId" TEXT NOT NULL,
+    "createdBy" TEXT NOT NULL,
+    "updatedBy" TEXT NOT NULL,
+    "title" TEXT NOT NULL,
+    "description" TEXT,
+    "anonymousVotes" BOOLEAN NOT NULL DEFAULT false,
+    "multipleChoice" BOOLEAN NOT NULL DEFAULT false,
+    "ranking" BOOLEAN NOT NULL DEFAULT false,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "polls_groupId_fkey" FOREIGN KEY ("groupId") REFERENCES "groups" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "polls_createdBy_fkey" FOREIGN KEY ("createdBy") REFERENCES "users" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "poll_photos" (
+    "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    "pollId" TEXT NOT NULL,
+    "photoUrl" TEXT NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "poll_photos_pollId_fkey" FOREIGN KEY ("pollId") REFERENCES "polls" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "poll_options" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "pollId" TEXT NOT NULL,
+    "sortOrder" INTEGER NOT NULL,
+    "inputKind" TEXT NOT NULL,
+    "textHtml" TEXT,
+    "textFont" TEXT DEFAULT 'sans',
+    "dateTimeValue" DATETIME,
+    CONSTRAINT "poll_options_pollId_fkey" FOREIGN KEY ("pollId") REFERENCES "polls" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
@@ -207,3 +260,12 @@ CREATE UNIQUE INDEX "rsvps_eventId_userId_key" ON "rsvps"("eventId", "userId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "event_watches_eventId_userId_key" ON "event_watches"("eventId", "userId");
+
+-- CreateIndex
+CREATE INDEX "comments_replyToCommentId_idx" ON "comments"("replyToCommentId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "comment_reactions_commentId_userId_emoji_key" ON "comment_reactions"("commentId", "userId", "emoji");
+
+-- CreateIndex
+CREATE INDEX "poll_options_pollId_idx" ON "poll_options"("pollId");

@@ -23,7 +23,7 @@ function publicBaseUrl(): string {
 }
 
 function uploadPutSecret(): string {
-  return process.env.UPLOAD_PUT_SECRET?.trim() || 'moija-local-upload-dev-secret';
+  return process.env.UPLOAD_PUT_SECRET?.trim() || 'moijia-local-upload-dev-secret';
 }
 
 function extensionFromFilenameOrType(filename: string | undefined, contentType: string): string {

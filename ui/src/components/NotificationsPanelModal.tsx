@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, usePathname } from 'expo-router';
-import { Notification } from '@moija/client';
+import { Notification } from '@moijia/client';
 import { Colors, Fonts, Layout, Radius } from '../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName } from '../utils/helpers';
 import { NotificationListIcon } from './NotificationListIcon';

@@ -568,7 +568,7 @@ export class GroupService {
     inviteCode: string,
     userId: string
   ): Promise<{ groupName: string; status: 'joined' | 'pending' }> {
-    // Extract code from URL (e.g. moija.app/join/ABC123) or use as-is
+    // Extract code from URL (e.g. moijia.app/join/ABC123) or use as-is
     let raw = inviteCode.trim();
     const joinMatch = raw.match(/\/join\/([A-Za-z0-9]+)/i);
     if (joinMatch) raw = joinMatch[1];

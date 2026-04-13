@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { NotificationsService, type NotificationInput } from '@moija/client';
+import { NotificationsService, type NotificationInput } from '@moijia/client';
 import { queryKeys } from '../../config/queryClient';
 
 export function useNotifications(userId?: string) {

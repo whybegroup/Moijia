@@ -1,4 +1,4 @@
-import { UploadsService } from '@moija/client';
+import { UploadsService } from '@moijia/client';
 
 /** Best-effort DELETE for app-managed `https` uploads; ignores failures. */
 export function deleteManagedUploadFireAndForget(userId: string, sourceUrl: string): void {

@@ -1,5 +1,5 @@
 import { rrulestr } from 'rrule';
-import type { EventDetailed } from '@moija/client';
+import type { EventDetailed } from '@moijia/client';
 import { formatLocalDateInput } from './helpers';
 
 /** Upper bound for RRULE COUNT (“after N times”) in the UI and when saving. */

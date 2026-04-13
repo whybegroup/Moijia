@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export type CalendarScopeMode = 'day' | 'week' | 'month' | 'year';
 
-const STORAGE_KEY = '@moija/eventsScreenPrefs';
+const STORAGE_KEY = '@moijia/eventsScreenPrefs';
 
 export type EventsScreenPersistedV1 = {
   v: 1;

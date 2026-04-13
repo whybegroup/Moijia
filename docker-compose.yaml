@@ -8,7 +8,7 @@ services:
     ports:
       - 3000:3000
       - 5555:5555
-    image: danbyun0110/moija:1.0.0
+    image: danbyun0110/moijia:1.0.0
     volumes:
       - ./api/prisma/data:/app/prisma/data
       - ./api/data:/app/data
@@ -20,7 +20,7 @@ services:
     build:
       context: api
       dockerfile: Dockerfile.db
-    image: danbyun0110/moija-db:1.0.0
+    image: danbyun0110/moijia-db:1.0.0
     volumes:
       - ./api/prisma/data:/app/prisma/data
 
@@ -28,7 +28,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.ui
-    image: danbyun0110/moija-ui:1.0.0
+    image: danbyun0110/moijia-ui:1.0.0
     secrets:
       - source: uienv
         target: /app/.env

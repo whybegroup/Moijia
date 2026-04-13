@@ -16,7 +16,7 @@ import {
   memberMatchesMentionFilter,
   primaryMentionSlug,
 } from '../utils/mentionUtils';
-import type { User } from '@moija/client';
+import type { User } from '@moijia/client';
 
 type MentionMember = Pick<User, 'id' | 'displayName' | 'name'>;
 

@@ -1,7 +1,7 @@
 {
-  "name": "moija-api",
+  "name": "moijia-api",
   "version": "1.0.0",
-  "description": "Moija REST API with SQLite",
+  "description": "moijia REST API with SQLite",
   "main": "dist/server.js",
   "scripts": {
     "build": "npm run generate && tsc",

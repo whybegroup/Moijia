@@ -81,8 +81,8 @@ import {
   useRejectTimeSuggestion,
 } from '../../hooks/api';
 import { uid, getNoResponseIds } from '../../utils/api-helpers';
-import type { CommentInput, EventDetailed, GroupScoped, RSVP, User } from '@moija/client';
-import { RSVPInput, MembershipStatus, EventUpdate } from '@moija/client';
+import type { CommentInput, EventDetailed, GroupScoped, RSVP, User } from '@moijia/client';
+import { RSVPInput, MembershipStatus, EventUpdate } from '@moijia/client';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useCurrentUserContext } from '../../contexts/CurrentUserContext';
 import { ResolvableImage } from '../../components/ResolvableImage';

@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { EventsService, type RSVPInput } from '@moija/client';
+import { EventsService, type RSVPInput } from '@moijia/client';
 
 export function useCreateOrUpdateRSVP(eventId: string) {
   const queryClient = useQueryClient();

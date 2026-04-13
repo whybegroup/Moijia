@@ -8,7 +8,7 @@ import {
   type EventActivityOptionInput,
   type EventActivityVoteInput,
   type EventTimeSuggestionInput,
-} from '@moija/client';
+} from '@moijia/client';
 import { queryKeys } from '../../config/queryClient';
 
 interface EventFilters {

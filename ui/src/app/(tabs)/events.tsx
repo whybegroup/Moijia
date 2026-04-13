@@ -53,7 +53,7 @@ import {
   type EventsScreenPersistedV1,
   type CalendarScopeMode,
 } from '../../utils/eventsScreenPrefs';
-import { EventUpdate, type EventDetailed } from '@moija/client';
+import { EventUpdate, type EventDetailed } from '@moijia/client';
 import {
   SERIES_SCOPE_OPTIONS,
   type SeriesUpdateScope,

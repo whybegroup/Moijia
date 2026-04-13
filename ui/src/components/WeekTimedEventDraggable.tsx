@@ -7,7 +7,7 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import type { EventDetailed } from '@moija/client';
+import type { EventDetailed } from '@moijia/client';
 import { isSameDay } from '../utils/helpers';
 import { Fonts, Radius } from '../constants/theme';
 

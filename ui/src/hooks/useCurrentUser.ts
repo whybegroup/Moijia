@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import type { User } from '@moija/client';
+import type { User } from '@moijia/client';
 import { useAuth } from '../contexts/AuthContext';
 import { useUser, useCreateUser } from './api';
 

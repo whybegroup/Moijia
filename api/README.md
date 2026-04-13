@@ -1,6 +1,6 @@
-# Moija API
+# moijia API
 
-REST API for Moija - A social event planning platform for groups.
+REST API for moijia - A social event planning platform for groups.
 
 ## OnPrem
 
@@ -11,12 +11,12 @@ brew install caddy
 ```bash
 sudo cat >> /opt/homebrew/etc/Caddyfile << EOF
 api.danielbyun.com {
-        tls /opt/homebrew/etc/moija-api.pem /opt/homebrew/etc/moija-api-privkey.pem
+        tls /opt/homebrew/etc/moijia-api.pem /opt/homebrew/etc/moijia-api-privkey.pem
         reverse_proxy 127.0.0.1:3000
 }
 
-moija.danielbyun.com {
-        tls /opt/homebrew/etc/moija-ui.pem /opt/homebrew/etc/moija-ui-privkey.pem
+moijia.danielbyun.com {
+        tls /opt/homebrew/etc/moijia-ui.pem /opt/homebrew/etc/moijia-ui-privkey.pem
         reverse_proxy 127.0.0.1:8081
 }
 EOF
@@ -84,8 +84,8 @@ source ~/.bashrc
 ```
 
 ```bash
-git clone git@github.com:whybegroup/Moija.git
-cd Moija/api
+git clone git@github.com:whybegroup/moijia.git
+cd moijia/api
 nvm install
 nvm use
 npm install
@@ -95,7 +95,7 @@ npm start
 
 ## Architecture Overview
 
-Moija uses a **code-first approach** with TypeScript as the single source of truth:
+moijia uses a **code-first approach** with TypeScript as the single source of truth:
 
 1. **TypeScript Models**: Define data structures once in TypeScript interfaces
 2. **Controllers**: Define API endpoints with tsoa decorators
@@ -214,7 +214,7 @@ api/
 │   ├── schema.prisma        # Prisma database schema
 │   ├── migrations/          # Database migrations
 │   ├── seed.ts              # Database seeding script
-│   └── moija.db            # SQLite database file
+│   └── moijia.db            # SQLite database file
 │
 ├── dist/                    # Compiled JavaScript
 ├── tsoa.json                # tsoa configuration
@@ -691,7 +691,7 @@ Controls API generation:
     "outputDirectory": ".",
     "specVersion": 3,
     "yaml": true,
-    "name": "Moija API",
+    "name": "moijia API",
     "version": "1.0.0"
   },
   "routes": {

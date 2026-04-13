@@ -1,5 +1,5 @@
 {
-  "name": "moija-ui",
+  "name": "moijia-ui",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
@@ -19,7 +19,7 @@
     "@dicebear/core": "^9.4.0",
     "@expo-google-fonts/dm-sans": "^0.2.3",
     "@firebase/auth": "1.10.8",
-    "@moija/client": "*",
+    "@moijia/client": "*",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-community/datetimepicker": "^8.6.0",
     "@react-native-google-signin/google-signin": "^16.1.2",

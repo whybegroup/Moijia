@@ -5,7 +5,7 @@ import { dayShort, fmtDateShort } from '../utils/helpers';
 import { EventRow } from './EventRow';
 import { useUsers } from '../hooks/api';
 import { useCurrentUserContext } from '../contexts/CurrentUserContext';
-import type { EventDetailed, GroupScoped } from '@moija/client';
+import type { EventDetailed, GroupScoped } from '@moijia/client';
 
 interface ListViewProps {
   events: EventDetailed[];

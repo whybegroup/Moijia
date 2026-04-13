@@ -24,7 +24,7 @@ import {
   useSetMemberRole,
   useSetSuperAdmin,
 } from '../../hooks/api';
-import { MembershipRequestAction } from '@moija/client';
+import { MembershipRequestAction } from '@moijia/client';
 import { useCurrentUserContext } from '../../contexts/CurrentUserContext';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path, Rect } from 'react-native-svg';

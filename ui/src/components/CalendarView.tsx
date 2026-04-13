@@ -16,7 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Colors, Fonts, Radius } from '../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName } from '../utils/helpers';
 import { isSameDay, isToday } from '../utils/helpers';
-import type { EventDetailed, GroupScoped } from '@moija/client';
+import type { EventDetailed, GroupScoped } from '@moijia/client';
 import { useCurrentUserContext } from '../contexts/CurrentUserContext';
 import { WeekDayTimelineGestures } from './WeekDayTimelineGestures';
 import { WeekTimedEventDraggable } from './WeekTimedEventDraggable';

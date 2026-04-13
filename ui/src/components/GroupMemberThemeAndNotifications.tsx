@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Colors, Fonts, Radius } from '../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName } from '../utils/helpers';
 import { Toggle } from './ui';
-import type { Partial_NotifPrefs_ } from '@moija/client';
+import type { Partial_NotifPrefs_ } from '@moijia/client';
 import {
   useGroupMemberColor,
   useUpdateGroupMemberColor,

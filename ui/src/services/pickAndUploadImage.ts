@@ -1,7 +1,7 @@
 import { Alert, Platform } from 'react-native';
 import { File as ExpoFile } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
-import { UploadsService } from '@moija/client';
+import { UploadsService } from '@moijia/client';
 
 function isCancelled(e: unknown): boolean {
   return e instanceof Error && e.message === 'cancelled';

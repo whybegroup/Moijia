@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <g transform="translate(512, 512)">
+    <circle cx="0" cy="0" r="440" fill="#97C459"/>
+    <g transform="rotate(10)">
+      <polygon points="175,-400 -200,55 75,55 -175,400 280,-55 0,-55" fill="white"/>
+      <circle cx="-110" cy="-270" r="38" fill="white"/>
+    </g>
+  </g>
+</svg>

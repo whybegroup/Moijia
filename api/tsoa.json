@@ -7,11 +7,11 @@
     "specVersion": 3,
     "specFileBaseName": "openapi",
     "yaml": true,
-    "name": "Moija API",
+    "name": "moijia API",
     "version": "1.0.0",
-    "description": "REST API for Moija - A social event planning platform for groups",
+    "description": "REST API for moijia - A social event planning platform for groups",
     "contact": {
-      "name": "Moija Team"
+      "name": "moijia Team"
     },
     "host": "localhost:3000",
     "schemes": ["http"],

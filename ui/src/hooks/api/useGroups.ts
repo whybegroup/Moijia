@@ -13,7 +13,7 @@ import {
   type GroupScoped,
   type MembershipRequestAction,
   type Partial_NotifPrefs_,
-} from '@moija/client';
+} from '@moijia/client';
 import { queryKeys } from '../../config/queryClient';
 
 /** Reuse list data so group detail can render without waiting on a duplicate GET /groups/:id. */

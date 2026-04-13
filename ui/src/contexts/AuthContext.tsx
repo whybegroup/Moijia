@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, onAuthStateChange, signOut as firebaseSignOut } from '../config/firebase';
-import { UsersService } from '@moija/client';
+import { UsersService } from '@moijia/client';
 
 interface AuthContextType {
   user: User | null;

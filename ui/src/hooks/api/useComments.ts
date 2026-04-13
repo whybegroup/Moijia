@@ -4,7 +4,7 @@ import {
   CommentsService,
   type CommentInput,
   type CommentUpdateInput,
-} from '@moija/client';
+} from '@moijia/client';
 import { queryKeys } from '../../config/queryClient';
 
 export function useEventComments(eventId: string, viewerUserId?: string) {

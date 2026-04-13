@@ -2,7 +2,7 @@ import { View, Text, TouchableOpacity, Pressable, StyleSheet } from 'react-nativ
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Fonts, Radius } from '../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName, fmtTime, getMyWaitlistPosition } from '../utils/helpers';
-import type { EventDetailed, GroupScoped, User } from '@moija/client';
+import type { EventDetailed, GroupScoped, User } from '@moijia/client';
 import { UserAvatarStack } from './UserAvatarStack';
 
 interface EventRowProps {
