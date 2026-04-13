@@ -42,4 +42,7 @@ export const queryKeys = {
     all: ['notifications'] as const,
     user: (userId: string) => ['notifications', 'user', userId] as const,
   },
+  polls: {
+    detail: (id: string, userId: string) => ['polls', id, userId] as const,
+  },
 } as const;

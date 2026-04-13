@@ -334,24 +334,43 @@ export default function EventsScreen() {
         <View style={styles.actions}>
           {/* View toggle */}
           <View style={styles.viewToggle}>
-            {(
-              [
-                ['list', 'list-outline'] as const,
-                ['calendar', 'calendar-outline'] as const,
-              ] as const
-            ).map(([v, ion]) => {
-              const active = viewMode === v;
-              return (
-                <TouchableOpacity
-                  key={v}
-                  style={[styles.viewBtn, active && styles.viewBtnActive]}
-                  onPress={() => setViewMode(v)}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons name={ion} size={18} color={active ? Colors.text : Colors.textMuted} />
-                </TouchableOpacity>
-              );
-            })}
+            <TouchableOpacity
+              style={[styles.viewBtn, viewMode === 'list' && styles.viewBtnActive]}
+              onPress={() => setViewMode('list')}
+              activeOpacity={0.7}
+            >
+              <Svg
+                width={18}
+                height={18}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke={viewMode === 'list' ? Colors.text : Colors.textMuted}
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <Path d="M4 7h16M4 12h16M4 17h16" />
+              </Svg>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.viewBtn, viewMode === 'calendar' && styles.viewBtnActive]}
+              onPress={() => setViewMode('calendar')}
+              activeOpacity={0.7}
+            >
+              <Svg
+                width={18}
+                height={18}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke={viewMode === 'calendar' ? Colors.text : Colors.textMuted}
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <Path d="M8 2v4M16 2v4M3 10h18" />
+                <Path d="M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" strokeLinejoin="round" />
+              </Svg>
+            </TouchableOpacity>
           </View>
 
           <CreateOrJoinButton userId={currentUserId} eventEligibleGroupCount={groups.length} />

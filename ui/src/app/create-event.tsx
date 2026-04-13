@@ -79,6 +79,7 @@ export default function CreateEventScreen() {
     location: '', minAttendees: '1', maxAttendees: '',
     allowMaybe: false, enableWaitlist: false, coverPhotoDrafts: [] as CoverPhotoDraft[],
     activityIdeasEnabled: false,
+    activityVotesAnonymous: false,
     recurrence: defaultRecurrenceFormState() as RecurrenceFormState,
   });
   const [errors, setErrors] = useState({
@@ -92,6 +93,10 @@ export default function CreateEventScreen() {
   const eventEligibleGroups = groups.filter(
     (g) => g.membershipStatus === 'member' || g.membershipStatus === 'admin',
   );
+
+  const [activityOptionDrafts, setActivityOptionDrafts] = useState<{ id: string; label: string }[]>([]);
+  const [newActivityLabel, setNewActivityLabel] = useState('');
+
   useEffect(() => {
     if (eventEligibleGroups.length > 0 && !form.groupId) {
       setForm((p) => ({ ...p, groupId: eventEligibleGroups[0].id }));
@@ -230,6 +235,14 @@ export default function CreateEventScreen() {
         enableWaitlist: form.maxAttendees.trim() ? form.enableWaitlist : undefined,
         allowMaybe: form.allowMaybe,
         activityIdeasEnabled: form.activityIdeasEnabled,
+        ...(form.activityIdeasEnabled
+          ? {
+              activityVotesAnonymous: form.activityVotesAnonymous,
+              activityOptionLabels: activityOptionDrafts
+                .map((o) => o.label.trim())
+                .filter((s) => s.length > 0),
+            }
+          : {}),
         ...(recurrenceRule
           ? { recurrenceRule, viewerTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }
           : {}),
@@ -240,6 +253,17 @@ export default function CreateEventScreen() {
     } catch {
       Alert.alert('Error', 'Failed to create event');
     }
+  };
+
+  const addActivityDraft = () => {
+    const label = newActivityLabel.trim();
+    if (!label) return;
+    setActivityOptionDrafts((prev) => [...prev, { id: uid(), label }]);
+    setNewActivityLabel('');
+  };
+
+  const removeActivityDraft = (id: string) => {
+    setActivityOptionDrafts((prev) => prev.filter((o) => o.id !== id));
   };
 
   const [showStartDatePicker, setShowStartDatePicker] = useState(false);
@@ -860,7 +884,76 @@ export default function CreateEventScreen() {
               value={form.activityIdeasEnabled}
               onChange={(v) => set('activityIdeasEnabled', v)}
               label="Enable activity ideas"
+              style={form.activityIdeasEnabled ? { borderBottomWidth: 0 } : undefined}
             />
+            {form.activityIdeasEnabled ? (
+              <View style={{ paddingHorizontal: 0, paddingBottom: 14, paddingTop: 4 }}>
+                <Text
+                  style={{
+                    fontSize: 13,
+                    color: Colors.textMuted,
+                    marginBottom: 10,
+                    fontFamily: Fonts.regular,
+                    paddingHorizontal: 0,
+                  }}
+                >
+                  Add options now — same as when editing an event. Members can vote after the event is created.
+                </Text>
+                {activityOptionDrafts.map((opt) => (
+                  <View
+                    key={opt.id}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      paddingVertical: 10,
+                      paddingHorizontal: 12,
+                      borderRadius: Radius.md,
+                      borderWidth: 1,
+                      borderColor: Colors.border,
+                      backgroundColor: Colors.bg,
+                      marginBottom: 8,
+                      gap: 8,
+                    }}
+                  >
+                    <Text
+                      style={{ flex: 1, fontSize: 15, fontFamily: Fonts.medium, color: Colors.text }}
+                      numberOfLines={3}
+                    >
+                      {opt.label}
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() => removeActivityDraft(opt.id)}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Ionicons name="trash-outline" size={18} color={Colors.textMuted} />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+                <View style={{ flexDirection: 'row', gap: 8, marginTop: 4, alignItems: 'center' }}>
+                  <TextInput
+                    value={newActivityLabel}
+                    onChangeText={setNewActivityLabel}
+                    placeholder="Add an activity idea"
+                    placeholderTextColor={Colors.textMuted}
+                    style={[styles.activityComposerInput, { flex: 1 }]}
+                    onSubmitEditing={addActivityDraft}
+                  />
+                  <TouchableOpacity
+                    onPress={addActivityDraft}
+                    style={[styles.activityAddBtn, !newActivityLabel.trim() && styles.activityAddBtnDisabled]}
+                    disabled={!newActivityLabel.trim()}
+                  >
+                    <Text style={styles.activityAddBtnText}>Add</Text>
+                  </TouchableOpacity>
+                </View>
+                <Toggle
+                  value={form.activityVotesAnonymous}
+                  onChange={(v) => set('activityVotesAnonymous', v)}
+                  label="Anonymous votes (hide who voted)"
+                  style={{ paddingHorizontal: 0, paddingTop: 12, borderBottomWidth: 0 }}
+                />
+              </View>
+            ) : null}
           </View>
         </Field>
 
@@ -897,6 +990,25 @@ const styles = StyleSheet.create({
   datePickerBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: Radius.lg, backgroundColor: Colors.accent },
   datePickerBtnText: { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.accentFg },
   settingsCard:  { backgroundColor: Colors.surface, borderRadius: Radius.xl, borderWidth: 1, borderColor: Colors.border, paddingHorizontal: 16 },
+  activityComposerInput: {
+    padding: 9,
+    paddingHorizontal: 14,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.bg,
+    fontSize: 14,
+    color: Colors.text,
+    fontFamily: Fonts.regular,
+  },
+  activityAddBtn: {
+    paddingHorizontal: 18,
+    paddingVertical: 9,
+    borderRadius: Radius.lg,
+    backgroundColor: Colors.accent,
+  },
+  activityAddBtnDisabled: { backgroundColor: Colors.border },
+  activityAddBtnText: { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.accentFg },
   descBox:       { backgroundColor: Colors.surface, borderRadius: Radius.xl, borderWidth: 1.5, borderColor: Colors.border, overflow: 'hidden' },
   descInput:     { padding: 12, paddingHorizontal: 14, fontSize: 14, color: Colors.text, fontFamily: Fonts.regular, minHeight: 100, textAlignVertical: 'top' },
   descToolbar:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', padding: 8, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: Colors.border },

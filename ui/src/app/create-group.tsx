@@ -1,33 +1,46 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo, useCallback } from 'react';
 import * as Crypto from 'expo-crypto';
 import {
-  View, Text, ScrollView, TouchableOpacity, TextInput,
-  StyleSheet, ActivityIndicator, Alert, Platform,
+  View,
+  Text,
+  ScrollView,
+  TouchableOpacity,
+  TextInput,
+  StyleSheet,
+  ActivityIndicator,
+  Alert,
+  Platform,
+  Modal,
 } from 'react-native';
 import { useRouter, useLocalSearchParams, type Href } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Fonts, Radius } from '../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName, groupAvatarBorderRadius } from '../utils/helpers';
-import { NavBar, Field, formSectionTitleStyle } from '../components/ui';
+import { NavBar, formSectionTitleStyle, Avatar, Toggle } from '../components/ui';
 import { EventFormPopoverChrome } from '../components/EventFormPopoverChrome';
 import { useCreateGroup } from '../hooks/api/useGroups';
+import { useUsers } from '../hooks/api';
 import { useAuth } from '../contexts/AuthContext';
 import { GroupAvatar } from '../components/GroupAvatar';
 import { AvatarPickerModal } from '../components/AvatarPickerModal';
+import { UserAvatar } from '../components/UserAvatar';
 import type { PendingAvatarFile } from '../services/pickAndUploadImage';
 import { uploadPendingAvatarFile } from '../services/pickAndUploadImage';
 import { ResolvableImage } from '../components/ResolvableImage';
 import { pickAndUploadCoverPhoto } from '../services/pickAndUploadImage';
-import { firstSearchParam, parseReturnToParam, withReturnTo } from '../utils/navigationReturn';
+import { firstSearchParam, parseReturnToParam } from '../utils/navigationReturn';
 
 const DEFAULT_AVATAR_SEED = 'auto';
 const AVATAR_SIZE = 56;
+const DEFAULT_REQUIRE_APPROVAL = true;
 
 export default function CreateGroupScreen() {
   const router = useRouter();
   const { returnTo: returnToRaw } = useLocalSearchParams<{ returnTo?: string | string[] }>();
   const groupReturnTo = parseReturnToParam(firstSearchParam(returnToRaw));
   const { user } = useAuth();
+  const { data: usersData } = useUsers();
+  const users = usersData ?? [];
   const createGroup = useCreateGroup();
   const [groupId] = useState(() => Crypto.randomUUID());
 
@@ -37,7 +50,25 @@ export default function CreateGroupScreen() {
   const [draftThumbnail, setDraftThumbnail] = useState<string | null>(null);
   const [draftCoverPhotos, setDraftCoverPhotos] = useState<string[]>([]);
   const [coverPhotoBusy, setCoverPhotoBusy] = useState(false);
+  const [groupPhotoLightbox, setGroupPhotoLightbox] = useState<{ urls: string[]; index: number } | null>(
+    null,
+  );
+  const [requireApprovalToJoin, setRequireApprovalToJoin] = useState(DEFAULT_REQUIRE_APPROVAL);
   const valid = !!draftName.trim();
+
+  const settingsDirty = requireApprovalToJoin !== DEFAULT_REQUIRE_APPROVAL;
+
+  const createFormDirty = useMemo(
+    () =>
+      !!(
+        draftName.trim() ||
+        draftDesc.trim() ||
+        draftCoverPhotos.length > 0 ||
+        draftThumbnail != null ||
+        settingsDirty
+      ),
+    [draftName, draftDesc, draftCoverPhotos.length, draftThumbnail, settingsDirty],
+  );
 
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const pendingAvatarFileRef = useRef<PendingAvatarFile | null>(null);
@@ -60,6 +91,18 @@ export default function CreateGroupScreen() {
     setShowAvatarPicker(false);
   };
 
+  const resetCreateForm = useCallback(() => {
+    setDraftName('');
+    setDraftDesc('');
+    setDraftSeed('');
+    setDraftThumbnail(null);
+    setDraftCoverPhotos([]);
+    setRequireApprovalToJoin(DEFAULT_REQUIRE_APPROVAL);
+    const p = pendingAvatarFileRef.current;
+    if (p?.kind === 'web') URL.revokeObjectURL(p.objectUrl);
+    pendingAvatarFileRef.current = null;
+  }, []);
+
   const addCoverPhotoFromPicker = async () => {
     if (!user?.uid || coverPhotoBusy) return;
     setCoverPhotoBusy(true);
@@ -72,7 +115,7 @@ export default function CreateGroupScreen() {
   };
 
   const handleBack = () => {
-    if (router.canGoBack()) {
+    if (Platform.OS !== 'web' && router.canGoBack()) {
       router.back();
       return;
     }
@@ -96,7 +139,7 @@ export default function CreateGroupScreen() {
         setDraftThumbnail(thumbnail);
       }
 
-      const newGroup = await createGroup.mutateAsync({
+      await createGroup.mutateAsync({
         id: groupId,
         name: draftName.trim(),
         desc: draftDesc.trim(),
@@ -107,169 +150,321 @@ export default function CreateGroupScreen() {
         createdBy: user.uid,
         adminIds: [user.uid],
         memberIds: [user.uid],
+        requireApprovalToJoin,
       });
 
-      router.replace(withReturnTo(`/groups/${newGroup.id}`, groupReturnTo ?? '/(tabs)/groups'));
+      handleBack();
     } catch {
       Alert.alert('Error', 'Failed to create group. Please try again.');
     }
   };
 
-  return (
-    <>
-    <EventFormPopoverChrome onClose={handleBack}>
-      <View style={styles.inner}>
-      <NavBar
-        title="New Group"
-        onClose={handleBack}
-        centerTitle
-        right={
-          <TouchableOpacity
-            onPress={() => void handleCreate()}
-            disabled={!valid || createGroup.isPending}
-            style={[styles.navCreateBtn, (!valid || createGroup.isPending) && styles.navCreateBtnDisabled]}
-            activeOpacity={0.8}
-          >
-            {createGroup.isPending ? (
-              <ActivityIndicator size="small" color={Colors.textMuted} />
-            ) : (
-              <Text style={[styles.navCreateBtnText, !valid && { color: Colors.textMuted }]} numberOfLines={1}>
-                Create
-              </Text>
-            )}
-          </TouchableOpacity>
-        }
-      />
+  const coverPhotosForDisplay = draftCoverPhotos;
+  const themeName = draftName.trim() || 'Group';
 
-      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
-        <View style={[styles.headerBlock, { borderBottomColor: Colors.border }]}>
-          <View style={styles.avatarNameRow}>
-            <TouchableOpacity
-              onPress={openAvatarPicker}
-              style={[
-                styles.groupThumb,
-                {
-                  backgroundColor: getGroupColor(getDefaultGroupThemeFromName(draftName || 'Group')).row,
-                  borderColor: getGroupColor(getDefaultGroupThemeFromName(draftName || 'Group')).cal,
-                  borderRadius: groupAvatarBorderRadius(AVATAR_SIZE),
-                },
-              ]}
-              activeOpacity={0.8}
-            >
-              <GroupAvatar
-                seed={draftSeed || DEFAULT_AVATAR_SEED}
-                thumbnail={draftThumbnail}
-                size={AVATAR_SIZE}
-                style={{ width: AVATAR_SIZE, height: AVATAR_SIZE }}
-              />
-            </TouchableOpacity>
-            <View style={styles.nameFieldWrap}>
-              <TextInput
-                value={draftName}
-                onChangeText={(text) => {
-                  setDraftName(text);
-                  if (text) {
-                    setDraftSeed(text);
-                  } else {
-                    setDraftSeed(DEFAULT_AVATAR_SEED);
-                  }
-                }}
-                placeholder="Group name"
-                placeholderTextColor={Colors.textMuted}
-                style={styles.nameInput}
-                autoCorrect={false}
-              />
-            </View>
-          </View>
-
-          <Field label="Description">
-            <View style={styles.descBox}>
-              <TextInput
-                value={draftDesc}
-                onChangeText={setDraftDesc}
-                placeholder="What's this group about?"
-                placeholderTextColor={Colors.textMuted}
-                multiline
-                numberOfLines={5}
-                style={styles.descInput}
-              />
-              <View style={styles.descToolbar}>
-                <Text style={{ fontSize: 11, color: Colors.textMuted }}>{draftDesc.length}/500</Text>
-              </View>
-            </View>
-          </Field>
-        </View>
-
-        <View style={styles.photosSectionLower}>
-          <Text style={formSectionTitleStyle}>
-            Photos{draftCoverPhotos.length > 0 ? ` · ${draftCoverPhotos.length}` : ''}
-          </Text>
-          <Text style={styles.photosHint}>Optional — saved when you create the group.</Text>
-          <View style={styles.photosCard}>
-            {draftCoverPhotos.length > 0 && (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={{ borderBottomWidth: 1, borderBottomColor: Colors.border }}
-                contentContainerStyle={{ gap: 4, padding: 10 }}
-              >
-                {draftCoverPhotos.map((uri, i) => (
-                  <View key={`${uri}-${i}`} style={{ position: 'relative' }}>
-                    <ResolvableImage
-                      storedUrl={uri}
-                      style={{ width: 80, height: 80, borderRadius: Radius.lg }}
-                      resizeMode="cover"
-                    />
-                    <TouchableOpacity
-                      onPress={() => setDraftCoverPhotos(draftCoverPhotos.filter((_, j) => j !== i))}
-                      style={styles.removeThumb}
-                    >
-                      <Ionicons name="close" size={11} color="#fff" />
-                    </TouchableOpacity>
-                  </View>
-                ))}
-              </ScrollView>
-            )}
-            <View style={[styles.photosToolbar, draftCoverPhotos.length === 0 && { borderTopWidth: 0 }]}>
+  const groupPhotosBlock = (
+    <View
+      style={{
+        marginTop: draftDesc.trim() || draftName.trim() ? 4 : 10,
+        marginBottom: 0,
+      }}
+    >
+      <View style={{ paddingHorizontal: 16 }}>
+        <Text style={formSectionTitleStyle}>
+          Photos{coverPhotosForDisplay.length > 0 ? ` · ${coverPhotosForDisplay.length}` : ''}
+        </Text>
+      </View>
+      {coverPhotosForDisplay.length > 0 ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={{
+            borderBottomWidth: StyleSheet.hairlineWidth,
+            borderBottomColor: Colors.border,
+          }}
+          contentContainerStyle={{ gap: 4, paddingVertical: 10, paddingHorizontal: 16 }}
+        >
+          {coverPhotosForDisplay.map((uri, i) => (
+            <View key={`${uri}-${i}`} style={{ position: 'relative' }}>
               <TouchableOpacity
-                onPress={() => void addCoverPhotoFromPicker()}
-                style={styles.photoBtn}
-                disabled={coverPhotoBusy}
+                onPress={() => setGroupPhotoLightbox({ urls: coverPhotosForDisplay, index: i })}
+                activeOpacity={0.9}
               >
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                  {coverPhotoBusy ? (
-                    <ActivityIndicator size="small" color={Colors.textSub} />
-                  ) : (
-                    <Ionicons name="camera-outline" size={16} color={Colors.textSub} />
-                  )}
-                  <Text style={{ fontSize: 12, color: Colors.textSub, fontFamily: Fonts.medium }}>Add photo</Text>
-                </View>
+                <ResolvableImage
+                  storedUrl={uri}
+                  style={{
+                    width: 80,
+                    height: 80,
+                    borderRadius: Radius.lg,
+                    backgroundColor: Colors.bg,
+                    borderWidth: StyleSheet.hairlineWidth,
+                    borderColor: Colors.border,
+                  }}
+                  resizeMode="cover"
+                />
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setDraftCoverPhotos((prev) => prev.filter((_, j) => j !== i))}
+                style={styles.coverRemoveThumb}
+              >
+                <Ionicons name="close" size={11} color="#fff" />
               </TouchableOpacity>
             </View>
-          </View>
+          ))}
+        </ScrollView>
+      ) : null}
+      <View
+        style={{
+          paddingHorizontal: 16,
+          marginTop: coverPhotosForDisplay.length > 0 ? 4 : 0,
+          marginBottom: 16,
+        }}
+      >
+        <View style={[styles.groupPhotosAddCard, styles.groupPhotosAddCardNested]}>
+          <TouchableOpacity
+            onPress={() => void addCoverPhotoFromPicker()}
+            style={styles.groupPhotosAddBtn}
+            disabled={coverPhotoBusy}
+            activeOpacity={0.85}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+              {coverPhotoBusy ? (
+                <ActivityIndicator size="small" color={Colors.textSub} />
+              ) : (
+                <Ionicons name="camera-outline" size={16} color={Colors.textSub} />
+              )}
+              <Text style={{ fontSize: 12, color: Colors.textSub, fontFamily: Fonts.medium }}>Add photo</Text>
+            </View>
+          </TouchableOpacity>
         </View>
+      </View>
+    </View>
+  );
 
-        <View style={{ height: 24 }} />
-      </ScrollView>
+  const displayNameForChrome = draftName.trim() || 'New group';
 
-      <View style={[styles.bottomBar, { borderTopColor: Colors.border }]}>
-        <TouchableOpacity
-          onPress={() => void handleCreate()}
-          disabled={!valid || createGroup.isPending}
-          style={[styles.bottomCreateBtn, (!valid || createGroup.isPending) && styles.bottomCreateBtnDisabled]}
-          activeOpacity={0.85}
+  const meUser = users.find((u) => u.id === user?.uid);
+  const meDisplayName =
+    meUser?.displayName?.trim() ||
+    meUser?.name?.trim() ||
+    user?.displayName?.trim() ||
+    user?.email?.split('@')[0] ||
+    'You';
+
+  return (
+    <>
+      <EventFormPopoverChrome onClose={handleBack}>
+        <View style={styles.safe}>
+          <NavBar
+            onClose={handleBack}
+            right={
+              createFormDirty ? (
+                <View style={styles.navEditActions}>
+                  <TouchableOpacity
+                    onPress={resetCreateForm}
+                    disabled={createGroup.isPending}
+                    style={[styles.draftBarBtnSecondary, createGroup.isPending && { opacity: 0.45 }]}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.draftBarBtnSecondaryText}>Reset</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => void handleCreate()}
+                    disabled={!valid || createGroup.isPending}
+                    style={[
+                      styles.draftBarBtnPrimary,
+                      (!valid || createGroup.isPending) && styles.draftBarBtnPrimaryDisabled,
+                    ]}
+                    activeOpacity={0.8}
+                  >
+                    {createGroup.isPending ? (
+                      <ActivityIndicator size="small" color={Colors.accentFg} />
+                    ) : (
+                      <Text style={styles.draftBarBtnPrimaryText}>Create</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              ) : undefined
+            }
+          />
+
+          <ScrollView
+            style={styles.groupScrollView}
+            contentContainerStyle={styles.groupScrollContent}
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.groupMainCardWrap}>
+              <View style={styles.groupMainCard}>
+                <View style={{ paddingHorizontal: 16, paddingTop: 18 }}>
+                  <TouchableOpacity
+                    onPress={openAvatarPicker}
+                    style={[
+                      styles.groupThumb,
+                      {
+                        alignSelf: 'flex-start',
+                        marginBottom: 10,
+                        backgroundColor: getGroupColor(getDefaultGroupThemeFromName(themeName)).row,
+                        borderColor: getGroupColor(getDefaultGroupThemeFromName(themeName)).cal,
+                        borderRadius: groupAvatarBorderRadius(AVATAR_SIZE),
+                      },
+                    ]}
+                    activeOpacity={0.8}
+                  >
+                    <GroupAvatar
+                      seed={draftSeed || DEFAULT_AVATAR_SEED}
+                      thumbnail={draftThumbnail}
+                      name={themeName}
+                      size={AVATAR_SIZE}
+                      style={{ width: AVATAR_SIZE, height: AVATAR_SIZE }}
+                    />
+                  </TouchableOpacity>
+                  <TextInput
+                    value={draftName}
+                    onChangeText={(text) => {
+                      setDraftName(text);
+                      if (text) {
+                        setDraftSeed(text);
+                      } else {
+                        setDraftSeed(DEFAULT_AVATAR_SEED);
+                      }
+                    }}
+                    placeholder="Group name"
+                    placeholderTextColor={Colors.textMuted}
+                    style={styles.groupTitleInput}
+                    autoCapitalize="words"
+                    autoCorrect={false}
+                  />
+                  <View style={[styles.groupDescBox, { marginTop: 10 }]}>
+                    <TextInput
+                      value={draftDesc}
+                      onChangeText={setDraftDesc}
+                      placeholder="Description"
+                      placeholderTextColor={Colors.textMuted}
+                      style={styles.groupDescInput}
+                      multiline
+                    />
+                  </View>
+                </View>
+
+                {groupPhotosBlock}
+              </View>
+            </View>
+
+            <View style={styles.groupDetailSections}>
+              <Text style={[styles.sectionLabel, styles.sectionLabelSpaced]}>SETTINGS</Text>
+              <View style={[styles.card, { marginBottom: 16 }]}>
+                <Toggle
+                  value={requireApprovalToJoin}
+                  onChange={setRequireApprovalToJoin}
+                  label="Require approval to join?"
+                  style={{ borderBottomWidth: 0, paddingHorizontal: 16 }}
+                />
+              </View>
+
+              <Text style={styles.sectionLabel}>MEMBERS · 1</Text>
+              <View style={[styles.card, { marginBottom: 16 }]}>
+                <View style={styles.memberRow}>
+                  <UserAvatar
+                    seed={meDisplayName}
+                    backgroundColor={
+                      meUser?.avatarSeed != null && meUser.avatarSeed !== ''
+                        ? [meUser.avatarSeed]
+                        : undefined
+                    }
+                    thumbnail={meUser?.thumbnail}
+                    size={38}
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.memberName}>
+                      {meDisplayName}
+                      <Text style={styles.youLabel}> · you</Text>
+                    </Text>
+                    <Text style={styles.memberRole}>Super Admin</Text>
+                  </View>
+                  <Ionicons name="star" size={16} color="#CA8A04" />
+                </View>
+              </View>
+            </View>
+
+            <View style={{ height: 24 }} />
+          </ScrollView>
+        </View>
+      </EventFormPopoverChrome>
+
+      {groupPhotoLightbox !== null && (
+        <Modal
+          visible
+          transparent
+          animationType="fade"
+          onRequestClose={() => setGroupPhotoLightbox(null)}
         >
-          {createGroup.isPending ? (
-            <ActivityIndicator size="small" color={Colors.textMuted} />
-          ) : (
-            <Text style={[styles.bottomCreateBtnText, !valid && { color: Colors.textMuted }]} numberOfLines={1}>
-              Create group
-            </Text>
-          )}
-        </TouchableOpacity>
-      </View>
-      </View>
-    </EventFormPopoverChrome>
+          <View style={styles.groupPhotoLightbox}>
+            <View style={styles.groupPhotoLightboxHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <Avatar name={displayNameForChrome} size={28} />
+                <View>
+                  <Text style={styles.groupPhotoLightboxName}>{displayNameForChrome}</Text>
+                  <Text style={styles.groupPhotoLightboxSub}>
+                    {groupPhotoLightbox.urls.length > 1
+                      ? `Cover photos · ${groupPhotoLightbox.index + 1} of ${groupPhotoLightbox.urls.length}`
+                      : 'Cover photo'}
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                onPress={() => setGroupPhotoLightbox(null)}
+                style={styles.groupPhotoLightboxClose}
+              >
+                <Ionicons name="close" size={22} color="#fff" />
+              </TouchableOpacity>
+            </View>
+            {groupPhotoLightbox.urls.length > 1 ? (
+              <>
+                <TouchableOpacity
+                  accessibilityLabel="Previous photo"
+                  onPress={() =>
+                    setGroupPhotoLightbox((prev) =>
+                      prev && prev.index > 0 ? { ...prev, index: prev.index - 1 } : prev,
+                    )
+                  }
+                  disabled={groupPhotoLightbox.index <= 0}
+                  style={[
+                    styles.groupPhotoLightboxNavBtn,
+                    styles.groupPhotoLightboxNavPrev,
+                    groupPhotoLightbox.index <= 0 && styles.groupPhotoLightboxNavBtnDisabled,
+                  ]}
+                >
+                  <Ionicons name="chevron-back" size={28} color="#fff" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  accessibilityLabel="Next photo"
+                  onPress={() =>
+                    setGroupPhotoLightbox((prev) =>
+                      prev && prev.index < prev.urls.length - 1
+                        ? { ...prev, index: prev.index + 1 }
+                        : prev,
+                    )
+                  }
+                  disabled={groupPhotoLightbox.index >= groupPhotoLightbox.urls.length - 1}
+                  style={[
+                    styles.groupPhotoLightboxNavBtn,
+                    styles.groupPhotoLightboxNavNext,
+                    groupPhotoLightbox.index >= groupPhotoLightbox.urls.length - 1 &&
+                      styles.groupPhotoLightboxNavBtnDisabled,
+                  ]}
+                >
+                  <Ionicons name="chevron-forward" size={28} color="#fff" />
+                </TouchableOpacity>
+              </>
+            ) : null}
+            <ResolvableImage
+              storedUrl={groupPhotoLightbox.urls[groupPhotoLightbox.index] ?? ''}
+              style={styles.groupPhotoLightboxImg}
+              resizeMode="contain"
+            />
+          </View>
+        </Modal>
+      )}
 
       <AvatarPickerModal
         variant="group"
@@ -288,87 +483,150 @@ export default function CreateGroupScreen() {
 }
 
 const styles = StyleSheet.create({
-  inner:           { flex: 1, backgroundColor: Colors.bg },
-  headerBlock:     { backgroundColor: Colors.surface, padding: 20, borderBottomWidth: 1 },
-  avatarNameRow:   { flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 16 },
-  groupThumb:      { width: AVATAR_SIZE, height: AVATAR_SIZE, borderWidth: 1, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  nameFieldWrap:   { flex: 1, minWidth: 0, height: AVATAR_SIZE, justifyContent: 'center', borderBottomWidth: 1, borderBottomColor: Colors.border },
-  nameInput:       {
+  safe: { flex: 1, backgroundColor: Colors.bg },
+  groupScrollView: { flex: 1, backgroundColor: Colors.bg },
+  groupScrollContent: { flexGrow: 1, backgroundColor: Colors.bg, paddingBottom: 8 },
+  groupDetailSections: { paddingHorizontal: 20 },
+  sectionLabel: {
+    fontSize: 11,
+    fontFamily: Fonts.semiBold,
+    color: Colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 10,
+  },
+  sectionLabelSpaced: { marginTop: 8 },
+  card: { backgroundColor: Colors.surface, borderRadius: Radius['2xl'], overflow: 'hidden' },
+  memberRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, paddingHorizontal: 16 },
+  memberName: { fontSize: 14, fontFamily: Fonts.medium, color: Colors.text },
+  youLabel: { fontSize: 12, color: Colors.textMuted, fontFamily: Fonts.regular },
+  memberRole: { fontSize: 11, color: Colors.textMuted, fontFamily: Fonts.regular, marginTop: 1 },
+  groupMainCardWrap: { marginHorizontal: 20, marginTop: 10, marginBottom: 4 },
+  groupMainCard: { backgroundColor: Colors.surface, borderRadius: Radius['2xl'], overflow: 'hidden' },
+  groupThumb: { width: AVATAR_SIZE, height: AVATAR_SIZE, borderWidth: 1, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  groupTitleInput: {
     width: '100%',
-    paddingVertical: Platform.OS === 'ios' ? 10 : 0,
+    paddingVertical: Platform.OS === 'ios' ? 8 : 4,
     paddingHorizontal: 0,
     margin: 0,
+    marginBottom: 4,
     borderWidth: 0,
     backgroundColor: 'transparent',
-    fontSize: 19,
+    fontSize: 21,
     fontFamily: Fonts.extraBold,
     color: Colors.text,
-    textAlignVertical: 'center',
-    ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' as any, outlineWidth: 0 } as any) : null),
+    lineHeight: 28,
+    ...(Platform.OS === 'web' ? ({ outlineStyle: 'none', outlineWidth: 0 } as object) : null),
   },
-  descBox:         { backgroundColor: Colors.surface, borderRadius: Radius.xl, borderWidth: 1.5, borderColor: Colors.border, overflow: 'hidden' },
-  descInput:       { padding: 12, paddingHorizontal: 14, fontSize: 14, color: Colors.text, fontFamily: Fonts.regular, minHeight: 100, textAlignVertical: 'top' },
-  descToolbar:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', padding: 8, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: Colors.border },
-  navCreateBtn: {
+  groupDescBox: {
+    backgroundColor: Colors.bg,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: 12,
+    marginBottom: 16,
+  },
+  groupDescInput: {
+    width: '100%',
+    minHeight: 88,
+    padding: 0,
+    margin: 0,
+    fontSize: 14,
+    fontFamily: Fonts.regular,
+    color: Colors.text,
+    lineHeight: 22,
+    textAlignVertical: 'top',
+    ...(Platform.OS === 'web' ? ({ outlineStyle: 'none', outlineWidth: 0 } as object) : null),
+  },
+  groupPhotosAddCard: {
+    backgroundColor: Colors.bg,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  groupPhotosAddCardNested: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+  },
+  groupPhotosAddBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    alignItems: 'flex-start',
+  },
+  coverRemoveThumb: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: Colors.text,
+    borderWidth: 2,
+    borderColor: Colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  navEditActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  draftBarBtnSecondary: {
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.bg,
+  },
+  draftBarBtnSecondaryText: { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.text },
+  draftBarBtnPrimary: {
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+    borderRadius: Radius.lg,
     backgroundColor: Colors.accent,
-    flexShrink: 0,
     minWidth: 72,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  navCreateBtnDisabled: {
-    backgroundColor: Colors.border,
-  },
-  navCreateBtnText: {
-    fontSize: 13,
-    fontFamily: Fonts.semiBold,
-    color: Colors.accentFg,
-  },
-  photosSectionLower: {
-    paddingHorizontal: 20,
-    marginTop: 14,
-    paddingTop: 22,
-    paddingBottom: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: Colors.border,
-  },
-  photosHint: {
-    fontSize: 13,
-    color: Colors.textMuted,
-    fontFamily: Fonts.regular,
-    marginBottom: 10,
-    lineHeight: 18,
-  },
-  photosCard:      { backgroundColor: Colors.surface, borderRadius: 16, borderWidth: 1, borderColor: Colors.border, overflow: 'hidden' },
-  photosToolbar:   { flexDirection: 'row', alignItems: 'center', padding: 8, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: Colors.border },
-  photoBtn:        { paddingHorizontal: 10, paddingVertical: 5, borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.bg },
-  removeThumb:     { position: 'absolute', top: -5, right: -5, width: 18, height: 18, borderRadius: 9, backgroundColor: Colors.text, borderWidth: 2, borderColor: Colors.surface, alignItems: 'center', justifyContent: 'center' },
-  bottomBar: {
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: Platform.OS === 'ios' ? 10 : 14,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    backgroundColor: Colors.surface,
-  },
-  bottomCreateBtn: {
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderRadius: Radius.lg,
-    backgroundColor: Colors.accent,
-    alignItems: 'center',
+  draftBarBtnPrimaryDisabled: { opacity: 0.45 },
+  draftBarBtnPrimaryText: { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.accentFg },
+  groupPhotoLightbox: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.93)',
     justifyContent: 'center',
-    minHeight: 48,
+    alignItems: 'center',
   },
-  bottomCreateBtnDisabled: {
-    backgroundColor: Colors.border,
+  groupPhotoLightboxHeader: {
+    position: 'absolute',
+    top: 60,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
   },
-  bottomCreateBtnText: {
-    fontSize: 15,
-    fontFamily: Fonts.bold,
-    color: Colors.accentFg,
-    textAlign: 'center',
+  groupPhotoLightboxName: { fontSize: 13, fontFamily: Fonts.semiBold, color: '#fff' },
+  groupPhotoLightboxSub: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.45)',
+    fontFamily: Fonts.regular,
   },
+  groupPhotoLightboxClose: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: Radius.lg,
+    backgroundColor: 'rgba(255,255,255,0.14)',
+  },
+  groupPhotoLightboxImg: { width: '100%', height: '70%' },
+  groupPhotoLightboxNavBtn: {
+    position: 'absolute',
+    top: '42%',
+    zIndex: 2,
+    paddingVertical: 14,
+    paddingHorizontal: 10,
+    borderRadius: Radius.full,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  groupPhotoLightboxNavBtnDisabled: { opacity: 0.28 },
+  groupPhotoLightboxNavPrev: { left: 10 },
+  groupPhotoLightboxNavNext: { right: 10 },
 });

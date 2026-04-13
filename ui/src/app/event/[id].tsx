@@ -699,6 +699,7 @@ export default function EventDetailScreen() {
   const [draftMaxAttendees, setDraftMaxAttendees] = useState('');
   const [draftAllowMaybe, setDraftAllowMaybe] = useState(false);
   const [draftActivityIdeasEnabled, setDraftActivityIdeasEnabled] = useState(false);
+  const [draftActivityVotesAnonymous, setDraftActivityVotesAnonymous] = useState(false);
   const [draftStartDate, setDraftStartDate] = useState('');
   const [draftStartTime, setDraftStartTime] = useState('');
   const [draftEndDate, setDraftEndDate] = useState('');
@@ -845,6 +846,7 @@ export default function EventDetailScreen() {
     setDraftMaxAttendees(ev.maxAttendees != null && ev.maxAttendees > 0 ? String(ev.maxAttendees) : '');
     setDraftAllowMaybe(!!ev.allowMaybe);
     setDraftActivityIdeasEnabled(ev.activityIdeasEnabled ?? false);
+    setDraftActivityVotesAnonymous(ev.activityVotesAnonymous ?? false);
     setDraftRsvpDeadlineEnabled(!!ev.rsvpDeadline);
     if (ev.rsvpDeadline) {
       setDraftRsvpDeadlineDate(formatWallDateFromUtcIso(ev.rsvpDeadline as string));
@@ -867,6 +869,7 @@ export default function EventDetailScreen() {
     ev?.maxAttendees,
     ev?.allowMaybe,
     ev?.activityIdeasEnabled,
+    ev?.activityVotesAnonymous,
     ev?.rsvpDeadline,
   ]);
 
@@ -926,6 +929,7 @@ export default function EventDetailScreen() {
       draftMaxAttendees.trim() !== maxB ||
       draftAllowMaybe !== !!ev.allowMaybe ||
       draftActivityIdeasEnabled !== (ev.activityIdeasEnabled ?? false) ||
+      draftActivityVotesAnonymous !== (ev.activityVotesAnonymous ?? false) ||
       timeFieldsDirty ||
       rsvpDeadlineDirty
     );
@@ -940,6 +944,7 @@ export default function EventDetailScreen() {
     draftMaxAttendees,
     draftAllowMaybe,
     draftActivityIdeasEnabled,
+    draftActivityVotesAnonymous,
     timeFieldsDirty,
     rsvpDeadlineDirty,
   ]);
@@ -1012,6 +1017,30 @@ export default function EventDetailScreen() {
     minTime.setHours(h, m + 1, 0, 0);
     return minTime;
   }, [draftStartDate, draftEndDate, draftStartTime]);
+
+  const persistActivityIdeasSettings = useCallback(
+    async (nextIdeasEnabled: boolean, nextVotesAnonymous: boolean) => {
+      if (!currentUserId || !eventId) return;
+      const inSeries = !!(ev as EventDetailed | undefined)?.recurrenceSeriesId?.trim();
+      try {
+        await updateEventMutation.mutateAsync({
+          activityIdeasEnabled: nextIdeasEnabled,
+          activityVotesAnonymous: nextVotesAnonymous,
+          updatedBy: currentUserId,
+          viewerTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          ...(inSeries ? { seriesUpdateScope: EventUpdate.seriesUpdateScope.ALL_OCCURRENCES } : {}),
+        });
+      } catch (e: any) {
+        const msg =
+          e?.body?.error ?? e?.response?.data?.error ?? e?.message ?? 'Failed to update activity settings';
+        if (Platform.OS === 'web') window.alert(msg);
+        else Alert.alert('Error', msg);
+        setDraftActivityIdeasEnabled(ev?.activityIdeasEnabled ?? false);
+        setDraftActivityVotesAnonymous(ev?.activityVotesAnonymous ?? false);
+      }
+    },
+    [currentUserId, eventId, ev, updateEventMutation],
+  );
 
   if (!eventId) {
     return (
@@ -1146,6 +1175,7 @@ export default function EventDetailScreen() {
     ? `RSVP by ${rsvpHeaderYmdSlashed}${rsvpHeaderTimeLabel ? ` · ${rsvpHeaderTimeLabel}` : ''}`
     : 'RSVP';
   const activityOptions = ev.activityOptions ?? [];
+  const activityVotesAnonymous = displayEv.activityVotesAnonymous ?? false;
   const timeSuggestions = ev.timeSuggestions ?? [];
   const myActivityVoteOptionIds = ev.myActivityVoteOptionIds ?? [];
   const canResolveTimeSuggestions =
@@ -1263,6 +1293,7 @@ export default function EventDetailScreen() {
         enableWaitlist: hasMaxCap ? !!displayEv.enableWaitlist : false,
         allowMaybe: draftAllowMaybe,
         activityIdeasEnabled: draftActivityIdeasEnabled,
+        activityVotesAnonymous: draftActivityVotesAnonymous,
         rsvpDeadline: rsvpDeadlineOut,
         updatedBy: currentUserId,
         viewerTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -2358,15 +2389,22 @@ export default function EventDetailScreen() {
                 {canCollaborateActivities ? (
                   <Text style={{ fontSize: 13, color: Colors.textMuted, marginBottom: 10, fontFamily: Fonts.regular }}>
                     Tap to vote for any options you like. Tap again on an option to remove your vote.
+                    {activityVotesAnonymous ? ' Votes are anonymous — only totals are shown.' : ''}
                   </Text>
                 ) : (
                   <Text style={{ fontSize: 13, color: Colors.textMuted, marginBottom: 10, fontFamily: Fonts.regular }}>
                     What the group might do (voting is for members).
+                    {activityVotesAnonymous ? ' Votes are anonymous — only totals are shown.' : ''}
                   </Text>
                 )}
                 {activityOptions.map((opt) => {
                   const selected = myActivityVoteOptionIds.includes(opt.id);
                   const canRemoveOpt = opt.createdBy === currentUserId || ev.createdBy === currentUserId;
+                  const voterIds = !activityVotesAnonymous ? opt.voterUserIds ?? [] : [];
+                  const votersLine =
+                    voterIds.length > 0
+                      ? voterIds.map((uid) => getUserSafe(uid).displayName).join(', ')
+                      : '';
                   return (
                     <View
                       key={opt.id}
@@ -2394,6 +2432,14 @@ export default function EventDetailScreen() {
                           {opt.voteCount} vote{opt.voteCount === 1 ? '' : 's'} · suggested by{' '}
                           {getUserSafe(opt.createdBy).displayName}
                         </Text>
+                        {votersLine ? (
+                          <Text
+                            style={{ fontSize: 12, color: Colors.textSub, marginTop: 4, fontFamily: Fonts.regular }}
+                            numberOfLines={4}
+                          >
+                            Voted by: {votersLine}
+                          </Text>
+                        ) : null}
                       </TouchableOpacity>
                       {selected ? <Ionicons name="checkmark-circle" size={22} color={p.dot} /> : null}
                       {canRemoveOpt && !isPast ? (
@@ -2445,10 +2491,32 @@ export default function EventDetailScreen() {
               />
               <Toggle
                 value={draftActivityIdeasEnabled}
-                onChange={setDraftActivityIdeasEnabled}
+                onChange={(v) => {
+                  setDraftActivityIdeasEnabled(v);
+                  if (v) {
+                    void persistActivityIdeasSettings(v, draftActivityVotesAnonymous);
+                  } else {
+                    setDraftActivityVotesAnonymous(false);
+                    void persistActivityIdeasSettings(false, false);
+                  }
+                }}
                 label="Enable activity ideas"
-                style={styles.eventTogglePad}
+                style={[
+                  styles.eventTogglePad,
+                  draftActivityIdeasEnabled && { borderBottomWidth: 0 },
+                ]}
               />
+              {draftActivityIdeasEnabled ? (
+                <Toggle
+                  value={draftActivityVotesAnonymous}
+                  onChange={(anon) => {
+                    setDraftActivityVotesAnonymous(anon);
+                    void persistActivityIdeasSettings(true, anon);
+                  }}
+                  label="Anonymous votes (hide who voted)"
+                  style={styles.eventTogglePad}
+                />
+              ) : null}
               <Toggle
                 value={draftRsvpDeadlineEnabled}
                 onChange={(v) => {

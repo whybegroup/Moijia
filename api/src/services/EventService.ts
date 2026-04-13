@@ -33,6 +33,15 @@ import { utcInstantFromClient } from '../utils/utcInstantFromClient';
 import { seriesOccurrenceStartEndFromForm } from '../utils/seriesOccurrenceScheduleFromForm';
 
 const prisma = new PrismaClient();
+
+/** Activity options on event detail/list: counts + per-vote user ids (mapper hides ids when anonymous). */
+const ACTIVITY_OPTIONS_EVENT_INCLUDE = {
+  orderBy: { createdAt: 'asc' as const },
+  include: {
+    _count: { select: { votes: true } },
+    votes: { select: { userId: true } },
+  },
+} as const;
 const notificationService = new NotificationService();
 const localUploads = new LocalUploadService();
 
@@ -209,12 +218,7 @@ export class EventService {
             createdAt: 'asc',
           },
         },
-        activityOptions: {
-          orderBy: { createdAt: 'asc' },
-          include: {
-            _count: { select: { votes: true } },
-          },
-        },
+        activityOptions: ACTIVITY_OPTIONS_EVENT_INCLUDE,
         timeSuggestions: {
           orderBy: { createdAt: 'desc' },
         },
@@ -333,12 +337,7 @@ export class EventService {
             createdAt: 'asc',
           },
         },
-        activityOptions: {
-          orderBy: { createdAt: 'asc' },
-          include: {
-            _count: { select: { votes: true } },
-          },
-        },
+        activityOptions: ACTIVITY_OPTIONS_EVENT_INCLUDE,
         timeSuggestions: {
           orderBy: { createdAt: 'desc' },
         },
@@ -592,6 +591,7 @@ export class EventService {
       allowMaybe: eventData.allowMaybe ?? true,
       isAllDay: eventData.isAllDay ?? false,
       activityIdeasEnabled: eventData.activityIdeasEnabled ?? false,
+      activityVotesAnonymous: eventData.activityVotesAnonymous ?? false,
     };
 
     let event: Awaited<ReturnType<typeof prisma.event.create>> & { coverPhotos: { photoUrl: string }[] };
@@ -894,6 +894,9 @@ export class EventService {
       if (eventData.activityIdeasEnabled !== undefined) {
         seriesPatch.activityIdeasEnabled = eventData.activityIdeasEnabled;
       }
+      if (eventData.activityVotesAnonymous !== undefined) {
+        seriesPatch.activityVotesAnonymous = eventData.activityVotesAnonymous;
+      }
       if (Object.keys(seriesPatch).length > 1) {
         const canPatchThisAndFollowing = scope !== 'this_and_following' || !!subsetIdsThisAndFollowing?.length;
         if (canPatchThisAndFollowing) {
@@ -917,6 +920,7 @@ export class EventService {
         'allowMaybe',
         'isAllDay',
         'activityIdeasEnabled',
+        'activityVotesAnonymous',
         'rsvpDeadline',
       ] as const) {
         if (k in updateData) delete updateData[k];
@@ -1968,6 +1972,7 @@ export class EventService {
       allowMaybe: event.allowMaybe,
       rsvpDeadline: event.rsvpDeadline ?? null,
       activityIdeasEnabled: Boolean(event.activityIdeasEnabled),
+      activityVotesAnonymous: Boolean(event.activityVotesAnonymous),
       recurrenceRule: event.recurrenceRule ?? null,
       recurrenceSeriesId: event.recurrenceSeriesId ?? null,
       createdAt: event.createdAt,
@@ -1982,13 +1987,25 @@ export class EventService {
     event: any,
     extras?: { recurrenceSeriesMemberCount?: number; viewerUserId?: string }
   ): EventDetailed {
-    const activityOptions: EventActivityOption[] = (event.activityOptions ?? []).map((o: any) => ({
-      id: o.id,
-      label: o.label,
-      createdBy: o.createdBy,
-      voteCount: o._count?.votes ?? 0,
-      createdAt: o.createdAt,
-    }));
+    const votesPublic = !event.activityVotesAnonymous;
+    const activityOptions: EventActivityOption[] = (event.activityOptions ?? []).map((o: any) => {
+      const voteCount = typeof o._count?.votes === 'number' ? o._count.votes : (o.votes?.length ?? 0);
+      const base: EventActivityOption = {
+        id: o.id,
+        label: o.label,
+        createdBy: o.createdBy,
+        voteCount,
+        createdAt: o.createdAt,
+      };
+      if (votesPublic && Array.isArray(o.votes) && o.votes.length > 0) {
+        const rawIds: string[] = o.votes.map((v: { userId?: string }) =>
+          String(v.userId ?? '').trim(),
+        );
+        const ids = [...new Set(rawIds.filter(Boolean))].sort();
+        if (ids.length > 0) base.voterUserIds = ids;
+      }
+      return base;
+    });
     const timeSuggestions: EventTimeSuggestion[] = (event.timeSuggestions ?? []).map((s: any) => ({
       id: s.id,
       suggestedBy: s.suggestedBy,

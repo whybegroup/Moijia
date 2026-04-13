@@ -40,6 +40,11 @@ export interface Event {
   /** When true, clients show the activity ideas (options + voting) UI. */
   activityIdeasEnabled: boolean;
   /**
+   * When true, activity vote counts are public but voter identities are hidden.
+   * When false, each option lists who voted (same group visibility as the event).
+   */
+  activityVotesAnonymous: boolean;
+  /**
    * RFC 5545 RRULE (same string on every row in a series). Null on one-off events.
    * Used when creating/editing; not shown on the event detail screen in the app.
    */
@@ -59,6 +64,8 @@ export interface EventActivityOption {
   createdBy: string;
   voteCount: number;
   createdAt: Date;
+  /** Present when `activityVotesAnonymous` is false on the event; user ids who voted for this option. */
+  voterUserIds?: string[];
 }
 
 /** Alternate schedule proposed by a member; host may accept to update the event. */
@@ -145,6 +152,11 @@ export interface EventInput {
   rsvpDeadline?: string | null;
   /** When true, members can suggest and vote on activity ideas on the event page. */
   activityIdeasEnabled?: boolean;
+  /**
+   * When true with activity ideas, who voted is hidden (counts only).
+   * Default false: voters are visible on each option.
+   */
+  activityVotesAnonymous?: boolean;
   /** Initial activity options (labels); creator is recorded as author */
   activityOptionLabels?: string[];
   recurrenceRule?: string | null;
@@ -173,6 +185,7 @@ export interface EventUpdate {
   enableWaitlist?: boolean;
   allowMaybe?: boolean;
   activityIdeasEnabled?: boolean;
+  activityVotesAnonymous?: boolean;
   /** ISO instant, or null to clear the deadline. Omit to leave unchanged. */
   rsvpDeadline?: string | null;
   updatedBy: string;

@@ -78,6 +78,22 @@ function RootLayoutNav() {
         }}
       />
       <Stack.Screen
+        name="create-poll"
+        options={{
+          presentation: 'transparentModal',
+          animation: 'fade',
+          contentStyle: { backgroundColor: 'transparent' },
+        }}
+      />
+      <Stack.Screen
+        name="poll/[id]"
+        options={{
+          presentation: 'transparentModal',
+          animation: 'fade',
+          contentStyle: { backgroundColor: 'transparent' },
+        }}
+      />
+      <Stack.Screen
         name="groups/[id]"
         options={{
           presentation: 'transparentModal',

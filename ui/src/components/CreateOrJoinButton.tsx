@@ -34,7 +34,7 @@ export function CreateOrJoinButton({ userId, eventEligibleGroupCount }: Props) {
   const pathname = usePathname();
   const joinByCode = useJoinByInviteCode();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [noGroupOpen, setNoGroupOpen] = useState(false);
+  const [noGroupFor, setNoGroupFor] = useState<'event' | 'poll' | null>(null);
   const [inviteCode, setInviteCode] = useState('');
 
   const closeMenu = () => setMenuOpen(false);
@@ -42,7 +42,7 @@ export function CreateOrJoinButton({ userId, eventEligibleGroupCount }: Props) {
   const onNewEvent = () => {
     closeMenu();
     if (eventEligibleGroupCount === 0) {
-      setNoGroupOpen(true);
+      setNoGroupFor('event');
       return;
     }
     router.push(withReturnTo('/create-event', pathname));
@@ -51,6 +51,15 @@ export function CreateOrJoinButton({ userId, eventEligibleGroupCount }: Props) {
   const onNewGroup = () => {
     closeMenu();
     router.push(withReturnTo('/create-group', pathname));
+  };
+
+  const onNewPoll = () => {
+    closeMenu();
+    if (eventEligibleGroupCount === 0) {
+      setNoGroupFor('poll');
+      return;
+    }
+    router.push(withReturnTo('/create-poll', pathname));
   };
 
   const onJoinSubmit = () => {
@@ -119,6 +128,17 @@ export function CreateOrJoinButton({ userId, eventEligibleGroupCount }: Props) {
                   <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
                 </TouchableOpacity>
 
+                <TouchableOpacity style={styles.menuRow} onPress={onNewPoll} activeOpacity={0.7}>
+                  <View style={styles.menuRowIcon}>
+                    <Ionicons name="bar-chart-outline" size={22} color={Colors.text} />
+                  </View>
+                  <View style={styles.menuRowText}>
+                    <Text style={styles.menuRowTitle}>New poll</Text>
+                    <Text style={styles.menuRowSubtitle}>Create a poll for your groups</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
+                </TouchableOpacity>
+
                 <View style={styles.menuDivider} />
 
                 <Text style={styles.inviteHeading}>Join with invite code</Text>
@@ -146,12 +166,21 @@ export function CreateOrJoinButton({ userId, eventEligibleGroupCount }: Props) {
         </View>
       </Modal>
 
-      <Modal visible={noGroupOpen} transparent animationType="fade" onRequestClose={() => setNoGroupOpen(false)}>
+      <Modal
+        visible={noGroupFor !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setNoGroupFor(null)}
+      >
         <View style={styles.alertOverlay}>
           <View style={styles.alertBox}>
             <Text style={styles.alertTitle}>No Groups</Text>
-            <Text style={styles.alertMessage}>You need to join or create a group before creating an event.</Text>
-            <TouchableOpacity onPress={() => setNoGroupOpen(false)} style={styles.alertButton}>
+            <Text style={styles.alertMessage}>
+              {noGroupFor === 'poll'
+                ? 'You need to join or create a group before creating a poll.'
+                : 'You need to join or create a group before creating an event.'}
+            </Text>
+            <TouchableOpacity onPress={() => setNoGroupFor(null)} style={styles.alertButton}>
               <Text style={styles.alertButtonText}>OK</Text>
             </TouchableOpacity>
           </View>
