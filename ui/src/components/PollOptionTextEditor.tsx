@@ -10,7 +10,7 @@ import {
   Platform,
   Alert,
 } from 'react-native';
-import { PollTextFont } from '@moija/client';
+import { PollTextFont } from '@moijia/client';
 import { Colors, Fonts, Radius } from '../constants/theme';
 
 const FONT_LABELS: { key: PollTextFont; label: string }[] = [

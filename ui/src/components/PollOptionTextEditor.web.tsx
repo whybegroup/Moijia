@@ -1,6 +1,6 @@
 import React, { useRef, useCallback, useEffect, createElement } from 'react';
 import { View, StyleSheet } from 'react-native';
-import { PollTextFont } from '@moija/client';
+import { PollTextFont } from '@moijia/client';
 import { Colors, Radius } from '../constants/theme';
 
 const fontChipDomBase: React.CSSProperties = {

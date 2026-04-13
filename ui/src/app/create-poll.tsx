@@ -14,7 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter, useLocalSearchParams, type Href } from 'expo-router';
 import Toast from 'react-native-toast-message';
-import { PollOptionInputKind, PollTextFont, type PollInput } from '@moija/client';
+import { PollOptionInputKind, PollTextFont, type PollInput } from '@moijia/client';
 import { Colors, Fonts, Radius } from '../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName, formatLocalDateInput } from '../utils/helpers';
 import { localWallDateTimeToUtcIso } from '../utils/datetimeUtc';

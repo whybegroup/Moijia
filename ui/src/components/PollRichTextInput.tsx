@@ -10,7 +10,7 @@ import {
   Modal,
   Pressable,
 } from 'react-native';
-import { PollTextFont } from '@moija/client';
+import { PollTextFont } from '@moijia/client';
 import { Colors, Fonts, Radius } from '../constants/theme';
 
 export function escapeHtml(s: string): string {

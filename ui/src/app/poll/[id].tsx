@@ -7,7 +7,7 @@ import { EventFormPopoverChrome } from '../../components/EventFormPopoverChrome'
 import { usePoll } from '../../hooks/api';
 import { useCurrentUserContext } from '../../contexts/CurrentUserContext';
 import { firstSearchParam, parseReturnToParam } from '../../utils/navigationReturn';
-import { PollOptionInputKind } from '@moija/client';
+import { PollOptionInputKind } from '@moijia/client';
 
 function stripHtmlPreview(html: string): string {
   return html

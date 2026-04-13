@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { PollsService, type PollInput } from '@moija/client';
+import { PollsService, type PollInput } from '@moijia/client';
 import { queryKeys } from '../../config/queryClient';
 
 export function usePoll(id: string, userId: string) {
