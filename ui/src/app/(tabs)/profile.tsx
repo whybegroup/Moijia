@@ -14,7 +14,7 @@ const REMINDER_OPTIONS = ['Never', '1 hour before', '1 day before', '1 week befo
 
 export default function ProfileScreen() {
   const { user: firebaseUser, signOut } = useAuth();
-  const { userId, user } = useCurrentUserContext();
+  const { userId, user, loading } = useCurrentUserContext();
   const updateUser = useUpdateUser(userId || '');
 
   const [draftDisplayName, setDraftDisplayName] = useState('');
@@ -70,8 +70,33 @@ export default function ProfileScreen() {
     }
   };
 
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.emptyState}>
+          <ActivityIndicator color={Colors.accent} />
+          <Text style={styles.emptyStateText}>Loading your profile...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   if (!user) {
-    return null;
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyStateTitle}>Profile data unavailable</Text>
+          <Text style={styles.emptyStateText}>
+            {firebaseUser
+              ? 'Signed in, but your profile record is not ready yet. Please refresh or sign out and sign in again.'
+              : 'Please sign in again.'}
+          </Text>
+          <TouchableOpacity style={styles.signOutBtn} onPress={handleSignOut}>
+            <Text style={styles.signOutText}>Sign Out</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
   }
 
   return (
@@ -347,6 +372,9 @@ const styles = StyleSheet.create({
   displayNameActionBtnChange:{ minWidth: 160 },
   displayNameActionBtnSave:{ paddingHorizontal: 10, minWidth: undefined },
   displayNameActionText:{ fontSize: 12, fontFamily: Fonts.semiBold, color: Colors.textSub },
+  emptyState:        { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24, gap: 10 },
+  emptyStateTitle:   { fontSize: 18, color: Colors.text, fontFamily: Fonts.extraBold, textAlign: 'center' },
+  emptyStateText:    { fontSize: 14, color: Colors.textMuted, fontFamily: Fonts.regular, textAlign: 'center', lineHeight: 20 },
   signOutBtn:       { marginTop: 20, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: '#FCA5A5', backgroundColor: '#FEF2F2', alignItems: 'center' },
   signOutText:      { fontSize: 14, color: '#DC2626', fontFamily: Fonts.semiBold },
 });

@@ -177,6 +177,31 @@ export default function CreateEventScreen() {
     !errors.endDate &&
     !errors.endTime;
 
+  const createFormDirty = useMemo(() => {
+    const recurrenceDirty =
+      JSON.stringify(form.recurrence) !== JSON.stringify(defaultRecurrenceFormState());
+    return !!(
+      form.title.trim() ||
+      form.description.trim() ||
+      form.location.trim() ||
+      form.groupId.trim() ||
+      form.startDate !== today ||
+      form.startTime !== '19:00' ||
+      form.endDate !== today ||
+      form.endTime !== '21:00' ||
+      form.allDay ||
+      form.minAttendees.trim() !== '1' ||
+      form.maxAttendees.trim() ||
+      form.allowMaybe ||
+      form.enableWaitlist ||
+      form.coverPhotoDrafts.length > 0 ||
+      form.activityIdeasEnabled ||
+      form.activityVotesAnonymous ||
+      activityOptionDrafts.length > 0 ||
+      recurrenceDirty
+    );
+  }, [form, activityOptionDrafts.length, today]);
+
   const timeFieldsComplete =
     !!form.startDate?.trim() &&
     !!form.endDate?.trim() &&
@@ -524,10 +549,26 @@ export default function CreateEventScreen() {
     router.replace('/(tabs)/events');
   }, [router, createReturnTo]);
 
+  const requestClose = useCallback(() => {
+    if (!createFormDirty) {
+      dismiss();
+      return;
+    }
+    const message = 'Discard your changes?';
+    if (Platform.OS === 'web') {
+      if (window.confirm(message)) dismiss();
+      return;
+    }
+    Alert.alert('Discard changes?', message, [
+      { text: 'Keep editing', style: 'cancel' },
+      { text: 'Discard', style: 'destructive', onPress: dismiss },
+    ]);
+  }, [createFormDirty, dismiss]);
+
   return (
-    <EventFormPopoverChrome onClose={dismiss}>
+    <EventFormPopoverChrome onClose={requestClose}>
       <View style={styles.inner}>
-      <NavBar title="New Event" onClose={dismiss}
+      <NavBar title="New Event" onClose={requestClose}
         right={
           <TouchableOpacity
             onPress={submit}

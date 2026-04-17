@@ -6,6 +6,7 @@ import {
   type CommentUpdateInput,
 } from '@moijia/client';
 import { queryKeys } from '../../config/queryClient';
+import { recordCommentQuickReaction } from '../../utils/commentQuickReactionsPrefs';
 
 export function useEventComments(eventId: string, viewerUserId?: string) {
   return useQuery({
@@ -66,6 +67,17 @@ export function useCommentReaction(eventId: string, viewerUserId?: string | null
       if (!uid) throw new Error('Sign in to react');
       return CommentsService.setCommentReaction(commentId, { userId: uid, emoji });
     },
-    onSuccess: () => invalidateEventCommentCaches(queryClient, eventId, viewerUserId),
+    onSuccess: async (_data, variables) => {
+      const uid = viewerUserId?.trim();
+      if (uid) {
+        try {
+          const next = await recordCommentQuickReaction(uid, variables.emoji);
+          queryClient.setQueryData(['commentQuickReactions', uid], next);
+        } catch {
+          void queryClient.invalidateQueries({ queryKey: ['commentQuickReactions', uid] });
+        }
+      }
+      invalidateEventCommentCaches(queryClient, eventId, viewerUserId);
+    },
   });
 }

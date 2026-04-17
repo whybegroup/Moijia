@@ -41,13 +41,13 @@ import { useLocalSearchParams, useRouter, usePathname, type Href } from 'expo-ro
 import { useFocusEffect } from '@react-navigation/native';
 import { Colors, Fonts, Radius, Shadows } from '../../constants/theme';
 import { COMMENT_REACTION_EMOJIS } from '../../constants/commentReactionEmojis';
+import { DEFAULT_COMMENT_QUICK_REACTIONS_LIST } from '../../utils/commentQuickReactionsPrefs';
 import {
   getGroupColor,
   getDefaultGroupThemeFromName,
   fmtTime,
   fmtDateFull,
   timeAgo,
-  dDiff,
   getMyWaitlistPosition,
   formatLocalDateInput,
   formatLocalDateYmdSlashes,
@@ -80,12 +80,14 @@ import {
   useAcceptTimeSuggestion,
   useRejectTimeSuggestion,
 } from '../../hooks/api';
+import { useCommentQuickReactions } from '../../hooks/useCommentQuickReactions';
 import { uid, getNoResponseIds } from '../../utils/api-helpers';
 import type { CommentInput, EventDetailed, GroupScoped, RSVP, User } from '@moijia/client';
 import { RSVPInput, MembershipStatus, EventUpdate } from '@moijia/client';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useCurrentUserContext } from '../../contexts/CurrentUserContext';
 import { ResolvableImage } from '../../components/ResolvableImage';
+import { ReactionEmojiGlyph } from '../../components/ReactionEmojiGlyph';
 import {
   pickImageFromLibrary,
   uploadPickedImageAsset,
@@ -119,20 +121,6 @@ const COMPOSER_INPUT_MAX_H = 140;
 
 /** Must match API soft-delete text when an admin removes someone else's comment */
 const COMMENT_DELETED_BY_ADMIN_MSG = 'This message was deleted by admin';
-
-/** Google Chat–style quick reactions in the long-press bar (full library opens from the + control). */
-const COMMENT_QUICK_REACTIONS = ['👍', '🙏', '😮', '✍️', '😂'] as const;
-
-/** Color emoji in the comment action menu / chips (custom DM Sans has no color glyph tables on iOS). */
-function commentMenuEmojiTextStyle(fontSize: number): TextStyle {
-  if (Platform.OS === 'ios') {
-    return { fontFamily: 'Apple Color Emoji', fontSize, lineHeight: fontSize + 6 };
-  }
-  if (Platform.OS === 'android') {
-    return { fontSize: fontSize + 1, lineHeight: fontSize + 8, includeFontPadding: false };
-  }
-  return { fontSize, lineHeight: fontSize + 4 };
-}
 
 function rsvpSavedToastTitle(status: RSVPInput.status): string {
   switch (status) {
@@ -422,6 +410,8 @@ export default function EventDetailScreen() {
   const updateCommentMutation = useUpdateComment(eventId || '', currentUserId);
   const deleteCommentMutation = useDeleteComment(eventId || '', currentUserId);
   const commentReactionMutation = useCommentReaction(eventId || '', currentUserId);
+  const { data: commentQuickReactions = [...DEFAULT_COMMENT_QUICK_REACTIONS_LIST] } =
+    useCommentQuickReactions(currentUserId);
   const deleteEventMutation = useDeleteEvent(currentUserId ?? '');
   const deleteRecurrenceSeriesMutation = useDeleteRecurrenceSeries(currentUserId ?? '');
   const truncateSeriesMutation = useTruncateRecurrenceSeries(currentUserId ?? '');
@@ -565,6 +555,8 @@ export default function EventDetailScreen() {
   const replyScrollRestoreYRef = useRef<number | null>(null);
   /** When jumping from a reply row’s quote, we shake this id after tapping “Back to Reply Message”. */
   const replyScrollRestoreShakeIdRef = useRef<string | null>(null);
+  /** Skip chip `onPress` when the same chip just fired `onLongPress` (both can run on release). */
+  const reactionChipLastLongPressRef = useRef<{ key: string; at: number } | null>(null);
   const [replyScrollBackVisible, setReplyScrollBackVisible] = useState(false);
   const [inputBarHeight, setInputBarHeight] = useState(96);
   const [shakeCommentId, setShakeCommentId] = useState<string | null>(null);
@@ -676,6 +668,11 @@ export default function EventDetailScreen() {
     }
   }, [reactionDetailSheetVisible, reactionDetailModal]);
 
+  /** Close long-press comment sheet only (keep full emoji picker open). */
+  const closeCommentActionSheet = useCallback(() => {
+    setCommentActionMenu(null);
+  }, []);
+
   const dismissCommentActionMenu = useCallback(() => {
     setCommentActionMenu(null);
     setCommentReactionFullPickerFor(null);
@@ -695,6 +692,10 @@ export default function EventDetailScreen() {
   const [draftTitle, setDraftTitle] = useState('');
   const [draftDesc, setDraftDesc] = useState('');
   const [draftLocation, setDraftLocation] = useState('');
+  const [locationSuggestions, setLocationSuggestions] = useState<
+    { id: string; label: string }[]
+  >([]);
+  const [locationSuggesting, setLocationSuggesting] = useState(false);
   const [draftMinAttendees, setDraftMinAttendees] = useState('');
   const [draftMaxAttendees, setDraftMaxAttendees] = useState('');
   const [draftAllowMaybe, setDraftAllowMaybe] = useState(false);
@@ -718,6 +719,91 @@ export default function EventDetailScreen() {
   const [detailSeriesUpdateScope, setDetailSeriesUpdateScope] = useState<SeriesUpdateScope>(
     EventUpdate.seriesUpdateScope.THIS_OCCURRENCE
   );
+
+  const openLocationInMaps = useCallback(async (rawQuery: string) => {
+    const query = rawQuery.trim();
+    if (!query) return;
+    const encoded = encodeURIComponent(query);
+    const appleUrl = `http://maps.apple.com/?q=${encoded}`;
+    const googleWebUrl = `https://www.google.com/maps/search/?api=1&query=${encoded}`;
+    const googleSchemeUrl = `comgooglemaps://?q=${encoded}`;
+
+    const openApple = async () => {
+      try {
+        await Linking.openURL(appleUrl);
+      } catch {
+        await Linking.openURL(googleWebUrl);
+      }
+    };
+    const openGoogle = async () => {
+      try {
+        const canOpenGoogleScheme = await Linking.canOpenURL(googleSchemeUrl);
+        if (canOpenGoogleScheme) {
+          await Linking.openURL(googleSchemeUrl);
+        } else {
+          await Linking.openURL(googleWebUrl);
+        }
+      } catch {
+        await Linking.openURL(googleWebUrl);
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      await Linking.openURL(googleWebUrl);
+      return;
+    }
+
+    Alert.alert('Open location in maps', query, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Apple Maps', onPress: () => void openApple() },
+      { text: 'Google Maps', onPress: () => void openGoogle() },
+    ]);
+  }, []);
+
+  useEffect(() => {
+    const query = draftLocation.trim();
+    if (query.length < 3) {
+      setLocationSuggestions([]);
+      setLocationSuggesting(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(async () => {
+      try {
+        setLocationSuggesting(true);
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&q=${encodeURIComponent(query)}`,
+          {
+            signal: controller.signal,
+            headers: { 'Accept-Language': 'en' },
+          }
+        );
+        if (!res.ok) throw new Error(`Location lookup failed (${res.status})`);
+        const rows = (await res.json()) as Array<{ place_id?: number; display_name?: string }>;
+        const next = rows
+          .map((r, i) => ({
+            id: String(r.place_id ?? `${query}-${i}`),
+            label: (r.display_name ?? '').trim(),
+          }))
+          .filter((r) => !!r.label);
+        setLocationSuggestions(next);
+      } catch {
+        if (!controller.signal.aborted) {
+          setLocationSuggestions([]);
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setLocationSuggesting(false);
+        }
+      }
+    }, 260);
+
+    return () => {
+      clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [draftLocation]);
 
   const removePendingPhoto = useCallback((target: 'composer' | string, p: PendingCommentPhoto) => {
     if (p.uri.startsWith('blob:')) {
@@ -1044,7 +1130,7 @@ export default function EventDetailScreen() {
 
   if (!eventId) {
     return (
-      <EventFormPopoverChrome onClose={dismiss}>
+      <EventFormPopoverChrome onClose={requestClose}>
         <View style={styles.container}>
           <View style={styles.errorContainer}>
             <Text style={styles.errorText}>Event not found</Text>
@@ -1088,7 +1174,7 @@ export default function EventDetailScreen() {
 
   if (!ev || !group) {
     return (
-      <EventFormPopoverChrome onClose={dismiss}>
+      <EventFormPopoverChrome onClose={requestClose}>
         <View style={[styles.safe, { justifyContent: 'center', alignItems: 'center' }]}>
           <ActivityIndicator size="large" color={Colors.accent} />
         </View>
@@ -1109,8 +1195,8 @@ export default function EventDetailScreen() {
   const evStart = displayTiming.displayStart;
   const evEnd = displayTiming.displayEnd;
   const isMultiDay = evStart.toDateString() !== evEnd.toDateString();
-  const diff    = dDiff(evStart);
-  const isPast  = diff < 0;
+  /** Event is considered ended only after its configured end instant has passed. */
+  const isPast  = Date.now() > evEnd.getTime();
   const minN = displayEv.minAttendees || 0;
   const maxN = displayEv.maxAttendees || 0;
   const needsMore = minN > 0 && going.length < minN && !isPast;
@@ -1120,17 +1206,35 @@ export default function EventDetailScreen() {
   const myWaitlistPos = imWaitlisted ? getMyWaitlistPosition(rsvps, currentUserId) : null;
   const hoursLeft = Math.max(0, Math.floor((evStart.getTime() - Date.now()) / 3600000));
   const canEdit = ev.createdBy === currentUserId;
+  const canEditLive = canEdit && !isPast;
+  function requestClose() {
+    const hasUnsavedDetailChanges = canEditLive && detailsDirty;
+    if (!hasUnsavedDetailChanges) {
+      dismiss();
+      return;
+    }
+    const message = 'Discard your changes?';
+    if (Platform.OS === 'web') {
+      if (window.confirm(message)) dismiss();
+      return;
+    }
+    Alert.alert('Discard changes?', message, [
+      { text: 'Keep editing', style: 'cancel' },
+      { text: 'Discard', style: 'destructive', onPress: dismiss },
+    ]);
+  }
   const canDeleteEvent =
     ev.createdBy === currentUserId ||
     group.superAdminId === currentUserId ||
     (group.adminIds ?? []).includes(currentUserId);
+  const canDeleteEventLive = canDeleteEvent && !isPast;
   const gScoped = group as GroupScoped;
   const canCollaborateActivities =
     !!currentUserId &&
     (gScoped.membershipStatus === MembershipStatus.MEMBER ||
       gScoped.membershipStatus === MembershipStatus.ADMIN);
   const activityIdeasOn = ev.activityIdeasEnabled ?? false;
-  const activityIdeasEffective = canEdit ? draftActivityIdeasEnabled : activityIdeasOn;
+  const activityIdeasEffective = canEditLive ? draftActivityIdeasEnabled : activityIdeasOn;
   /** RSVP row follows saved event flag, not the Settings draft (organizers were losing Maybe while editing). */
   const showMaybeRsvp = !!displayEv.allowMaybe;
   const rsvpDeadlineRaw = displayEv.rsvpDeadline as string | null | undefined;
@@ -1138,7 +1242,7 @@ export default function EventDetailScreen() {
   const rsvpDeadlineValid =
     rsvpDeadlineDt != null && Number.isFinite(rsvpDeadlineDt.getTime());
   const rsvpDeadlinePassed = rsvpDeadlineValid && Date.now() > rsvpDeadlineDt.getTime();
-  const rsvpHeaderYmdSlashed = !canEdit
+  const rsvpHeaderYmdSlashed = !canEditLive
     ? rsvpDeadlineValid && rsvpDeadlineRaw
       ? formatLocalDateYmdSlashes(rsvpDeadlineDt as Date)
       : null
@@ -1152,7 +1256,7 @@ export default function EventDetailScreen() {
           ? formatLocalDateYmdSlashes(new Date(ev.rsvpDeadline as string))
           : null;
   const rsvpHeaderTimed =
-    !canEdit
+    !canEditLive
       ? rsvpDeadlineValid && !displayEv.isAllDay
       : draftRsvpDeadlineEnabled
         ? !draftAllDay
@@ -1161,12 +1265,12 @@ export default function EventDetailScreen() {
           : false;
   let rsvpHeaderTimeLabel: string | null = null;
   if (rsvpHeaderYmdSlashed && rsvpHeaderTimed) {
-    if (!canEdit && rsvpDeadlineDt) {
+    if (!canEditLive && rsvpDeadlineDt) {
       rsvpHeaderTimeLabel = fmtTime(rsvpDeadlineDt);
-    } else if (canEdit && draftRsvpDeadlineEnabled && !draftAllDay && draftRsvpDeadlineDate.trim()) {
+    } else if (canEditLive && draftRsvpDeadlineEnabled && !draftAllDay && draftRsvpDeadlineDate.trim()) {
       const d = new Date(`${draftRsvpDeadlineDate.trim()}T${draftRsvpDeadlineTime}:00`);
       if (Number.isFinite(d.getTime())) rsvpHeaderTimeLabel = fmtTime(d);
-    } else if (canEdit && !draftRsvpDeadlineEnabled && !rsvpDeadlineDirty && ev.rsvpDeadline) {
+    } else if (canEditLive && !draftRsvpDeadlineEnabled && !rsvpDeadlineDirty && ev.rsvpDeadline) {
       const d = new Date(ev.rsvpDeadline as string);
       if (Number.isFinite(d.getTime())) rsvpHeaderTimeLabel = fmtTime(d);
     }
@@ -1414,8 +1518,8 @@ export default function EventDetailScreen() {
     }
   };
 
-  const coverPhotosForDisplay = canEdit ? localCoverPhotos : (displayEv.coverPhotos ?? []);
-  const showEventPhotosSection = coverPhotosForDisplay.length > 0 || canEdit;
+  const coverPhotosForDisplay = canEditLive ? localCoverPhotos : (displayEv.coverPhotos ?? []);
+  const showEventPhotosSection = coverPhotosForDisplay.length > 0 || canEditLive;
 
   const persistCoverPhotos = async (next: string[]) => {
     if (!currentUserId) return;
@@ -1426,7 +1530,7 @@ export default function EventDetailScreen() {
   };
 
   const removeCoverPhotoAt = async (index: number) => {
-    if (!currentUserId || !canEdit) return;
+    if (!currentUserId || !canEditLive) return;
     const prev = localCoverPhotos;
     const next = prev.filter((_, j) => j !== index);
     setLocalCoverPhotos(next);
@@ -1439,7 +1543,7 @@ export default function EventDetailScreen() {
   };
 
   const addCoverPhotoFromPicker = async () => {
-    if (!currentUserId || !canEdit || coverPhotoBusy) return;
+    if (!currentUserId || !canEditLive || coverPhotoBusy) return;
     setCoverPhotoBusy(true);
     try {
       const url = await pickAndUploadCoverPhoto(currentUserId);
@@ -1808,7 +1912,7 @@ export default function EventDetailScreen() {
   const hasBanners = showHoursBanner || isPast || needsMore || showLowSpots || imWaitlisted;
 
   return (
-    <EventFormPopoverChrome onClose={dismiss}>
+    <EventFormPopoverChrome onClose={requestClose}>
     <View style={styles.safe}>
       {Platform.OS === 'web' && (
         <input
@@ -1824,7 +1928,7 @@ export default function EventDetailScreen() {
       {/* Nav */}
       <View style={modalTopBarStyles.bar}>
         <TouchableOpacity
-          onPress={dismiss}
+          onPress={requestClose}
           style={modalTopBarStyles.closeButton}
           accessibilityRole="button"
           accessibilityLabel="Close"
@@ -1851,7 +1955,7 @@ export default function EventDetailScreen() {
             />
           </TouchableOpacity>
         ) : null}
-        {canDeleteEvent ? (
+        {canDeleteEventLive ? (
           <TouchableOpacity
             onPress={() => setShowDeleteConfirm(true)}
             style={[modalTopBarStyles.trailingIconTap, { marginRight: 8 }]}
@@ -1859,7 +1963,7 @@ export default function EventDetailScreen() {
             <Ionicons name="trash-outline" size={20} color={Colors.text} />
           </TouchableOpacity>
         ) : null}
-        {canEdit && detailsDirty ? (
+        {canEditLive && detailsDirty ? (
           <View style={styles.navEditActions}>
             <TouchableOpacity
               onPress={resetDetailsDrafts}
@@ -1965,7 +2069,7 @@ export default function EventDetailScreen() {
               </Text>
               <Ionicons name="chevron-forward" size={14} color={Colors.textMuted} style={{ marginTop: 1 }} />
             </TouchableOpacity>
-            {canEdit ? (
+            {canEditLive ? (
               <TextInput
                 value={draftTitle}
                 onChangeText={setDraftTitle}
@@ -1978,7 +2082,7 @@ export default function EventDetailScreen() {
             ) : (
               <Text style={styles.eventTitle}>{displayEv.title}</Text>
             )}
-            {canEdit ? (
+            {canEditLive ? (
               <View style={[styles.descBox, { marginTop: 10 }]}>
                 <TextInput
                   value={draftDesc}
@@ -2003,7 +2107,7 @@ export default function EventDetailScreen() {
             <View
               style={{
                 marginTop:
-                  canEdit || displayEv.description?.trim() ? 4 : 10,
+                  canEditLive || displayEv.description?.trim() ? 4 : 10,
               }}
             >
               <View style={{ paddingHorizontal: 16 }}>
@@ -2015,7 +2119,7 @@ export default function EventDetailScreen() {
                 <PhotoCarousel
                   photos={coverPhotosForDisplay}
                   urlMap={resolvedImageMap}
-                  canRemove={canEdit}
+                  canRemove={canEditLive}
                   onRemoveAt={(i) => void removeCoverPhotoAt(i)}
                   onPhotoPress={(url, index) =>
                     setLightbox({
@@ -2027,7 +2131,7 @@ export default function EventDetailScreen() {
                   }
                 />
               ) : null}
-              {canEdit ? (
+              {canEditLive ? (
                 <View
                   style={{
                     paddingHorizontal: 16,
@@ -2060,7 +2164,7 @@ export default function EventDetailScreen() {
           <View style={{ paddingHorizontal: 16 }}>
             {/* Info rows */}
             <View style={{ gap: 8, marginBottom: 16 }}>
-              {canEdit ? (
+              {canEditLive ? (
                 <View style={{ gap: 8 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
                     <Ionicons name="calendar-outline" size={20} color={Colors.textSub} style={{ width: 22, marginTop: 1 }} />
@@ -2259,27 +2363,72 @@ export default function EventDetailScreen() {
                   ) : null}
                 </View>
               )}
-              {canEdit ? (
-                <InfoRowSlot ionicon="location-outline">
-                  <TextInput
-                    value={draftLocation}
-                    onChangeText={setDraftLocation}
-                    placeholder="Location"
-                    placeholderTextColor={Colors.textMuted}
-                    style={styles.eventLocationInput}
-                    autoCapitalize="words"
-                  />
+              {canEditLive ? (
+                <InfoRowSlot
+                  ionicon="location-outline"
+                  onIconPress={() => void openLocationInMaps(draftLocation)}
+                  iconAccessibilityLabel="Search location in maps"
+                >
+                  <View>
+                    <TextInput
+                      value={draftLocation}
+                      onChangeText={setDraftLocation}
+                      placeholder="Location"
+                      placeholderTextColor={Colors.textMuted}
+                      style={styles.eventLocationInput}
+                      autoCapitalize="words"
+                    />
+                    {locationSuggesting ? (
+                      <Text style={styles.locationSuggestionHint}>Searching locations…</Text>
+                    ) : null}
+                    {locationSuggestions.length > 0 ? (
+                      <View style={styles.locationSuggestionCard}>
+                        {locationSuggestions.map((s, idx) => (
+                          <TouchableOpacity
+                            key={s.id}
+                            onPress={() => {
+                              setDraftLocation(s.label);
+                              setLocationSuggestions([]);
+                            }}
+                            style={[
+                              styles.locationSuggestionRow,
+                              idx < locationSuggestions.length - 1 && styles.locationSuggestionRowBorder,
+                            ]}
+                            activeOpacity={0.75}
+                          >
+                            <Ionicons name="location-outline" size={14} color={Colors.textMuted} />
+                            <Text style={styles.locationSuggestionText} numberOfLines={2}>
+                              {s.label}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    ) : null}
+                  </View>
                 </InfoRowSlot>
               ) : (
-                <InfoRow ionicon="location-outline">
+                <InfoRowSlot
+                  ionicon="location-outline"
+                  onIconPress={
+                    displayEv.location?.trim()
+                      ? () => void openLocationInMaps(displayEv.location!.trim())
+                      : undefined
+                  }
+                  iconAccessibilityLabel="Open location in maps"
+                >
                   {displayEv.location?.trim() ? (
-                    displayEv.location.trim()
+                    <TouchableOpacity
+                      onPress={() => void openLocationInMaps(displayEv.location!.trim())}
+                      activeOpacity={0.75}
+                    >
+                      <Text style={styles.locationLinkText}>{displayEv.location.trim()}</Text>
+                    </TouchableOpacity>
                   ) : (
                     <Text style={{ color: Colors.textMuted }}>None</Text>
                   )}
-                </InfoRow>
+                </InfoRowSlot>
               )}
-              {canEdit ? (
+              {canEditLive ? (
                 <InfoRowSlot ionicon="people-outline">
                   <View>
                     <View style={styles.detailCapacityRow}>
@@ -2479,7 +2628,7 @@ export default function EventDetailScreen() {
           </View>
         </View>
 
-        {canEdit ? (
+        {canEditLive ? (
           <View style={[styles.eventScrollInset, styles.eventSectionGap]}>
             <Text style={styles.eventSectionLabel}>Settings</Text>
             <View style={styles.eventMainCard}>
@@ -2489,34 +2638,6 @@ export default function EventDetailScreen() {
                 label={"Allow 'Maybe' responses"}
                 style={styles.eventTogglePad}
               />
-              <Toggle
-                value={draftActivityIdeasEnabled}
-                onChange={(v) => {
-                  setDraftActivityIdeasEnabled(v);
-                  if (v) {
-                    void persistActivityIdeasSettings(v, draftActivityVotesAnonymous);
-                  } else {
-                    setDraftActivityVotesAnonymous(false);
-                    void persistActivityIdeasSettings(false, false);
-                  }
-                }}
-                label="Enable activity ideas"
-                style={[
-                  styles.eventTogglePad,
-                  draftActivityIdeasEnabled && { borderBottomWidth: 0 },
-                ]}
-              />
-              {draftActivityIdeasEnabled ? (
-                <Toggle
-                  value={draftActivityVotesAnonymous}
-                  onChange={(anon) => {
-                    setDraftActivityVotesAnonymous(anon);
-                    void persistActivityIdeasSettings(true, anon);
-                  }}
-                  label="Anonymous votes (hide who voted)"
-                  style={styles.eventTogglePad}
-                />
-              ) : null}
               <Toggle
                 value={draftRsvpDeadlineEnabled}
                 onChange={(v) => {
@@ -2618,7 +2739,7 @@ export default function EventDetailScreen() {
                   status={myRsvp?.status === 'waitlist' ? 'waitlist' : 'going'}
                   active={myRsvp?.status === 'going' || myRsvp?.status === 'waitlist'}
                   disabled={
-                    rsvpDeadlinePassed || (isAtCapacity && !canGoGoing && !hasWaitlist)
+                    isPast || rsvpDeadlinePassed || (isAtCapacity && !canGoGoing && !hasWaitlist)
                   }
                   isWaitlist={isAtCapacity && !canGoGoing && hasWaitlist}
                   onPress={() => applyRsvp(RSVPInput.status.GOING)}
@@ -2634,7 +2755,7 @@ export default function EventDetailScreen() {
                   <RsvpBtn
                     status="maybe"
                     active={myRsvp?.status === 'maybe'}
-                    disabled={rsvpDeadlinePassed}
+                    disabled={isPast || rsvpDeadlinePassed}
                     onPress={() => applyRsvp(RSVPInput.status.MAYBE)}
                     onLongPress={() => setMemoFor(RSVPInput.status.MAYBE)}
                   />
@@ -2642,7 +2763,7 @@ export default function EventDetailScreen() {
                 <RsvpBtn
                   status="notGoing"
                   active={myRsvp?.status === 'notGoing'}
-                  disabled={rsvpDeadlinePassed}
+                  disabled={isPast || rsvpDeadlinePassed}
                   onPress={() => applyRsvp(RSVPInput.status.NOT_GOING)}
                   onLongPress={() => setMemoFor(RSVPInput.status.NOT_GOING)}
                 />
@@ -2910,7 +3031,21 @@ export default function EventDetailScreen() {
                             <Pressable
                               key={r.emoji}
                               delayLongPress={420}
+                              onPress={() => {
+                                if (!currentUserId) return;
+                                const key = `${c.id}:${r.emoji}`;
+                                const hit = reactionChipLastLongPressRef.current;
+                                if (hit && hit.key === key && Date.now() - hit.at < 500) {
+                                  reactionChipLastLongPressRef.current = null;
+                                  return;
+                                }
+                                void commentReactionMutation.mutateAsync({ commentId: c.id, emoji: r.emoji });
+                              }}
                               onLongPress={() => {
+                                reactionChipLastLongPressRef.current = {
+                                  key: `${c.id}:${r.emoji}`,
+                                  at: Date.now(),
+                                };
                                 if (Platform.OS !== 'web') {
                                   void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                                 }
@@ -2919,10 +3054,10 @@ export default function EventDetailScreen() {
                               style={({ pressed }) => [styles.reactionChip, pressed && { opacity: 0.92 }]}
                               accessibilityRole="button"
                               accessibilityLabel={`${r.count} ${r.emoji} reactions`}
-                              accessibilityHint="Long press to see who reacted"
+                              accessibilityHint="Tap to react or remove your reaction. Long press to see who reacted."
                             >
                               <View style={styles.reactionChipInner}>
-                                <Text style={styles.reactionChipEmoji}>{r.emoji}</Text>
+                                <ReactionEmojiGlyph emoji={r.emoji} size={17} />
                                 <Text style={styles.reactionChipCount}>{r.count}</Text>
                               </View>
                             </Pressable>
@@ -3170,15 +3305,30 @@ export default function EventDetailScreen() {
               ]}
             >
               <View style={styles.reactionSheetGrabber} />
-              <Text style={styles.reactionSheetTitle} numberOfLines={4}>
+              <View style={styles.reactionSheetTitleRow}>
                 {(() => {
                   const n = reactionDetailModal.userIds.length;
                   const sc = reactionEmojiShortcode(reactionDetailModal.emoji);
-                  return `${n} ${n === 1 ? 'person' : 'people'} reacted with ${reactionDetailModal.emoji}${
-                    sc ? ` ${sc}` : ''
-                  }`;
+                  const head = `${n} ${n === 1 ? 'person' : 'people'} reacted with `;
+                  return (
+                    <>
+                      <Text style={styles.reactionSheetTitleText} numberOfLines={3}>
+                        {head}
+                      </Text>
+                      <ReactionEmojiGlyph
+                        emoji={reactionDetailModal.emoji}
+                        size={20}
+                        containerStyle={styles.reactionSheetTitleEmoji}
+                      />
+                      {sc ? (
+                        <Text style={styles.reactionSheetTitleText} numberOfLines={1}>
+                          {` ${sc}`}
+                        </Text>
+                      ) : null}
+                    </>
+                  );
                 })()}
-              </Text>
+              </View>
               <ScrollView
                 keyboardShouldPersistTaps="handled"
                 style={styles.reactionSheetList}
@@ -3326,7 +3476,7 @@ export default function EventDetailScreen() {
                         <View style={styles.commentActionEmojiBarRow}>
                           <View style={styles.commentActionEmojiQuickPill}>
                             <View style={styles.commentActionEmojiQuickInner}>
-                              {COMMENT_QUICK_REACTIONS.map((emoji) => {
+                              {commentQuickReactions.map((emoji) => {
                                 const active = (mc.viewerReactionEmojis || []).includes(emoji);
                                 return (
                                   <TouchableOpacity
@@ -3339,7 +3489,7 @@ export default function EventDetailScreen() {
                                     ]}
                                     accessibilityLabel={`React with ${emoji}`}
                                   >
-                                    <Text style={commentMenuEmojiTextStyle(24)}>{emoji}</Text>
+                                    <ReactionEmojiGlyph emoji={emoji} size={24} />
                                   </TouchableOpacity>
                                 );
                               })}
@@ -3347,7 +3497,10 @@ export default function EventDetailScreen() {
                           </View>
                           <TouchableOpacity
                             style={styles.commentActionEmojiMoreBtn}
-                            onPress={() => setCommentReactionFullPickerFor(mc.id)}
+                            onPress={() => {
+                              setCommentReactionFullPickerFor(mc.id);
+                              closeCommentActionSheet();
+                            }}
                             disabled={commentReactionMutation.isPending}
                             accessibilityLabel="More emojis"
                             activeOpacity={0.75}
@@ -3388,10 +3541,10 @@ export default function EventDetailScreen() {
                               {previewText}
                             </Text>
                           ) : mc.photos.length > 0 ? (
-                            <Text style={styles.commentActionPreviewBody}>
-                              <Text style={commentMenuEmojiTextStyle(18)}>📷</Text>
-                              {' Photo'}
-                            </Text>
+                            <View style={styles.commentActionPreviewPhotoRow}>
+                              <ReactionEmojiGlyph emoji="📷" size={18} />
+                              <Text style={styles.commentActionPreviewBody}> Photo</Text>
+                            </View>
                           ) : (
                             <Text style={[styles.commentActionPreviewBody, { opacity: 0.7 }]}>
                               (no text)
@@ -3474,7 +3627,7 @@ export default function EventDetailScreen() {
                       style={styles.commentActionEmojiHit}
                       accessibilityLabel={`React with ${emoji}`}
                     >
-                      <Text style={commentMenuEmojiTextStyle(22)}>{emoji}</Text>
+                      <ReactionEmojiGlyph emoji={emoji} size={22} />
                     </TouchableOpacity>
                   ))}
                 </ScrollView>
@@ -4044,13 +4197,29 @@ export default function EventDetailScreen() {
 function InfoRowSlot({
   ionicon,
   children,
+  onIconPress,
+  iconAccessibilityLabel,
 }: {
   ionicon: React.ComponentProps<typeof Ionicons>['name'];
   children: React.ReactNode;
+  onIconPress?: () => void;
+  iconAccessibilityLabel?: string;
 }) {
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-      <Ionicons name={ionicon} size={20} color={Colors.textSub} style={{ width: 22 }} />
+      {onIconPress ? (
+        <TouchableOpacity
+          onPress={onIconPress}
+          style={styles.infoIconHit}
+          accessibilityRole="button"
+          accessibilityLabel={iconAccessibilityLabel ?? 'Open in maps'}
+          activeOpacity={0.75}
+        >
+          <Ionicons name={ionicon} size={20} color={Colors.textSub} style={{ width: 22 }} />
+        </TouchableOpacity>
+      ) : (
+        <Ionicons name={ionicon} size={20} color={Colors.textSub} style={{ width: 22 }} />
+      )}
       <View style={{ flex: 1, minWidth: 0 }}>{children}</View>
     </View>
   );
@@ -4557,6 +4726,51 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     ...(Platform.OS === 'web' ? ({ outlineStyle: 'none', outlineWidth: 0 } as object) : null),
   },
+  infoIconHit: {
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  locationLinkText: {
+    fontSize: 14,
+    fontFamily: Fonts.medium,
+    color: '#2563EB',
+    textDecorationLine: 'underline',
+    lineHeight: 20,
+  },
+  locationSuggestionHint: {
+    marginTop: 6,
+    fontSize: 12,
+    color: Colors.textMuted,
+    fontFamily: Fonts.regular,
+  },
+  locationSuggestionCard: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+    overflow: 'hidden',
+    backgroundColor: Colors.bg,
+  },
+  locationSuggestionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+  },
+  locationSuggestionRowBorder: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.border,
+  },
+  locationSuggestionText: {
+    flex: 1,
+    fontSize: 13,
+    color: Colors.textSub,
+    fontFamily: Fonts.regular,
+    lineHeight: 18,
+  },
   detailCapacityRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -4738,14 +4952,6 @@ const styles = StyleSheet.create({
   },
   /** Row wrapper so emoji uses system font (DMSans has no color glyphs → tofu on iOS). */
   reactionChipInner: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  reactionChipEmoji: {
-    alignSelf: 'center',
-    ...(Platform.OS === 'ios'
-      ? { fontFamily: 'Apple Color Emoji', fontSize: 17, lineHeight: 23 }
-      : Platform.OS === 'android'
-        ? { fontSize: 18, lineHeight: 24 }
-        : { fontSize: 16, lineHeight: 20 }),
-  },
   reactionChipCount: { fontSize: 13, fontFamily: Fonts.medium, color: Colors.text },
   commentActionModalRoot: {
     flex: 1,
@@ -4899,6 +5105,11 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.regular,
     color: Colors.textMuted,
   },
+  commentActionPreviewPhotoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   commentActionPreviewBody: {
     fontSize: 14,
     lineHeight: 20,
@@ -5012,6 +5223,22 @@ const styles = StyleSheet.create({
     borderRadius: 2,
     backgroundColor: 'rgba(255,255,255,0.28)',
     marginBottom: 14,
+  },
+  reactionSheetTitleRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    marginBottom: 16,
+    gap: 4,
+  },
+  reactionSheetTitleText: {
+    fontSize: 17,
+    fontFamily: Fonts.semiBold,
+    color: '#f5f5f7',
+    lineHeight: 24,
+  },
+  reactionSheetTitleEmoji: {
+    marginTop: -2,
   },
   reactionSheetTitle: {
     fontSize: 17,

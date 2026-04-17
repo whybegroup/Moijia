@@ -1,6 +1,6 @@
 import { type ReactNode, useMemo } from 'react';
 import { View, Pressable, StyleSheet, useWindowDimensions } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Radius, Shadows } from '../constants/theme';
 
 const POPOVER_MAX_W = 560;
@@ -13,6 +13,18 @@ type Props = { children: ReactNode; onClose: () => void };
  */
 export function EventFormPopoverChrome({ children, onClose }: Props) {
   const { height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+
+  const rootStyle = useMemo(
+    () => [
+      styles.root,
+      {
+        paddingTop: Math.max(insets.top, 10) + 6,
+        paddingBottom: Math.max(insets.bottom, 10) + 2,
+      },
+    ],
+    [insets.bottom, insets.top]
+  );
 
   const sheetStyle = useMemo(
     () => [
@@ -21,18 +33,19 @@ export function EventFormPopoverChrome({ children, onClose }: Props) {
         maxWidth: POPOVER_MAX_W,
         width: '100%' as const,
         flex: 1,
-        maxHeight: height * 0.92,
+        // Keep modal below status area / dynamic island on iPhone.
+        maxHeight: Math.max(320, height - (Math.max(insets.top, 10) + Math.max(insets.bottom, 10) + 24)),
         borderRadius: Radius['2xl'],
         overflow: 'hidden' as const,
         alignSelf: 'center' as const,
         ...(Shadows.lg ?? {}),
       },
     ],
-    [height]
+    [height, insets.bottom, insets.top]
   );
 
   return (
-    <View style={styles.root}>
+    <View style={rootStyle}>
       <Pressable style={styles.scrim} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close" />
       <SafeAreaView edges={['top', 'bottom', 'left', 'right']} style={sheetStyle}>
         {children}

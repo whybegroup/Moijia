@@ -114,6 +114,22 @@ export default function GroupDetailScreen() {
     );
   }, [group, draftName, draftDesc]);
 
+  const requestClose = useCallback(() => {
+    if (!profileDirty) {
+      dismiss();
+      return;
+    }
+    const message = 'Discard your changes?';
+    if (Platform.OS === 'web') {
+      if (window.confirm(message)) dismiss();
+      return;
+    }
+    Alert.alert('Discard changes?', message, [
+      { text: 'Keep editing', style: 'cancel' },
+      { text: 'Discard', style: 'destructive', onPress: dismiss },
+    ]);
+  }, [profileDirty, dismiss]);
+
   useEffect(() => {
     if (isError || (group && group.membershipStatus === 'none')) {
       router.replace('/(tabs)/groups');
@@ -470,10 +486,10 @@ export default function GroupDetailScreen() {
   ) : null;
 
   return (
-    <EventFormPopoverChrome onClose={dismiss}>
+    <EventFormPopoverChrome onClose={requestClose}>
     <View style={styles.safe}>
       <NavBar
-        onClose={dismiss}
+        onClose={requestClose}
         right={
           profileDirty ? (
             <View style={styles.navEditActions}>

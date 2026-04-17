@@ -14,8 +14,8 @@ export const modalTopBarStyles = StyleSheet.create({
     position: 'relative',
   },
   closeButton: {
-    width: 44,
-    height: 44,
+    width: 40,
+    height: 40,
     flexShrink: 0,
     alignItems: 'center',
     justifyContent: 'center',
@@ -23,8 +23,8 @@ export const modalTopBarStyles = StyleSheet.create({
   },
   /** Toolbar icons (watch / edit / delete) — same vertical bounds as close. */
   trailingIconTap: {
-    width: 44,
-    height: 44,
+    width: 40,
+    height: 40,
     alignItems: 'center',
     justifyContent: 'center',
   },

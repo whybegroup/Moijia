@@ -126,6 +126,22 @@ export default function CreateGroupScreen() {
     router.push('/(tabs)/groups');
   };
 
+  const requestClose = useCallback(() => {
+    if (!createFormDirty) {
+      handleBack();
+      return;
+    }
+    const message = 'Discard your changes?';
+    if (Platform.OS === 'web') {
+      if (window.confirm(message)) handleBack();
+      return;
+    }
+    Alert.alert('Discard changes?', message, [
+      { text: 'Keep editing', style: 'cancel' },
+      { text: 'Discard', style: 'destructive', onPress: handleBack },
+    ]);
+  }, [createFormDirty, handleBack]);
+
   const handleCreate = async () => {
     if (!valid || !user) return;
 
@@ -253,10 +269,10 @@ export default function CreateGroupScreen() {
 
   return (
     <>
-      <EventFormPopoverChrome onClose={handleBack}>
+      <EventFormPopoverChrome onClose={requestClose}>
         <View style={styles.safe}>
           <NavBar
-            onClose={handleBack}
+            onClose={requestClose}
             right={
               createFormDirty ? (
                 <View style={styles.navEditActions}>
