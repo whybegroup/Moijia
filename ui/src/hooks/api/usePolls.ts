@@ -1,6 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { PollsService, type PollInput } from '@moijia/client';
+import { PollsService, type Poll, type PollInput, type PollResults } from '@moijia/client';
 import { queryKeys } from '../../config/queryClient';
+
+export function usePolls(userId: string) {
+  return useQuery<Poll[]>({
+    queryKey: queryKeys.polls.list(userId),
+    queryFn: () => PollsService.listPolls(userId),
+    enabled: !!userId,
+  });
+}
 
 export function usePoll(id: string, userId: string) {
   return useQuery({
@@ -21,6 +29,25 @@ export function useCreatePoll(userId: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['groups'] });
       queryClient.invalidateQueries({ queryKey: ['polls'] });
+    },
+  });
+}
+
+export function usePollResults(id: string, userId: string) {
+  return useQuery<PollResults>({
+    queryKey: queryKeys.polls.results(id, userId),
+    queryFn: () => PollsService.getPollResults(id, userId),
+    enabled: Boolean(id?.trim() && userId?.trim()),
+  });
+}
+
+export function useSubmitPollVote(id: string, userId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (optionIds: string[]) => PollsService.submitVote(id, { userId, optionIds }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.polls.results(id, userId) });
     },
   });
 }

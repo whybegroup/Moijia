@@ -18,8 +18,10 @@ import { getGroupColor, getDefaultGroupThemeFromName } from '../utils/helpers';
 import { isSameDay, isToday } from '../utils/helpers';
 import type { EventDetailed, GroupScoped } from '@moijia/client';
 import { useCurrentUserContext } from '../contexts/CurrentUserContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WeekDayTimelineGestures } from './WeekDayTimelineGestures';
 import { WeekTimedEventDraggable } from './WeekTimedEventDraggable';
+import { EventRow } from './EventRow';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -159,6 +161,47 @@ function allDayEventsForDay(day: Date, events: EventDetailed[]): EventDetailed[]
   });
 }
 
+/** Events that occur on this calendar day (timed overlap + all-day span). Sorted: all-day first, then by start. */
+function eventsOverlappingCalendarDay(day: Date, list: EventDetailed[]): EventDetailed[] {
+  const ds = dayStart(day).getTime();
+  const de = dayEnd(day).getTime();
+  const d0 = calendarDateOnly(day);
+  const out = list.filter((ev) => {
+    const s = new Date(ev.start);
+    const e = new Date(ev.end);
+    if (ev.isAllDay) {
+      const s0 = calendarDateOnly(s);
+      const e0 = calendarDateOnly(e);
+      return d0 >= s0 && d0 <= e0;
+    }
+    return e.getTime() > ds && s.getTime() < de;
+  });
+  return out.sort((a, b) => {
+    const aAll = !!a.isAllDay;
+    const bAll = !!b.isAllDay;
+    if (aAll !== bAll) return aAll ? -1 : 1;
+    return new Date(a.start).getTime() - new Date(b.start).getTime();
+  });
+}
+
+function clampDayInMonth(year: number, month: number, preferredDom: number): Date {
+  const last = new Date(year, month + 1, 0).getDate();
+  const dom = Math.min(Math.max(1, preferredDom), last);
+  return new Date(year, month, dom);
+}
+
+/** Events with any overlap on this calendar month, sorted by start. */
+function eventsOverlappingCalendarMonth(y: number, mo: number, list: EventDetailed[]): EventDetailed[] {
+  const monthStart = new Date(y, mo, 1, 0, 0, 0, 0).getTime();
+  const monthEnd = new Date(y, mo + 1, 0, 23, 59, 59, 999).getTime();
+  const out = list.filter((ev) => {
+    const s = new Date(ev.start).getTime();
+    const e = new Date(ev.end).getTime();
+    return e >= monthStart && s <= monthEnd;
+  });
+  return out.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+}
+
 type TimedSeg = { ev: EventDetailed; top: number; height: number };
 
 function timedSegmentsOverlap(a: TimedSeg, b: TimedSeg): boolean {
@@ -257,10 +300,18 @@ export function CalendarView({
   calendarScrollPrefsReady = false,
 }: CalendarViewProps) {
   const { userId: meId } = useCurrentUserContext();
-  const { width: winW } = useWindowDimensions();
+  const { width: winW, height: winH } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const [internalFocus, setInternalFocus] = useState(() => new Date());
   const [internalScope, setInternalScope] = useState<CalendarScopeMode>('week');
   const [scopeMenuOpen, setScopeMenuOpen] = useState(false);
+  const [scopeMenuAnchor, setScopeMenuAnchor] = useState<{
+    top: number;
+    left: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  const scopeDropdownRef = useRef<View>(null);
   const [weekSlotDraft, setWeekSlotDraft] = useState<{
     dayKey: string;
     top: number;
@@ -296,6 +347,34 @@ export function CalendarView({
     },
     [controlledScope, onCalendarScopeModeChange]
   );
+
+  const closeScopeMenu = useCallback(() => {
+    setScopeMenuOpen(false);
+    setScopeMenuAnchor(null);
+  }, []);
+
+  const openScopeMenu = useCallback(() => {
+    scopeDropdownRef.current?.measureInWindow((x, y, width, height) => {
+      setScopeMenuAnchor({ top: y, left: x, width, height });
+      setScopeMenuOpen(true);
+    });
+  }, []);
+
+  const scopeMenuPosition = useMemo(() => {
+    if (!scopeMenuAnchor) return null;
+    const pad = 8;
+    const gap = 4;
+    const menuW = Math.max(168, scopeMenuAnchor.width);
+    const estMenuH = SCOPE_OPTIONS.length * 48 + 4;
+    let left = scopeMenuAnchor.left;
+    left = Math.min(Math.max(pad, left), winW - menuW - pad);
+    let top = scopeMenuAnchor.top + scopeMenuAnchor.height + gap;
+    const maxBottom = winH - Math.max(insets.bottom, pad) - pad;
+    if (top + estMenuH > maxBottom) {
+      top = Math.max(insets.top + pad, scopeMenuAnchor.top - estMenuH - gap);
+    }
+    return { top, left, width: menuW };
+  }, [scopeMenuAnchor, winH, winW, insets.bottom, insets.top]);
 
   useEffect(() => {
     if (scopeMode !== 'week' && scopeMode !== 'day') {
@@ -408,16 +487,20 @@ export function CalendarView({
 
   const grid = useMemo(() => getMonthGrid(year, month), [year, month]);
 
-  /** Day cell size for year view: 3 columns × 7 days, derived from window width. */
-  const yearMiniCellSize = useMemo(() => {
-    const yearGridHorizontalPad = 16;
-    const cardBorder = 4;
-    const cardInnerPad = 16;
-    const parentInner = winW - yearGridHorizontalPad;
-    const cardOuterW = parentInner * 0.31;
-    const cellAreaW = cardOuterW - cardBorder - cardInnerPad;
-    return Math.max(10, Math.floor(cellAreaW / 7));
-  }, [winW]);
+  /** Square month tile in year horizontal strip; mini calendar cells derive from this. */
+  const yearMonthCardSize = useMemo(
+    () => Math.min(200, Math.max(96, Math.round(winW - 48))),
+    [winW]
+  );
+  const yearCardPad = 6;
+  const yearCardTitleBand = 14;
+  const yearCardDowBand = 12;
+  const yearGridInnerW = yearMonthCardSize - yearCardPad * 2;
+  const yearGridInnerH = yearMonthCardSize - yearCardPad * 2 - yearCardTitleBand - yearCardDowBand;
+  const yearCellW = Math.max(8, Math.floor(yearGridInnerW / 7));
+  const yearCellH = Math.max(8, Math.floor(yearGridInnerH / 6));
+  const yearDayNumSize = Math.max(7, Math.min(11, Math.floor(Math.min(yearCellW, yearCellH) * 0.52)));
+  const yearCellBox = { width: yearCellW, height: yearCellH };
 
   const groupsMap = useMemo(() => {
     const map: Record<string, GroupScoped> = {};
@@ -435,6 +518,16 @@ export function CalendarView({
     }
     return map;
   }, [events]);
+
+  const monthSelectedDayEvents = useMemo(
+    () => eventsOverlappingCalendarDay(focusDate, events),
+    [focusDate, events]
+  );
+
+  const yearSelectedMonthEvents = useMemo(
+    () => eventsOverlappingCalendarMonth(year, month, events),
+    [year, month, events]
+  );
 
   const goToToday = () => setFocusDate(new Date());
 
@@ -638,6 +731,7 @@ export function CalendarView({
                       <WeekDayTimelineGestures
                         day={day}
                         timelineHeight={TIMELINE_HEIGHT}
+                        requireLongPressToPaint={scopeMode === 'week'}
                         onDraftChange={(d) =>
                           setWeekSlotDraft(d ? { dayKey: dateKey(day), ...d } : null)
                         }
@@ -783,26 +877,49 @@ export function CalendarView({
     });
   }, [needsWeekHorizontalScroll]);
 
+  const renderMonthNavigation = () => (
+    <View style={styles.monthNav}>
+      <TouchableOpacity onPress={prevNav} style={styles.navBtn}>
+        <Text style={styles.navBtnText}>‹</Text>
+      </TouchableOpacity>
+      <View style={styles.monthLabel}>
+        <Text style={styles.monthLabelText}>{navCenterLabel}</Text>
+      </View>
+      <TouchableOpacity onPress={nextNav} style={styles.navBtn}>
+        <Text style={styles.navBtnText}>›</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
   return (
     <View style={styles.calendarRoot}>
       <View style={styles.toolbarRow}>
         <TouchableOpacity onPress={goToToday} style={styles.todayBtn} activeOpacity={0.75}>
           <Text style={styles.todayBtnText}>Today</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          onPress={() => setScopeMenuOpen(true)}
-          style={styles.scopeDropdown}
-          activeOpacity={0.75}
-        >
-          <Text style={styles.scopeDropdownText}>{scopeLabel}</Text>
-          <Ionicons name="chevron-down" size={16} color={Colors.text} />
-        </TouchableOpacity>
+        <View ref={scopeDropdownRef} collapsable={false}>
+          <TouchableOpacity onPress={openScopeMenu} style={styles.scopeDropdown} activeOpacity={0.75}>
+            <Text style={styles.scopeDropdownText}>{scopeLabel}</Text>
+            <Ionicons name="chevron-down" size={16} color={Colors.text} />
+          </TouchableOpacity>
+        </View>
       </View>
 
-      <Modal visible={scopeMenuOpen} transparent animationType="fade" onRequestClose={() => setScopeMenuOpen(false)}>
+      <Modal visible={scopeMenuOpen} transparent animationType="fade" onRequestClose={closeScopeMenu}>
         <View style={styles.modalRoot}>
-          <Pressable style={styles.modalBackdrop} onPress={() => setScopeMenuOpen(false)} />
-          <View style={styles.modalMenuWrap} pointerEvents="box-none">
+          <Pressable style={styles.modalBackdrop} onPress={closeScopeMenu} />
+          {scopeMenuPosition ? (
+            <View
+              style={[
+                styles.modalMenuWrap,
+                {
+                  top: scopeMenuPosition.top,
+                  left: scopeMenuPosition.left,
+                  width: scopeMenuPosition.width,
+                },
+              ]}
+              pointerEvents="box-none"
+            >
             <View style={styles.scopeMenu}>
               {SCOPE_OPTIONS.map(({ key, label }, i) => (
                 <TouchableOpacity
@@ -814,7 +931,7 @@ export function CalendarView({
                   ]}
                   onPress={() => {
                     setScopeMode(key);
-                    setScopeMenuOpen(false);
+                    closeScopeMenu();
                   }}
                 >
                   <Text style={[styles.scopeMenuItemText, scopeMode === key && styles.scopeMenuItemTextActive]}>
@@ -826,21 +943,12 @@ export function CalendarView({
                 </TouchableOpacity>
               ))}
             </View>
-          </View>
+            </View>
+          ) : null}
         </View>
       </Modal>
 
-      <View style={styles.monthNav}>
-        <TouchableOpacity onPress={prevNav} style={styles.navBtn}>
-          <Text style={styles.navBtnText}>‹</Text>
-        </TouchableOpacity>
-        <View style={styles.monthLabel}>
-          <Text style={styles.monthLabelText}>{navCenterLabel}</Text>
-        </View>
-        <TouchableOpacity onPress={nextNav} style={styles.navBtn}>
-          <Text style={styles.navBtnText}>›</Text>
-        </TouchableOpacity>
-      </View>
+      {scopeMode !== 'month' && scopeMode !== 'year' ? renderMonthNavigation() : null}
 
       {(scopeMode === 'week' || scopeMode === 'day') && (
         <View style={[styles.weekTimelineOuter, styles.weekTimelineOuterFlex]}>
@@ -923,12 +1031,12 @@ export function CalendarView({
           style={styles.monthYearScroll}
           nestedScrollEnabled
           showsVerticalScrollIndicator={false}
-          stickyHeaderIndices={[0]}
           onScroll={onMonthBodyScroll}
           onScrollEndDrag={flushBodyScrollPersist}
           onMomentumScrollEnd={flushBodyScrollPersist}
           scrollEventThrottle={64}
         >
+          {renderMonthNavigation()}
           <View style={styles.weekdayRowStickyWrap}>
             <View style={styles.weekdayRow}>
               {WEEKDAYS.map((d) => (
@@ -1000,6 +1108,42 @@ export function CalendarView({
               </View>
             ))}
           </View>
+
+          <View style={styles.monthDayEventsSection}>
+            <Text style={styles.monthDayEventsSectionTitle}>
+              {focusDate.toLocaleDateString('default', {
+                weekday: 'long',
+                month: 'long',
+                day: 'numeric',
+              })}
+            </Text>
+            {monthSelectedDayEvents.length === 0 ? (
+              <Text style={styles.monthDayEventsEmpty}>No events this day</Text>
+            ) : (
+              <View style={styles.monthDayEventsList}>
+                {monthSelectedDayEvents.map((ev, i) => {
+                  const group = groupsMap[ev.groupId];
+                  const userColorHex =
+                    groupColors[ev.groupId] ||
+                    (group ? getDefaultGroupThemeFromName(group.name) : '#EC4899');
+                  return (
+                    <View key={eventOccurrenceKey(ev)} style={styles.monthDayEventRowWrap}>
+                      <EventRow
+                        ev={ev}
+                        group={group}
+                        groupColorHex={userColorHex}
+                        onPress={() => onSelectEvent(ev)}
+                        onGroupPress={onSelectGroup}
+                        isLast={i === monthSelectedDayEvents.length - 1}
+                        meId={meId}
+                        users={[]}
+                      />
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+          </View>
         </ScrollView>
       )}
 
@@ -1008,107 +1152,158 @@ export function CalendarView({
           ref={yearVerticalRef}
           style={styles.monthYearScroll}
           nestedScrollEnabled
-          showsVerticalScrollIndicator={false}
+          showsVerticalScrollIndicator
           onScroll={onYearBodyScroll}
           onScrollEndDrag={flushBodyScrollPersist}
           onMomentumScrollEnd={flushBodyScrollPersist}
           scrollEventThrottle={64}
         >
-          <View style={styles.yearGrid}>
-          {Array.from({ length: 12 }, (_, m) => {
-            const monthStart = new Date(year, m, 1);
-            const monthGrid = getMonthGrid(year, m);
-            const monthHighlighted = sameCalendarMonth(focusDate, monthStart);
-            const dayNumSize = Math.max(8, Math.min(11, Math.floor(yearMiniCellSize * 0.58)));
-            /** Taller than wide so day label and event dots stay separated on narrow screens. */
-            const yearMiniCellHeight = Math.max(26, yearMiniCellSize + 12);
-            const cellBox = { width: yearMiniCellSize, height: yearMiniCellHeight };
-            const colStride = yearMiniCellSize + 1;
-            return (
-              <View
-                key={m}
-                style={[styles.yearMiniMonthCard, monthHighlighted && styles.yearMiniMonthCardSelected]}
-              >
-                <Text style={styles.yearMiniMonthTitle} numberOfLines={1}>
-                  {monthStart.toLocaleString('default', { month: 'short' })}
-                </Text>
-                <View style={styles.yearMiniWeekdayRow}>
-                  {WEEKDAYS.map((d) => (
-                    <View key={d} style={{ width: colStride, alignItems: 'center' }}>
-                      <Text style={styles.yearMiniWeekdayCell}>{d.slice(0, 1)}</Text>
-                    </View>
-                  ))}
-                </View>
-                <View style={styles.yearMiniGrid}>
-                  {monthGrid.map((row, ri) => (
-                    <View key={ri} style={styles.yearMiniGridRow}>
-                      {row.map((cell, ci) => {
-                        if (!cell) {
-                          return <View key={ci} style={[styles.yearMiniCellEmpty, cellBox]} />;
-                        }
-                        const key = `${cell.getFullYear()}-${cell.getMonth()}-${cell.getDate()}`;
-                        const dayEvents = eventsByDate.get(key) ?? [];
-                        const selected = isSameDay(cell, focusDate);
-                        const today = isToday(cell);
-                        return (
-                          <TouchableOpacity
-                            key={ci}
-                            style={[
-                              styles.yearMiniCell,
-                              cellBox,
-                              selected && styles.yearMiniCellSelected,
-                              today && !selected && styles.yearMiniCellToday,
-                            ]}
-                            onPress={() => setFocusDate(cell)}
-                            activeOpacity={0.7}
-                          >
-                            <Text
+          {renderMonthNavigation()}
+          <ScrollView
+            horizontal
+            nestedScrollEnabled
+            showsHorizontalScrollIndicator
+            style={[styles.yearMonthStrip, { height: yearMonthCardSize + 16 }]}
+            contentContainerStyle={styles.yearMonthStripContent}
+          >
+            {Array.from({ length: 12 }, (_, m) => {
+              const monthStart = new Date(year, m, 1);
+              const monthGrid = getMonthGrid(year, m);
+              const monthHighlighted = sameCalendarMonth(focusDate, monthStart);
+              return (
+                <TouchableOpacity
+                  key={m}
+                  activeOpacity={0.88}
+                  onPress={() =>
+                    setFocusDate(clampDayInMonth(year, m, focusDate.getDate()))
+                  }
+                  style={[
+                    styles.yearMonthSquareCard,
+                    {
+                      width: yearMonthCardSize,
+                      height: yearMonthCardSize,
+                      padding: yearCardPad,
+                    },
+                    monthHighlighted && styles.yearMiniMonthCardSelected,
+                  ]}
+                >
+                  <Text style={styles.yearMiniMonthTitle} numberOfLines={1}>
+                    {monthStart.toLocaleString('default', { month: 'short' })}
+                  </Text>
+                  <View style={styles.yearMiniWeekdayRow}>
+                    {WEEKDAYS.map((d) => (
+                      <View key={d} style={styles.yearMiniWeekdayCellFlex}>
+                        <Text style={styles.yearMiniWeekdayCell}>{d.slice(0, 1)}</Text>
+                      </View>
+                    ))}
+                  </View>
+                  <View style={styles.yearMonthSquareGrid}>
+                    {monthGrid.map((row, ri) => (
+                      <View key={ri} style={styles.yearMiniGridRow}>
+                        {row.map((cell, ci) => {
+                          if (!cell) {
+                            return (
+                              <View key={ci} style={[styles.yearMiniCellEmpty, yearCellBox]} />
+                            );
+                          }
+                          const key = `${cell.getFullYear()}-${cell.getMonth()}-${cell.getDate()}`;
+                          const dayEvents = eventsByDate.get(key) ?? [];
+                          const selected = isSameDay(cell, focusDate);
+                          const today = isToday(cell);
+                          return (
+                            <TouchableOpacity
+                              key={ci}
                               style={[
-                                styles.yearMiniCellText,
-                                { fontSize: dayNumSize },
-                                selected && styles.yearMiniCellTextSelected,
-                                today && !selected && styles.yearMiniCellTextToday,
+                                styles.yearMiniCell,
+                                yearCellBox,
+                                selected && styles.yearMiniCellSelected,
+                                today && !selected && styles.yearMiniCellToday,
                               ]}
+                              onPress={() => setFocusDate(cell)}
+                              activeOpacity={0.7}
                             >
-                              {cell.getDate()}
-                            </Text>
-                            {dayEvents.length > 0 ? (
-                              <View style={styles.yearMiniDotWrap}>
-                                {dayEvents.slice(0, 2).map((ev) => {
-                                  const group = groupsMap[ev.groupId];
-                                  const userColorHex =
-                                    groupColors[ev.groupId] ||
-                                    (group ? getDefaultGroupThemeFromName(group.name) : '#EC4899');
-                                  const p = getGroupColor(userColorHex);
-                                  return (
-                                    <View
-                                      key={eventOccurrenceKey(ev)}
+                              <Text
+                                style={[
+                                  styles.yearMiniCellText,
+                                  { fontSize: yearDayNumSize },
+                                  selected && styles.yearMiniCellTextSelected,
+                                  today && !selected && styles.yearMiniCellTextToday,
+                                ]}
+                              >
+                                {cell.getDate()}
+                              </Text>
+                              {dayEvents.length > 0 ? (
+                                <View style={styles.yearMiniDotWrap}>
+                                  {dayEvents.slice(0, 2).map((ev) => {
+                                    const group = groupsMap[ev.groupId];
+                                    const userColorHex =
+                                      groupColors[ev.groupId] ||
+                                      (group ? getDefaultGroupThemeFromName(group.name) : '#EC4899');
+                                    const p = getGroupColor(userColorHex);
+                                    return (
+                                      <View
+                                        key={eventOccurrenceKey(ev)}
+                                        style={[
+                                          styles.yearMiniDot,
+                                          selected && styles.yearMiniDotSelected,
+                                          { backgroundColor: p.dot },
+                                        ]}
+                                      />
+                                    );
+                                  })}
+                                  {dayEvents.length > 2 ? (
+                                    <Text
                                       style={[
-                                        styles.yearMiniDot,
-                                        selected && styles.yearMiniDotSelected,
-                                        { backgroundColor: p.dot },
+                                        styles.yearMiniDotMore,
+                                        selected && styles.yearMiniDotMoreSelected,
                                       ]}
-                                    />
-                                  );
-                                })}
-                                {dayEvents.length > 2 ? (
-                                  <Text
-                                    style={[styles.yearMiniDotMore, selected && styles.yearMiniDotMoreSelected]}
-                                  >
-                                    +{dayEvents.length - 2}
-                                  </Text>
-                                ) : null}
-                              </View>
-                            ) : null}
-                          </TouchableOpacity>
-                        );
-                      })}
+                                    >
+                                      +{dayEvents.length - 2}
+                                    </Text>
+                                  ) : null}
+                                </View>
+                              ) : null}
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    ))}
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+
+          <View style={styles.yearMonthEventsSection}>
+            <Text style={styles.monthDayEventsSectionTitle}>
+              {new Date(year, month, 1).toLocaleString('default', { month: 'long', year: 'numeric' })}
+            </Text>
+            {yearSelectedMonthEvents.length === 0 ? (
+              <Text style={styles.monthDayEventsEmpty}>No events this month</Text>
+            ) : (
+              <View style={styles.monthDayEventsList}>
+                {yearSelectedMonthEvents.map((ev, i) => {
+                  const group = groupsMap[ev.groupId];
+                  const userColorHex =
+                    groupColors[ev.groupId] ||
+                    (group ? getDefaultGroupThemeFromName(group.name) : '#EC4899');
+                  return (
+                    <View key={eventOccurrenceKey(ev)} style={styles.monthDayEventRowWrap}>
+                      <EventRow
+                        ev={ev}
+                        group={group}
+                        groupColorHex={userColorHex}
+                        onPress={() => onSelectEvent(ev)}
+                        onGroupPress={onSelectGroup}
+                        isLast={i === yearSelectedMonthEvents.length - 1}
+                        meId={meId}
+                        users={[]}
+                      />
                     </View>
-                  ))}
-                </View>
+                  );
+                })}
               </View>
-            );
-          })}
+            )}
           </View>
         </ScrollView>
       )}
@@ -1168,11 +1363,10 @@ const styles = StyleSheet.create({
   },
   modalMenuWrap: {
     position: 'absolute',
-    top: 52,
-    left: 12,
     zIndex: 10,
   },
   scopeMenu: {
+    width: '100%',
     minWidth: 168,
     backgroundColor: Colors.surface,
     borderRadius: Radius.lg,
@@ -1382,7 +1576,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: Colors.border,
+    borderTopColor: '#9AA3AF',
   },
   nowLine: {
     position: 'absolute',
@@ -1466,23 +1660,70 @@ const styles = StyleSheet.create({
   dotMoreSelected: {
     color: Colors.accentFg,
   },
-  yearGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    paddingHorizontal: 8,
-    paddingBottom: 8,
-    justifyContent: 'space-between',
+  monthDayEventsSection: {
+    paddingHorizontal: 12,
+    paddingTop: 18,
+    paddingBottom: 100,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.border,
+    marginTop: 8,
   },
-  yearMiniMonthCard: {
-    width: '31%',
-    marginBottom: 10,
+  monthDayEventsSectionTitle: {
+    fontSize: 16,
+    fontFamily: Fonts.bold,
+    color: Colors.text,
+    marginBottom: 12,
+  },
+  monthDayEventsEmpty: {
+    fontSize: 14,
+    fontFamily: Fonts.medium,
+    color: Colors.textMuted,
+    paddingVertical: 8,
+  },
+  monthDayEventsList: {
+    gap: 10,
+  },
+  monthDayEventRowWrap: {
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    overflow: 'hidden',
+    backgroundColor: Colors.surface,
+  },
+  yearMonthStrip: {
+    flexGrow: 0,
+    flexShrink: 0,
+  },
+  yearMonthStripContent: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    alignItems: 'flex-start',
+  },
+  yearMonthSquareCard: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    marginRight: 10,
     borderRadius: Radius.lg,
     borderWidth: 2,
     borderColor: Colors.border,
     backgroundColor: Colors.surface,
-    paddingHorizontal: 4,
-    paddingTop: 6,
-    paddingBottom: 4,
+    overflow: 'hidden',
+  },
+  yearMonthSquareGrid: {
+    flex: 1,
+    minHeight: 0,
+    justifyContent: 'center',
+  },
+  yearMiniWeekdayCellFlex: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  yearMonthEventsSection: {
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    paddingBottom: 100,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.border,
   },
   yearMiniMonthCardSelected: {
     borderColor: Colors.accent,
@@ -1496,6 +1737,7 @@ const styles = StyleSheet.create({
   },
   yearMiniWeekdayRow: {
     flexDirection: 'row',
+    flexShrink: 0,
     paddingBottom: 2,
   },
   yearMiniWeekdayCell: {
@@ -1504,7 +1746,6 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.semiBold,
     color: Colors.textMuted,
   },
-  yearMiniGrid: { alignItems: 'center' },
   yearMiniGridRow: {
     flexDirection: 'row',
     justifyContent: 'center',

@@ -43,6 +43,8 @@ export const queryKeys = {
     user: (userId: string) => ['notifications', 'user', userId] as const,
   },
   polls: {
+    list: (userId: string) => ['polls', 'list', userId] as const,
     detail: (id: string, userId: string) => ['polls', id, userId] as const,
+    results: (id: string, userId: string) => ['polls', id, 'results', userId] as const,
   },
 } as const;

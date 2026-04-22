@@ -117,17 +117,6 @@ export function CreateOrJoinButton({ userId, eventEligibleGroupCount }: Props) {
                   <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
                 </TouchableOpacity>
 
-                <TouchableOpacity style={styles.menuRow} onPress={onNewGroup} activeOpacity={0.7}>
-                  <View style={styles.menuRowIcon}>
-                    <Ionicons name="people-outline" size={22} color={Colors.text} />
-                  </View>
-                  <View style={styles.menuRowText}>
-                    <Text style={styles.menuRowTitle}>New group</Text>
-                    <Text style={styles.menuRowSubtitle}>Start a group others can join</Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
-                </TouchableOpacity>
-
                 <TouchableOpacity style={styles.menuRow} onPress={onNewPoll} activeOpacity={0.7}>
                   <View style={styles.menuRowIcon}>
                     <Ionicons name="bar-chart-outline" size={22} color={Colors.text} />
@@ -135,6 +124,17 @@ export function CreateOrJoinButton({ userId, eventEligibleGroupCount }: Props) {
                   <View style={styles.menuRowText}>
                     <Text style={styles.menuRowTitle}>New poll</Text>
                     <Text style={styles.menuRowSubtitle}>Create a poll for your groups</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.menuRow} onPress={onNewGroup} activeOpacity={0.7}>
+                  <View style={styles.menuRowIcon}>
+                    <Ionicons name="people-outline" size={22} color={Colors.text} />
+                  </View>
+                  <View style={styles.menuRowText}>
+                    <Text style={styles.menuRowTitle}>New group</Text>
+                    <Text style={styles.menuRowSubtitle}>Start a group others can join</Text>
                   </View>
                   <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
                 </TouchableOpacity>

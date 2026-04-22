@@ -118,6 +118,19 @@ type PendingCommentPhoto = {
 
 const COMPOSER_INPUT_MIN_H = 38;
 const COMPOSER_INPUT_MAX_H = 140;
+const IMAGE_URL_RE = /https?:\/\/[^\s)]+?\.(?:png|jpe?g|gif|webp|bmp|heic|heif|avif|svg)(?:\?[^\s)]*)?(?=$|\s)/gi;
+
+function extractImageUrlsFromText(text: string): { cleanedText: string; imageUrls: string[] } {
+  const imageUrls: string[] = [];
+  const cleanedText = text
+    .replace(IMAGE_URL_RE, (url) => {
+      imageUrls.push(url);
+      return ' ';
+    })
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/[ \t]{2,}/g, ' ');
+  return { cleanedText, imageUrls };
+}
 
 /** Must match API soft-delete text when an admin removes someone else's comment */
 const COMMENT_DELETED_BY_ADMIN_MSG = 'This message was deleted by admin';
@@ -887,6 +900,36 @@ export default function EventDetailScreen() {
       void pickCommentPhotoNative();
     }
   }, [currentUserId, pickCommentPhotoNative]);
+
+  const absorbImageUrlsFromCommentText = useCallback(
+    (target: 'composer' | string, text: string): string => {
+      const { cleanedText, imageUrls } = extractImageUrlsFromText(text);
+      if (imageUrls.length === 0) return text;
+
+      if (target === 'composer') {
+        setComposerPendingPhotos((rows) => {
+          const existing = new Set(rows.map((r) => r.uri));
+          const added = imageUrls
+            .filter((url) => !existing.has(url))
+            .map((url) => ({ id: uid(), uri: url, pendingUpload: url as string }));
+          return added.length > 0 ? [...rows, ...added] : rows;
+        });
+      } else {
+        setCommentEditDrafts((prev) => {
+          const d = prev[target];
+          if (!d) return prev;
+          const existing = new Set(d.photos.map((p) => p.uri));
+          const added = imageUrls
+            .filter((url) => !existing.has(url))
+            .map((url) => ({ id: uid(), uri: url, pendingUpload: url as string }));
+          if (added.length === 0) return prev;
+          return { ...prev, [target]: { ...d, photos: [...d.photos, ...added] } };
+        });
+      }
+      return cleanedText;
+    },
+    []
+  );
 
   const openCommentPhotoUrlModal = useCallback((target: 'composer' | string) => {
     commentPhotoTargetRef.current = target;
@@ -1753,10 +1796,11 @@ export default function EventDetailScreen() {
   };
 
   const updateEditDraftText = (commentId: string, text: string) => {
+    const nextText = absorbImageUrlsFromCommentText(commentId, text);
     setCommentEditDrafts((prev) => {
       const d = prev[commentId];
       if (!d) return prev;
-      return { ...prev, [commentId]: { ...d, text } };
+      return { ...prev, [commentId]: { ...d, text: nextText } };
     });
   };
 
@@ -2931,8 +2975,6 @@ export default function EventDetailScreen() {
                       <View style={styles.commentInlineEditToolbar}>
                         <TouchableOpacity
                           onPress={() => onCommentPhotoButtonPress(c.id)}
-                          onLongPress={() => openCommentPhotoUrlModal(c.id)}
-                          delayLongPress={350}
                           style={styles.photoBtn}
                         >
                           <Ionicons name="camera-outline" size={20} color={Colors.textSub} />
@@ -3169,15 +3211,13 @@ export default function EventDetailScreen() {
         <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
           <TouchableOpacity
             onPress={() => onCommentPhotoButtonPress()}
-            onLongPress={() => openCommentPhotoUrlModal('composer')}
-            delayLongPress={350}
             style={styles.photoBtn}
           >
             <Ionicons name="camera-outline" size={20} color={Colors.textSub} />
           </TouchableOpacity>
           <CommentMentionInput
             value={composerInput}
-            onChangeText={setComposerInput}
+            onChangeText={(t) => setComposerInput(absorbImageUrlsFromCommentText('composer', t))}
             members={mentionMembersForInput}
             currentUserId={currentUserId}
             placeholder={isPast ? 'Add a memory or photo… (@ to mention)' : 'Add a comment… (@ to mention)'}

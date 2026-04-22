@@ -26,6 +26,8 @@ export interface PollInput {
   createdBy: string;
   title: string;
   description?: string;
+  /** UTC instant (ISO) after which voting should be considered closed. */
+  deadline: Date | string;
   coverPhotos?: string[];
   options: PollOptionInput[];
   anonymousVotes?: boolean;
@@ -53,8 +55,35 @@ export interface Poll {
   anonymousVotes: boolean;
   multipleChoice: boolean;
   ranking: boolean;
+  /** UTC instant when voting closes. */
+  deadline: string;
   coverPhotos: string[];
   options: PollOption[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface PollVoteInput {
+  userId: string;
+  optionIds: string[];
+}
+
+export interface PollQuestionResult {
+  questionKey: string;
+  questionIndex: number;
+  questionTitle: string;
+  questionType: 'single' | 'multiple' | 'rating';
+  totalVotes: number;
+  options: Array<{
+    optionId: string;
+    label: string;
+    votes: number;
+    pct: number;
+  }>;
+}
+
+export interface PollResults {
+  pollId: string;
+  myOptionIds: string[];
+  questions: PollQuestionResult[];
 }

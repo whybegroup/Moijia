@@ -1,4 +1,12 @@
-import { useState, useEffect, useRef, useMemo, useCallback, type ChangeEvent } from 'react';
+import {
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useMemo,
+  useCallback,
+  type ChangeEvent,
+} from 'react';
 import {
   View,
   Text,
@@ -40,6 +48,56 @@ import {
 } from '../services/pickAndUploadImage';
 import { firstSearchParam, parseReturnToParam, withReturnTo } from '../utils/navigationReturn';
 
+/** Stable snapshot for “dirty?” after URL + default-group hydration. */
+function serializeCreateFormBaseline(
+  f: {
+    title: string;
+    description: string;
+    groupId: string;
+    startDate: string;
+    startTime: string;
+    endDate: string;
+    endTime: string;
+    allDay: boolean;
+    location: string;
+    minAttendees: string;
+    maxAttendees: string;
+    allowMaybe: boolean;
+    enableWaitlist: boolean;
+    coverPhotoDrafts: CoverPhotoDraft[];
+    activityIdeasEnabled: boolean;
+    activityVotesAnonymous: boolean;
+    recurrence: RecurrenceFormState;
+  },
+  activityOptionDrafts: { id: string; label: string }[],
+  newActivityLabel: string
+): string {
+  const coverKey = f.coverPhotoDrafts
+    .map((d) => (d.kind === 'remote' ? `r:${d.url}` : `p:${d.previewUri}`))
+    .join('\n');
+  return JSON.stringify({
+    title: f.title,
+    description: f.description,
+    groupId: f.groupId,
+    startDate: f.startDate,
+    startTime: f.startTime,
+    endDate: f.endDate,
+    endTime: f.endTime,
+    allDay: f.allDay,
+    location: f.location,
+    minAttendees: f.minAttendees,
+    maxAttendees: f.maxAttendees,
+    allowMaybe: f.allowMaybe,
+    enableWaitlist: f.enableWaitlist,
+    coverKey,
+    activityIdeasEnabled: f.activityIdeasEnabled,
+    activityVotesAnonymous: f.activityVotesAnonymous,
+    recurrence: f.recurrence,
+    activityOptionDrafts,
+    newActivityLabel,
+  });
+}
+
 function webEventTimeInputStyle(errored: boolean): Record<string, string | number> {
   return {
     padding: '6px 10px',
@@ -69,7 +127,7 @@ export default function CreateEventScreen() {
   );
   const { userId: currentUserId } = useCurrentUserContext();
   const today = formatLocalDateInput(new Date());
-  const { data: groups = [] } = useGroups(currentUserId ?? '');
+  const { data: groups = [], isFetched: groupsIsFetched } = useGroups(currentUserId ?? '');
   const { data: groupColors = {} } = useAllGroupMemberColors(currentUserId || '');
   const createEventMutation = useCreateEvent(currentUserId ?? '');
 
@@ -96,6 +154,7 @@ export default function CreateEventScreen() {
 
   const [activityOptionDrafts, setActivityOptionDrafts] = useState<{ id: string; label: string }[]>([]);
   const [newActivityLabel, setNewActivityLabel] = useState('');
+  const [createFormBaselineSerialized, setCreateFormBaselineSerialized] = useState<string | null>(null);
 
   useEffect(() => {
     if (eventEligibleGroups.length > 0 && !form.groupId) {
@@ -178,29 +237,12 @@ export default function CreateEventScreen() {
     !errors.endTime;
 
   const createFormDirty = useMemo(() => {
-    const recurrenceDirty =
-      JSON.stringify(form.recurrence) !== JSON.stringify(defaultRecurrenceFormState());
-    return !!(
-      form.title.trim() ||
-      form.description.trim() ||
-      form.location.trim() ||
-      form.groupId.trim() ||
-      form.startDate !== today ||
-      form.startTime !== '19:00' ||
-      form.endDate !== today ||
-      form.endTime !== '21:00' ||
-      form.allDay ||
-      form.minAttendees.trim() !== '1' ||
-      form.maxAttendees.trim() ||
-      form.allowMaybe ||
-      form.enableWaitlist ||
-      form.coverPhotoDrafts.length > 0 ||
-      form.activityIdeasEnabled ||
-      form.activityVotesAnonymous ||
-      activityOptionDrafts.length > 0 ||
-      recurrenceDirty
+    if (createFormBaselineSerialized == null) return false;
+    return (
+      serializeCreateFormBaseline(form, activityOptionDrafts, newActivityLabel) !==
+      createFormBaselineSerialized
     );
-  }, [form, activityOptionDrafts.length, today]);
+  }, [createFormBaselineSerialized, form, activityOptionDrafts, newActivityLabel]);
 
   const timeFieldsComplete =
     !!form.startDate?.trim() &&
@@ -508,10 +550,14 @@ export default function CreateEventScreen() {
     const rawE = calendarParams.end;
     const sStr = typeof rawS === 'string' ? rawS : Array.isArray(rawS) ? rawS[0] : undefined;
     const eStr = typeof rawE === 'string' ? rawE : Array.isArray(rawE) ? rawE[0] : undefined;
-    if (!sStr || !eStr) return;
+    if (!sStr || !eStr) {
+      calendarPresetAppliedRef.current = true;
+      return;
+    }
     const start = new Date(sStr);
     const end = new Date(eStr);
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end.getTime() <= start.getTime()) {
+      calendarPresetAppliedRef.current = true;
       return;
     }
     calendarPresetAppliedRef.current = true;
@@ -536,6 +582,29 @@ export default function CreateEventScreen() {
       endTime: '',
     }));
   }, [calendarParams.start, calendarParams.end]);
+
+  const calStartStr = firstSearchParam(calendarParams.start);
+  const calEndStr = firstSearchParam(calendarParams.end);
+  const hasCalendarTimePreset = !!(calStartStr && calEndStr);
+  const calendarPresetHydrated = !hasCalendarTimePreset || calendarPresetAppliedRef.current;
+  const groupsDataReady = !currentUserId || groupsIsFetched;
+  const groupSelectHydrated =
+    !groupsDataReady ? false : eventEligibleGroups.length === 0 ? true : !!form.groupId;
+
+  useLayoutEffect(() => {
+    if (createFormBaselineSerialized != null) return;
+    if (!calendarPresetHydrated || !groupSelectHydrated) return;
+    setCreateFormBaselineSerialized(
+      serializeCreateFormBaseline(form, activityOptionDrafts, newActivityLabel)
+    );
+  }, [
+    createFormBaselineSerialized,
+    calendarPresetHydrated,
+    groupSelectHydrated,
+    form,
+    activityOptionDrafts,
+    newActivityLabel,
+  ]);
 
   const dismiss = useCallback(() => {
     if (router.canGoBack()) {

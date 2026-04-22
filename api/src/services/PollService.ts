@@ -1,6 +1,14 @@
 import { PrismaClient } from '@prisma/client';
 import { randomUUID } from 'crypto';
-import type { Poll, PollInput, PollOption, PollOptionInput, PollTextFont } from '../models';
+import type {
+  Poll,
+  PollInput,
+  PollOption,
+  PollOptionInput,
+  PollQuestionResult,
+  PollResults,
+  PollTextFont,
+} from '../models';
 
 const prisma = new PrismaClient();
 
@@ -45,6 +53,37 @@ function fontFamilyCss(f: PollTextFont): string {
 function parseFont(v: string | undefined): PollTextFont {
   if (v === 'serif' || v === 'mono') return v;
   return 'sans';
+}
+
+type ParsedQuestionMeta = {
+  questionKey: string;
+  questionIndex: number;
+  questionTitle: string;
+  questionType: 'single' | 'multiple' | 'rating';
+  optionLabel: string;
+};
+
+function parseQuestionMetaFromOptionText(text: string): ParsedQuestionMeta | null {
+  const re = /^Q(\d+):\s*(.*?)\s*\[(.*?)\]\s*-\s*(.*)$/i;
+  const m = text.match(re);
+  if (!m) return null;
+  const idx = Number(m[1]);
+  const title = m[2].trim();
+  const rawType = m[3].trim().toLowerCase();
+  const optionLabel = m[4].trim();
+  const questionType =
+    rawType.includes('rating')
+      ? 'rating'
+      : rawType.includes('multiple')
+        ? 'multiple'
+        : 'single';
+  return {
+    questionKey: `q-${idx}`,
+    questionIndex: idx,
+    questionTitle: title || `Question ${idx}`,
+    questionType,
+    optionLabel: optionLabel || 'Option',
+  };
 }
 
 export class PollService {
@@ -102,6 +141,7 @@ export class PollService {
     updatedBy: string;
     title: string;
     description: string | null;
+    deadline: Date | null;
     anonymousVotes: boolean;
     multipleChoice: boolean;
     ranking: boolean;
@@ -129,6 +169,7 @@ export class PollService {
       anonymousVotes: row.anonymousVotes,
       multipleChoice: row.multipleChoice,
       ranking: row.ranking,
+      deadline: (row.deadline ?? row.createdAt).toISOString(),
       coverPhotos: row.photos.map((p) => p.photoUrl),
       options: opts,
       createdAt: row.createdAt.toISOString(),
@@ -202,6 +243,7 @@ export class PollService {
       createdBy,
       title,
       description,
+      deadline,
       coverPhotos = [],
       options,
       anonymousVotes,
@@ -216,6 +258,12 @@ export class PollService {
     }
 
     const optionRows = this.validateOptions(options ?? []);
+    const deadlineDt = new Date(String(deadline ?? ''));
+    if (!Number.isFinite(deadlineDt.getTime())) {
+      throw Object.assign(new Error('Poll deadline is required and must be a valid datetime'), {
+        status: 400,
+      });
+    }
     const pollId = clientId?.trim() || randomUUID();
     const photoRows = coverPhotos.map((photoUrl) => ({ photoUrl }));
 
@@ -227,6 +275,7 @@ export class PollService {
         updatedBy: createdBy,
         title: t,
         description: description?.trim() ? description.trim() : null,
+        deadline: deadlineDt,
         anonymousVotes: !!anonymousVotes,
         multipleChoice: !!multipleChoice,
         ranking: !!ranking,
@@ -262,5 +311,134 @@ export class PollService {
     if (!row) return null;
     if (!(await this.userCanAccessPoll(row, userId))) return null;
     return this.mapPoll(row);
+  }
+
+  public async listForUser(userId: string): Promise<Poll[]> {
+    const memberships = await prisma.groupMember.findMany({
+      where: { userId, status: 'active' },
+      select: { groupId: true },
+    });
+    const groupIds = memberships.map((m) => m.groupId);
+    if (groupIds.length === 0) return [];
+
+    const rows = await prisma.poll.findMany({
+      where: { groupId: { in: groupIds } },
+      include: {
+        photos: { orderBy: { id: 'asc' } },
+        options: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    return rows.map((row) => this.mapPoll(row));
+  }
+
+  public async submitVote(pollId: string, userId: string, optionIds: string[]): Promise<PollResults> {
+    if (!Array.isArray(optionIds)) {
+      throw Object.assign(new Error('optionIds must be an array'), { status: 400 });
+    }
+    const poll = await prisma.poll.findUnique({
+      where: { id: pollId },
+      include: { options: true },
+    });
+    if (!poll) throw Object.assign(new Error('Poll not found'), { status: 404 });
+    if (!(await this.userCanAccessPoll(poll, userId))) {
+      throw Object.assign(new Error('Forbidden'), { status: 403 });
+    }
+    const now = Date.now();
+    const deadlineMs = poll.deadline?.getTime() ?? Number.NaN;
+    if (Number.isFinite(deadlineMs) && now > deadlineMs) {
+      throw Object.assign(new Error('Poll deadline has passed'), { status: 400 });
+    }
+
+    const optionIdSet = new Set(poll.options.map((o) => o.id));
+    const picked = optionIds.filter((id) => optionIdSet.has(id));
+
+    const byQuestion = new Map<
+      string,
+      { type: 'single' | 'multiple' | 'rating'; optionIds: string[] }
+    >();
+    for (const o of poll.options) {
+      const text = o.textHtml?.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() ?? '';
+      const meta = parseQuestionMetaFromOptionText(text);
+      const key = meta?.questionKey ?? 'q-1';
+      const type = meta?.questionType ?? 'single';
+      if (!byQuestion.has(key)) byQuestion.set(key, { type, optionIds: [] });
+      byQuestion.get(key)!.optionIds.push(o.id);
+    }
+
+    for (const [, q] of byQuestion) {
+      const qPicked = picked.filter((id) => q.optionIds.includes(id));
+      if (q.type === 'single' && qPicked.length > 1) {
+        throw Object.assign(new Error('Single choice questions allow only one option'), { status: 400 });
+      }
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.pollOptionVote.deleteMany({ where: { pollId, userId } });
+      if (picked.length > 0) {
+        await tx.pollOptionVote.createMany({
+          data: picked.map((pollOptionId) => ({
+            id: randomUUID(),
+            pollId,
+            pollOptionId,
+            userId,
+          })),
+        });
+      }
+    });
+
+    return this.getResults(pollId, userId);
+  }
+
+  public async getResults(pollId: string, userId: string): Promise<PollResults> {
+    const poll = await prisma.poll.findUnique({
+      where: { id: pollId },
+      include: {
+        options: true,
+        votes: true,
+      },
+    });
+    if (!poll) throw Object.assign(new Error('Poll not found'), { status: 404 });
+    if (!(await this.userCanAccessPoll(poll, userId))) {
+      throw Object.assign(new Error('Forbidden'), { status: 403 });
+    }
+
+    const myOptionIds = poll.votes.filter((v) => v.userId === userId).map((v) => v.pollOptionId);
+
+    const grouped = new Map<string, PollQuestionResult>();
+    for (const o of poll.options.slice().sort((a, b) => a.sortOrder - b.sortOrder)) {
+      const text = o.textHtml?.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() ?? '';
+      const meta = parseQuestionMetaFromOptionText(text);
+      const key = meta?.questionKey ?? 'q-1';
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          questionKey: key,
+          questionIndex: meta?.questionIndex ?? 1,
+          questionTitle: meta?.questionTitle ?? poll.title,
+          questionType: meta?.questionType ?? 'single',
+          totalVotes: 0,
+          options: [],
+        });
+      }
+      const votes = poll.votes.filter((v) => v.pollOptionId === o.id).length;
+      grouped.get(key)!.options.push({
+        optionId: o.id,
+        label: meta?.optionLabel ?? (text || 'Option'),
+        votes,
+        pct: 0,
+      });
+    }
+
+    const questions = Array.from(grouped.values()).sort((a, b) => a.questionIndex - b.questionIndex);
+    for (const q of questions) {
+      const total = q.options.reduce((n, o) => n + o.votes, 0);
+      q.totalVotes = total;
+      q.options = q.options.map((o) => ({
+        ...o,
+        pct: total > 0 ? Math.round((o.votes / total) * 100) : 0,
+      }));
+    }
+
+    return { pollId, myOptionIds, questions };
   }
 }

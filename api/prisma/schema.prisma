@@ -36,6 +36,7 @@ model User {
   authoredTimeSuggestions EventTimeSuggestion[] @relation("TimeSuggestionAuthor")
   createdActivityOptions  EventActivityOption[] @relation("ActivityOptionAuthor")
   createdPolls            Poll[]               @relation("PollCreator")
+  pollOptionVotes         PollOptionVote[]
 
   @@map("users")
 }
@@ -307,6 +308,8 @@ model Poll {
   updatedBy        String
   title            String
   description      String?
+  /// UTC instant when voting closes.
+  deadline         DateTime?
   anonymousVotes   Boolean  @default(false)
   multipleChoice   Boolean  @default(false)
   ranking          Boolean  @default(false)
@@ -317,6 +320,7 @@ model Poll {
   creator User         @relation("PollCreator", fields: [createdBy], references: [id])
   photos  PollPhoto[]
   options PollOption[]
+  votes   PollOptionVote[]
 
   @@map("polls")
 }
@@ -348,9 +352,27 @@ model PollOption {
   dateTimeValue DateTime?
 
   poll Poll @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  votes PollOptionVote[]
 
   @@index([pollId])
   @@map("poll_options")
+}
+
+model PollOptionVote {
+  id           String   @id @default(uuid())
+  pollId       String
+  pollOptionId String
+  userId       String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  poll   Poll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  option PollOption @relation(fields: [pollOptionId], references: [id], onDelete: Cascade)
+  user   User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([pollId, userId])
+  @@unique([pollId, pollOptionId, userId])
+  @@map("poll_option_votes")
 }
 
 // ============================================

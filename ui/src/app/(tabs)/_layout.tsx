@@ -105,6 +105,24 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="polls"
+        options={{
+          title: 'Polls',
+          tabBarIcon: ({ focused }) => (
+            <TabBarGlyph
+              focused={focused}
+              iconNode={
+                <Ionicons
+                  name="bar-chart-outline"
+                  size={20}
+                  color={focused ? Colors.text : Colors.textMuted}
+                />
+              }
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="groups"
         options={{
           title: 'Groups',

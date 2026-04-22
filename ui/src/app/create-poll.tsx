@@ -1,4 +1,12 @@
-import { useState, useEffect, useRef, useMemo, useCallback, type ChangeEvent } from 'react';
+import {
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useMemo,
+  useCallback,
+  type ChangeEvent,
+} from 'react';
 import {
   View,
   Text,
@@ -14,7 +22,7 @@ import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter, useLocalSearchParams, type Href } from 'expo-router';
 import Toast from 'react-native-toast-message';
-import { PollOptionInputKind, PollTextFont, type PollInput } from '@moijia/client';
+import { PollOptionInputKind, type PollInput } from '@moijia/client';
 import { Colors, Fonts, Radius } from '../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName, formatLocalDateInput } from '../utils/helpers';
 import { localWallDateTimeToUtcIso } from '../utils/datetimeUtc';
@@ -32,8 +40,7 @@ import {
   coverPhotoDraftDisplayUri,
   type CoverPhotoDraft,
 } from '../services/pickAndUploadImage';
-import { firstSearchParam, parseReturnToParam, withReturnTo } from '../utils/navigationReturn';
-import { PollRichTextInput } from '../components/PollRichTextInput';
+import { firstSearchParam, parseReturnToParam } from '../utils/navigationReturn';
 
 function webPollDatetimeInputStyle(): Record<string, string | number> {
   return {
@@ -51,29 +58,65 @@ function webPollDatetimeInputStyle(): Record<string, string | number> {
   };
 }
 
-type OptionDraft = {
+type QuestionType = 'choice' | 'rating';
+
+type QuestionDraft = {
   id: string;
-  inputKind: PollOptionInputKind;
-  textFont: PollTextFont;
-  textBody: string;
-  date: string;
-  time: string;
+  title: string;
+  options: string[];
+  multipleChoice: boolean;
+  type: QuestionType;
 };
 
-function newOptionDraft(): OptionDraft {
+function newQuestionDraft(): QuestionDraft {
   return {
     id: uid(),
-    inputKind: PollOptionInputKind.TEXT,
-    textFont: PollTextFont.SANS,
-    textBody: '',
-    date: formatLocalDateInput(new Date()),
-    time: '12:00',
+    title: '',
+    options: ['', ''],
+    multipleChoice: false,
+    type: 'choice',
   };
 }
 
 function stripForLength(s: string): number {
   const t = s.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
   return t.length;
+}
+
+function serializeCreatePollDraft(args: {
+  form: {
+    title: string;
+    description: string;
+    groupId: string;
+    coverPhotoDrafts: CoverPhotoDraft[];
+    anonymousVotes: boolean;
+    multipleChoice: boolean;
+    ranking: boolean;
+  };
+  questionDrafts: QuestionDraft[];
+  deadlineDate: string;
+  deadlineTime: string;
+}): string {
+  const { form, questionDrafts, deadlineDate, deadlineTime } = args;
+  return JSON.stringify({
+    title: form.title,
+    description: form.description,
+    groupId: form.groupId,
+    coverPhotos: form.coverPhotoDrafts.map((d) =>
+      d.kind === 'remote' ? `r:${d.url}` : `p:${d.previewUri}`
+    ),
+    anonymousVotes: form.anonymousVotes,
+    multipleChoice: form.multipleChoice,
+    ranking: form.ranking,
+    deadlineDate,
+    deadlineTime,
+    questions: questionDrafts.map((q) => ({
+      title: q.title,
+      options: q.options,
+      multipleChoice: q.multipleChoice,
+      type: q.type,
+    })),
+  });
 }
 
 export default function CreatePollScreen() {
@@ -84,7 +127,7 @@ export default function CreatePollScreen() {
     [params.returnTo],
   );
   const { userId: currentUserId } = useCurrentUserContext();
-  const { data: groups = [] } = useGroups(currentUserId ?? '');
+  const { data: groups = [], isFetched: groupsIsFetched } = useGroups(currentUserId ?? '');
   const { data: groupColors = {} } = useAllGroupMemberColors(currentUserId || '');
   const createPollMutation = useCreatePoll(currentUserId ?? '');
 
@@ -97,19 +140,35 @@ export default function CreatePollScreen() {
     multipleChoice: false,
     ranking: false,
   });
-  const [optionDrafts, setOptionDrafts] = useState<OptionDraft[]>(() => [newOptionDraft(), newOptionDraft()]);
+  const [questionDrafts, setQuestionDrafts] = useState<QuestionDraft[]>(() => [newQuestionDraft()]);
   const [coverPhotoBusy, setCoverPhotoBusy] = useState(false);
-  const [pickerFor, setPickerFor] = useState<{ optionId: string; mode: 'date' | 'time' } | null>(null);
+  const [deadlineDate, setDeadlineDate] = useState(() => formatLocalDateInput(new Date()));
+  const [deadlineTime, setDeadlineTime] = useState('23:59');
+  const [showDeadlineDatePicker, setShowDeadlineDatePicker] = useState(false);
+  const [showDeadlineTimePicker, setShowDeadlineTimePicker] = useState(false);
+  const [createPollBaselineSerialized, setCreatePollBaselineSerialized] = useState<string | null>(null);
 
-  const eventEligibleGroups = groups.filter(
+  const joinedGroups = groups.filter(
+    (g) =>
+      g.membershipStatus === 'member' ||
+      g.membershipStatus === 'admin' ||
+      g.membershipStatus === 'pending',
+  );
+  const eventEligibleGroups = joinedGroups.filter(
     (g) => g.membershipStatus === 'member' || g.membershipStatus === 'admin',
   );
+  const selectedGroup = joinedGroups.find((g) => g.id === form.groupId);
+  const selectedGroupEligible =
+    selectedGroup?.membershipStatus === 'member' || selectedGroup?.membershipStatus === 'admin';
 
   useEffect(() => {
-    if (eventEligibleGroups.length > 0 && !form.groupId) {
-      setForm((p) => ({ ...p, groupId: eventEligibleGroups[0]!.id }));
+    if (joinedGroups.length > 0 && !form.groupId) {
+      const firstEligible = joinedGroups.find(
+        (g) => g.membershipStatus === 'member' || g.membershipStatus === 'admin',
+      );
+      setForm((p) => ({ ...p, groupId: (firstEligible ?? joinedGroups[0])!.id }));
     }
-  }, [eventEligibleGroups, form.groupId]);
+  }, [joinedGroups, form.groupId]);
 
   const set = (k: string, v: unknown) => setForm((p) => ({ ...p, [k]: v }));
 
@@ -162,33 +221,69 @@ export default function CreatePollScreen() {
     });
   };
 
-  const updateOption = (id: string, patch: Partial<OptionDraft>) => {
-    setOptionDrafts((rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  const updateQuestion = (id: string, patch: Partial<QuestionDraft>) => {
+    setQuestionDrafts((rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   };
-
-  const addOption = () => setOptionDrafts((rows) => [...rows, newOptionDraft()]);
-
-  const removeOption = (id: string) => {
-    setOptionDrafts((rows) => (rows.length <= 2 ? rows : rows.filter((r) => r.id !== id)));
+  const updateQuestionTitle = (id: string, title: string) => updateQuestion(id, { title });
+  const addQuestion = () => setQuestionDrafts((rows) => [...rows, newQuestionDraft()]);
+  const removeQuestion = (id: string) => {
+    setQuestionDrafts((rows) => (rows.length <= 1 ? rows : rows.filter((r) => r.id !== id)));
+  };
+  const addQuestionOption = (id: string) => {
+    setQuestionDrafts((rows) =>
+      rows.map((q) => (q.id === id ? { ...q, options: [...q.options, ''] } : q))
+    );
+  };
+  const updateQuestionOption = (id: string, idx: number, value: string) => {
+    setQuestionDrafts((rows) =>
+      rows.map((q) =>
+        q.id === id
+          ? { ...q, options: q.options.map((opt, i) => (i === idx ? value : opt)) }
+          : q
+      )
+    );
+  };
+  const removeQuestionOption = (id: string, idx: number) => {
+    setQuestionDrafts((rows) =>
+      rows.map((q) =>
+        q.id === id && q.options.length > 2
+          ? { ...q, options: q.options.filter((_, i) => i !== idx) }
+          : q
+      )
+    );
   };
 
   const optionsValid = useMemo(
     () =>
-      optionDrafts.every((o) => {
-        if (o.inputKind === PollOptionInputKind.DATETIME) {
-          return !!(o.date?.trim() && o.time?.trim());
-        }
-        return stripForLength(o.textBody) > 0;
+      questionDrafts.every((q) => {
+        const titleOk = q.title.trim().length > 0;
+        const validOptions = q.options.filter((o) => stripForLength(o) > 0);
+        return titleOk && validOptions.length >= 2;
       }),
-    [optionDrafts],
+    [questionDrafts],
   );
+  const hasDeadlineOption = !!(deadlineDate.trim() && deadlineTime.trim());
 
   const ok =
     !!form.title.trim() &&
     !!form.groupId &&
-    optionDrafts.length >= 2 &&
+    !!selectedGroupEligible &&
+    questionDrafts.length >= 1 &&
     optionsValid &&
+    hasDeadlineOption &&
     !!currentUserId;
+
+  const createPollDirty = useMemo(() => {
+    if (createPollBaselineSerialized == null) return false;
+    return (
+      serializeCreatePollDraft({
+        form,
+        questionDrafts,
+        deadlineDate,
+        deadlineTime,
+      }) !== createPollBaselineSerialized
+    );
+  }, [createPollBaselineSerialized, form, questionDrafts, deadlineDate, deadlineTime]);
 
   const dismiss = useCallback(() => {
     if (router.canGoBack()) {
@@ -199,11 +294,58 @@ export default function CreatePollScreen() {
       router.replace(createReturnTo as Href);
       return;
     }
-    router.replace('/(tabs)/events');
+    router.replace('/(tabs)/polls');
   }, [router, createReturnTo]);
+
+  const groupsDataReady = !currentUserId || groupsIsFetched;
+  const groupSelectHydrated = !groupsDataReady ? false : joinedGroups.length === 0 ? true : !!form.groupId;
+
+  useLayoutEffect(() => {
+    if (createPollBaselineSerialized != null) return;
+    if (!groupSelectHydrated) return;
+    setCreatePollBaselineSerialized(
+      serializeCreatePollDraft({
+        form,
+        questionDrafts,
+        deadlineDate,
+        deadlineTime,
+      })
+    );
+  }, [
+    createPollBaselineSerialized,
+    groupSelectHydrated,
+    form,
+    questionDrafts,
+    deadlineDate,
+    deadlineTime,
+  ]);
+
+  const requestClose = useCallback(() => {
+    if (!createPollDirty) {
+      dismiss();
+      return;
+    }
+    const message = 'Discard your changes?';
+    if (Platform.OS === 'web') {
+      if (window.confirm(message)) dismiss();
+      return;
+    }
+    Alert.alert('Discard changes?', message, [
+      { text: 'Keep editing', style: 'cancel' },
+      { text: 'Discard', style: 'destructive', onPress: dismiss },
+    ]);
+  }, [createPollDirty, dismiss]);
 
   const submit = async () => {
     if (!ok || !currentUserId) return;
+    if (!selectedGroupEligible) {
+      Alert.alert('Group not eligible', 'You can create polls only in groups you actively joined.');
+      return;
+    }
+    if (!hasDeadlineOption) {
+      Alert.alert('Deadline required', 'Set a valid deadline date and time.');
+      return;
+    }
     let coverPhotos: string[] = [];
     if (form.coverPhotoDrafts.length > 0) {
       try {
@@ -214,22 +356,16 @@ export default function CreatePollScreen() {
       }
     }
 
-    const options = optionDrafts.map((o, i) => {
-      if (o.inputKind === PollOptionInputKind.DATETIME) {
-        return {
-          id: o.id,
-          inputKind: PollOptionInputKind.DATETIME,
-          sortOrder: i,
-          dateTimeValue: localWallDateTimeToUtcIso(o.date, o.time),
-        };
-      }
-      return {
-        id: o.id,
+    const options = questionDrafts.flatMap((q, qi) => {
+      const typeLabel =
+        q.type === 'rating' ? 'Rating' : q.multipleChoice ? 'Multiple choice' : 'Single choice';
+      const cleanOptions = q.options.map((o) => o.trim()).filter((o) => o.length > 0);
+      return cleanOptions.map((opt, oi) => ({
+        id: uid(),
         inputKind: PollOptionInputKind.TEXT,
-        sortOrder: i,
-        textHtml: o.textBody.trim(),
-        textFont: o.textFont,
-      };
+        sortOrder: qi * 1000 + oi,
+        textHtml: `Q${qi + 1}: ${q.title.trim()} [${typeLabel}] - ${opt}`,
+      }));
     });
 
     const body: PollInput = {
@@ -238,6 +374,7 @@ export default function CreatePollScreen() {
       createdBy: currentUserId,
       title: form.title.trim(),
       description: form.description.trim() || undefined,
+      deadline: localWallDateTimeToUtcIso(deadlineDate, deadlineTime),
       coverPhotos,
       options,
       anonymousVotes: form.anonymousVotes,
@@ -246,9 +383,9 @@ export default function CreatePollScreen() {
     };
 
     try {
-      const created = await createPollMutation.mutateAsync(body);
+      await createPollMutation.mutateAsync(body);
       Toast.show({ type: 'success', text1: 'Poll created' });
-      router.replace(withReturnTo(`/poll/${created.id}`, createReturnTo));
+      router.replace('/(tabs)/polls');
     } catch (e: unknown) {
       const msg =
         e && typeof e === 'object' && 'body' in e
@@ -259,11 +396,11 @@ export default function CreatePollScreen() {
   };
 
   return (
-    <EventFormPopoverChrome onClose={dismiss}>
+    <EventFormPopoverChrome onClose={requestClose}>
       <View style={styles.inner}>
         <NavBar
           title="New Poll"
-          onClose={dismiss}
+          onClose={requestClose}
           right={
             <TouchableOpacity
               onPress={() => void submit()}
@@ -286,23 +423,32 @@ export default function CreatePollScreen() {
         >
           <Field label="Group" required>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-              {eventEligibleGroups.map((g) => {
+              {joinedGroups.map((g) => {
                 const userColorHex = groupColors[g.id] || getDefaultGroupThemeFromName(g.name);
                 const p = getGroupColor(userColorHex);
                 const sel = form.groupId === g.id;
+                const pending = g.membershipStatus === 'pending';
                 return (
                   <TouchableOpacity
                     key={g.id}
                     onPress={() => set('groupId', g.id)}
-                    style={[styles.groupChip, sel && { borderColor: p.dot, backgroundColor: p.row }]}
+                    style={[
+                      styles.groupChip,
+                      sel && { borderColor: p.dot, backgroundColor: p.row },
+                      pending && styles.groupChipPending,
+                    ]}
                   >
                     <Text style={[styles.chipText, sel && { color: p.text, fontFamily: Fonts.semiBold }]}>
                       {g.name}
+                      {pending ? ' (Pending)' : ''}
                     </Text>
                   </TouchableOpacity>
                 );
               })}
             </ScrollView>
+            {!selectedGroupEligible && selectedGroup ? (
+              <Text style={styles.deadlineHint}>Pending groups cannot create polls yet.</Text>
+            ) : null}
           </Field>
 
           <Field label="Poll title" required>
@@ -329,6 +475,86 @@ export default function CreatePollScreen() {
               />
               <Text style={styles.descCount}>{form.description.length}/500</Text>
             </View>
+          </Field>
+
+          <Field label="Deadline" required>
+            {Platform.OS === 'web' ? (
+              <View style={styles.deadlineWebRow}>
+                <input
+                  type="date"
+                  value={deadlineDate}
+                  onChange={(e) => setDeadlineDate((e.target.value || '').trim())}
+                  style={webPollDatetimeInputStyle()}
+                />
+                <input
+                  type="time"
+                  value={deadlineTime}
+                  onChange={(e) => setDeadlineTime((e.target.value || '').trim())}
+                  style={webPollDatetimeInputStyle()}
+                />
+              </View>
+            ) : (
+              <View style={styles.dtRow}>
+                <TouchableOpacity
+                  onPress={() => setShowDeadlineDatePicker(true)}
+                  style={styles.dtTouch}
+                >
+                  <Text style={styles.dtLabel}>Date</Text>
+                  <Text style={styles.dtValue}>{deadlineDate || 'Select'}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setShowDeadlineTimePicker(true)}
+                  style={styles.dtTouch}
+                >
+                  <Text style={styles.dtLabel}>Time</Text>
+                  <Text style={styles.dtValue}>{deadlineTime || 'Select'}</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+            {Platform.OS !== 'web' && showDeadlineDatePicker ? (
+              <DateTimePicker
+                value={deadlineDate ? new Date(`${deadlineDate}T12:00:00`) : new Date()}
+                mode="date"
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                onChange={(_, d) => {
+                  if (Platform.OS === 'android') setShowDeadlineDatePicker(false);
+                  if (d) setDeadlineDate(formatLocalDateInput(d));
+                }}
+              />
+            ) : null}
+            {Platform.OS !== 'web' && showDeadlineTimePicker ? (
+              <DateTimePicker
+                value={(() => {
+                  const [h, m] = deadlineTime.split(':').map(Number);
+                  const x = new Date();
+                  x.setHours(h || 0, m || 0, 0, 0);
+                  return x;
+                })()}
+                mode="time"
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                onChange={(_, d) => {
+                  if (Platform.OS === 'android') setShowDeadlineTimePicker(false);
+                  if (d) {
+                    const hh = String(d.getHours()).padStart(2, '0');
+                    const mm = String(d.getMinutes()).padStart(2, '0');
+                    setDeadlineTime(`${hh}:${mm}`);
+                  }
+                }}
+              />
+            ) : null}
+            {Platform.OS === 'ios' && (showDeadlineDatePicker || showDeadlineTimePicker) ? (
+              <View style={styles.pickerDoneRow}>
+                <TouchableOpacity
+                  onPress={() => {
+                    setShowDeadlineDatePicker(false);
+                    setShowDeadlineTimePicker(false);
+                  }}
+                  style={styles.pickerDoneBtn}
+                >
+                  <Text style={styles.pickerDoneText}>Done</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
           </Field>
 
           <View style={styles.photosSection}>
@@ -387,48 +613,37 @@ export default function CreatePollScreen() {
             </View>
           </View>
 
-          <Field label="Poll options" required>
-            <Text style={styles.optionsHint}>Add at least two choices. Each can be formatted text or a date and time.</Text>
-            {optionDrafts.map((o, index) => (
-              <View key={o.id} style={styles.optionCard}>
+          <Field label="Questions" required>
+            <Text style={styles.optionsHint}>
+              Add question blocks. Each question needs at least 2 text options.
+            </Text>
+            {questionDrafts.map((q, qIndex) => (
+              <View key={q.id} style={styles.optionCard}>
                 <View style={styles.optionHeader}>
-                  <Text style={styles.optionIndex}>Option {index + 1}</Text>
+                  <Text style={styles.optionIndex}>Question {qIndex + 1}</Text>
                   <View style={styles.kindChips}>
                     <TouchableOpacity
-                      onPress={() => updateOption(o.id, { inputKind: PollOptionInputKind.TEXT })}
-                      style={[
-                        styles.kindChip,
-                        o.inputKind === PollOptionInputKind.TEXT && styles.kindChipOn,
-                      ]}
+                      onPress={() => updateQuestion(q.id, { type: 'choice' })}
+                      style={[styles.kindChip, q.type === 'choice' && styles.kindChipOn]}
                     >
-                      <Text
-                        style={[
-                          styles.kindChipText,
-                          o.inputKind === PollOptionInputKind.TEXT && styles.kindChipTextOn,
-                        ]}
-                      >
-                        Text
+                      <Text style={[styles.kindChipText, q.type === 'choice' && styles.kindChipTextOn]}>
+                        Choice
                       </Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      onPress={() => updateOption(o.id, { inputKind: PollOptionInputKind.DATETIME })}
-                      style={[
-                        styles.kindChip,
-                        o.inputKind === PollOptionInputKind.DATETIME && styles.kindChipOn,
-                      ]}
+                      onPress={() => updateQuestion(q.id, { type: 'rating' })}
+                      style={[styles.kindChip, q.type === 'rating' && styles.kindChipOn]}
                     >
-                      <Text
-                        style={[
-                          styles.kindChipText,
-                          o.inputKind === PollOptionInputKind.DATETIME && styles.kindChipTextOn,
-                        ]}
-                      >
-                        Date & time
+                      <Text style={[styles.kindChipText, q.type === 'rating' && styles.kindChipTextOn]}>
+                        Rating
                       </Text>
                     </TouchableOpacity>
                   </View>
-                  {optionDrafts.length > 2 ? (
-                    <TouchableOpacity onPress={() => removeOption(o.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  {questionDrafts.length > 1 ? (
+                    <TouchableOpacity
+                      onPress={() => removeQuestion(q.id)}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
                       <Ionicons name="trash-outline" size={20} color={Colors.textMuted} />
                     </TouchableOpacity>
                   ) : (
@@ -436,134 +651,50 @@ export default function CreatePollScreen() {
                   )}
                 </View>
 
-                {o.inputKind === PollOptionInputKind.TEXT ? (
-                  <View>
-                    <View style={styles.fontRow}>
-                      {[
-                        { key: PollTextFont.SANS, label: 'Sans' },
-                        { key: PollTextFont.SERIF, label: 'Serif' },
-                        { key: PollTextFont.MONO, label: 'Mono' },
-                      ].map(({ key, label }) => (
-                        <TouchableOpacity
-                          key={key}
-                          onPress={() => updateOption(o.id, { textFont: key })}
-                          style={[styles.fontChip, o.textFont === key && styles.fontChipOn]}
-                        >
-                          <Text
-                            style={[styles.fontChipText, o.textFont === key && styles.fontChipTextOn]}
-                          >
-                            {label}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                    <PollRichTextInput
-                      value={o.textBody}
-                      onChange={(textBody) => updateOption(o.id, { textBody })}
-                      placeholder="Option label"
-                      textFont={o.textFont}
-                    />
-                  </View>
-                ) : Platform.OS === 'web' ? (
-                  <View style={styles.dtRow}>
-                    <View style={styles.dtTouch}>
-                      <Text style={styles.dtLabel}>Date</Text>
-                      <input
-                        type="date"
-                        value={o.date}
-                        onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                          updateOption(o.id, { date: e.target.value })
-                        }
-                        style={webPollDatetimeInputStyle()}
-                      />
-                    </View>
-                    <View style={styles.dtTouch}>
-                      <Text style={styles.dtLabel}>Time</Text>
-                      <input
-                        type="time"
-                        value={o.time}
-                        onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                          updateOption(o.id, { time: e.target.value })
-                        }
-                        style={webPollDatetimeInputStyle()}
-                      />
-                    </View>
-                  </View>
-                ) : (
-                  <View style={styles.dtRow}>
-                    <TouchableOpacity
-                      onPress={() => setPickerFor({ optionId: o.id, mode: 'date' })}
-                      style={styles.dtTouch}
-                    >
-                      <Text style={styles.dtLabel}>Date</Text>
-                      <Text style={styles.dtValue}>{o.date || 'Select'}</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => setPickerFor({ optionId: o.id, mode: 'time' })}
-                      style={styles.dtTouch}
-                    >
-                      <Text style={styles.dtLabel}>Time</Text>
-                      <Text style={styles.dtValue}>{o.time || 'Select'}</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
+                <TextInput
+                  value={q.title}
+                  onChangeText={(v) => updateQuestionTitle(q.id, v)}
+                  placeholder="Untitled question"
+                  placeholderTextColor={Colors.textMuted}
+                  style={styles.input}
+                />
+                <View style={{ marginTop: 10 }}>
+                  <Toggle
+                    value={q.multipleChoice}
+                    onChange={(v) => updateQuestion(q.id, { multipleChoice: v })}
+                    label="Enable multiple choice"
+                  />
+                </View>
 
-                {Platform.OS !== 'web' && pickerFor?.optionId === o.id && pickerFor.mode === 'date' ? (
-                  <DateTimePicker
-                    value={o.date ? new Date(`${o.date}T12:00:00`) : new Date()}
-                    mode="date"
-                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                    onChange={(_, d) => {
-                      if (Platform.OS === 'android') setPickerFor(null);
-                      if (d) updateOption(o.id, { date: formatLocalDateInput(d) });
-                    }}
-                  />
-                ) : null}
-                {Platform.OS !== 'web' && pickerFor?.optionId === o.id && pickerFor.mode === 'time' ? (
-                  <DateTimePicker
-                    value={(() => {
-                      const [h, m] = o.time.split(':').map(Number);
-                      const x = new Date();
-                      x.setHours(h || 0, m || 0, 0, 0);
-                      return x;
-                    })()}
-                    mode="time"
-                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                    onChange={(_, d) => {
-                      if (Platform.OS === 'android') setPickerFor(null);
-                      if (d) {
-                        const hh = String(d.getHours()).padStart(2, '0');
-                        const mm = String(d.getMinutes()).padStart(2, '0');
-                        updateOption(o.id, { time: `${hh}:${mm}` });
-                      }
-                    }}
-                  />
-                ) : null}
-                {Platform.OS === 'ios' && pickerFor?.optionId === o.id ? (
-                  <View style={styles.pickerDoneRow}>
-                    <TouchableOpacity onPress={() => setPickerFor(null)} style={styles.pickerDoneBtn}>
-                      <Text style={styles.pickerDoneText}>Done</Text>
-                    </TouchableOpacity>
-                  </View>
-                ) : null}
+                <View style={{ gap: 8, marginTop: 10 }}>
+                  {q.options.map((opt, oi) => (
+                    <View key={`${q.id}-o-${oi}`} style={styles.questionOptionRow}>
+                      <TextInput
+                        value={opt}
+                        onChangeText={(v) => updateQuestionOption(q.id, oi, v)}
+                        placeholder={`Option ${oi + 1}`}
+                        placeholderTextColor={Colors.textMuted}
+                        style={[styles.input, { flex: 1 }]}
+                      />
+                      {q.options.length > 2 ? (
+                        <TouchableOpacity onPress={() => removeQuestionOption(q.id, oi)} style={styles.optionRemoveBtn}>
+                          <Ionicons name="close" size={14} color={Colors.textMuted} />
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                  ))}
+                </View>
+
+                <TouchableOpacity onPress={() => addQuestionOption(q.id)} style={styles.addOptionBtn}>
+                  <Ionicons name="add-circle-outline" size={18} color={Colors.accent} />
+                  <Text style={styles.addOptionText}>Add option</Text>
+                </TouchableOpacity>
               </View>
             ))}
-            <TouchableOpacity onPress={addOption} style={styles.addOptionBtn}>
+            <TouchableOpacity onPress={addQuestion} style={styles.addOptionBtn}>
               <Ionicons name="add-circle-outline" size={20} color={Colors.accent} />
-              <Text style={styles.addOptionText}>Add option</Text>
+              <Text style={styles.addOptionText}>Add question</Text>
             </TouchableOpacity>
-          </Field>
-
-          <Field label="Settings">
-            <View style={styles.settingsCard}>
-              <Toggle value={form.anonymousVotes} onChange={(v) => set('anonymousVotes', v)} label="Anonymous votes" />
-              <Toggle
-                value={form.multipleChoice}
-                onChange={(v) => set('multipleChoice', v)}
-                label="Allow multiple choices"
-              />
-              <Toggle value={form.ranking} onChange={(v) => set('ranking', v)} label="Ranking (ordered preferences)" />
-            </View>
           </Field>
 
           <TouchableOpacity
@@ -606,6 +737,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
     backgroundColor: Colors.surface,
+  },
+  groupChipPending: {
+    opacity: 0.72,
   },
   chipText: { fontSize: 13, color: Colors.textSub, fontFamily: Fonts.regular },
   input: {
@@ -708,6 +842,7 @@ const styles = StyleSheet.create({
   kindChipText: { fontSize: 12, fontFamily: Fonts.medium, color: Colors.textSub },
   kindChipTextOn: { color: Colors.accent, fontFamily: Fonts.semiBold },
   dtRow: { flexDirection: 'row', gap: 10 },
+  deadlineWebRow: { flexDirection: 'row', gap: 10 },
   dtTouch: {
     flex: 1,
     padding: 12,
@@ -732,7 +867,23 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 10,
   },
+  questionOptionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  optionRemoveBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.surface,
+  },
   addOptionText: { fontSize: 15, fontFamily: Fonts.semiBold, color: Colors.accent },
+  deadlineHint: { fontSize: 12, fontFamily: Fonts.medium, color: Colors.notGoing, marginTop: 2 },
   settingsCard: {
     backgroundColor: Colors.surface,
     borderRadius: Radius.xl,

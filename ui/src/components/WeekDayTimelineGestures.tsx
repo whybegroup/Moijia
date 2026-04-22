@@ -64,13 +64,23 @@ type Props = {
   timelineHeight: number;
   onDraftChange: (draft: WeekSlotDraft | null) => void;
   onCommitRange: (start: Date, end: Date) => void;
+  /**
+   * When true (week view), painting a time range requires long-press then drag so the parent
+   * vertical ScrollView can handle normal scrolling. Quick tap still creates a 30‑min slot.
+   */
+  requireLongPressToPaint?: boolean;
 };
+
+const LONG_PRESS_MS = 360;
+/** Fail tap before long-press so pan can activate for press-and-drag ranges. */
+const TAP_MAX_DURATION_MS = 240;
 
 export function WeekDayTimelineGestures({
   day,
   timelineHeight,
   onDraftChange,
   onCommitRange,
+  requireLongPressToPaint = false,
 }: Props) {
   const startYRef = useRef(0);
   const onCommitRef = useRef(onCommitRange);
@@ -135,14 +145,14 @@ export function WeekDayTimelineGestures({
   );
 
   const gesture = useMemo(() => {
-    const tap = Gesture.Tap()
-      .maxDistance(14)
+    const tapBase = Gesture.Tap()
+      .maxDistance(requireLongPressToPaint ? 10 : 14)
       .onEnd((e) => {
         runOnJS(tapEnd)(e.y);
       });
+    const tap = requireLongPressToPaint ? tapBase.maxDuration(TAP_MAX_DURATION_MS) : tapBase;
 
-    const pan = Gesture.Pan()
-      .activeOffsetY([-10, 10])
+    const panBase = Gesture.Pan()
       .failOffsetX([-22, 22])
       .onStart((e) => {
         runOnJS(panBegin)(e.y);
@@ -156,9 +166,14 @@ export function WeekDayTimelineGestures({
       .onFinalize(() => {
         runOnJS(clearDraft)();
       });
+    const pan = requireLongPressToPaint
+      ? panBase.activateAfterLongPress(LONG_PRESS_MS)
+      : panBase.activeOffsetY([-10, 10]);
 
-    return Gesture.Exclusive(pan, tap);
-  }, [tapEnd, panBegin, panMove, panEnd, clearDraft]);
+    // Week: tap first (quick tap = 30 min slot). Long-press then drag paints a range without stealing scroll.
+    // Day: pan on small vertical move (unchanged).
+    return requireLongPressToPaint ? Gesture.Exclusive(tap, pan) : Gesture.Exclusive(pan, tap);
+  }, [tapEnd, panBegin, panMove, panEnd, clearDraft, requireLongPressToPaint]);
 
   return (
     <GestureDetector gesture={gesture}>
