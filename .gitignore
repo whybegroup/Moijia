@@ -15,3 +15,6 @@ secrets/
 # IDE
 .vscode/
 .idea/
+
+ui/ios
+ui/android

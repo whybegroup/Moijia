@@ -40,13 +40,13 @@ module.exports = {
     },
     ios: {
       supportsTablet: false,
-      bundleIdentifier: 'com.whybe.moijia',
+      bundleIdentifier: 'com.moijia.moijia',
     },
     android: {
       adaptiveIcon: {
         backgroundColor: '#FAFAF9',
       },
-      package: 'com.whybe.moijia',
+      package: 'com.moijia.moijia',
       /** Lets bottom sheets / modals shrink above the keyboard instead of covering inputs */
       softwareKeyboardLayoutMode: 'resize',
     },

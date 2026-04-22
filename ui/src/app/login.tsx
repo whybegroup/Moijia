@@ -30,7 +30,7 @@ function nativeGoogleSignInHint(err: unknown): string | undefined {
   if (typeof err !== 'object' || err === null || !('code' in err)) return undefined;
   const c = String((err as { code: unknown }).code);
   if (c === '10') {
-    return 'Google Sign-In (code 10): (1) Put Firebase’s google-services.json in android/app/ (Project settings → download; rebuild). (2) Register SHA-1 from android/app/debug.keystore for com.whybe.moijia (ui: npm run android:signing → :app:signingReport, debug). (3) EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID = Web client ID from the same project. Use an emulator image with Google Play, not AOSP without Play Store.';
+    return 'Google Sign-In (code 10): (1) Put Firebase\'s google-services.json in android/app/ (Project settings → download; rebuild). (2) Register SHA-1 from android/app/debug.keystore for com.moijia.moijia (ui: npm run android:signing → :app:signingReport, debug). (3) EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID = Web client ID from the same project. Use an emulator image with Google Play, not AOSP without Play Store.';
   }
   return undefined;
 }
@@ -117,7 +117,7 @@ export default function LoginScreen() {
       }
       const firebaseGoogle =
         err?.code === 'auth/invalid-credential'
-          ? 'Google sign-in could not be verified. On Android, register the SHA-1 from android/app/debug.keystore in Firebase for com.whybe.moijia, and use the Web client ID in EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID.'
+          ? 'Google sign-in could not be verified. On Android, register the SHA-1 from android/app/debug.keystore in Firebase for com.moijia.moijia, and use the Web client ID in EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID.'
           : undefined;
       showError(
         nativeGoogleSignInHint(err) ??
