@@ -6,7 +6,7 @@ import {
   useEffect,
   type ChangeEvent,
   type ComponentProps,
-  type ElementRef,
+  type ComponentRef,
 } from 'react';
 import {
   View,
@@ -138,13 +138,13 @@ const COMMENT_DELETED_BY_ADMIN_MSG = 'This message was deleted by admin';
 function rsvpSavedToastTitle(status: RSVPInput.status): string {
   switch (status) {
     case RSVPInput.status.GOING:
-      return "You're going";
+      return "Going - saved";
     case RSVPInput.status.NOT_GOING:
-      return "Can't go — saved";
+      return "Can't go - saved";
     case RSVPInput.status.MAYBE:
-      return 'Maybe — saved';
+      return 'Maybe - saved';
     case RSVPInput.status.WAITLIST:
-      return "You're on the waitlist";
+      return "Waitlist - saved";
     default:
       return 'RSVP updated';
   }
@@ -560,7 +560,7 @@ export default function EventDetailScreen() {
   const [showSuggestEndDatePicker, setShowSuggestEndDatePicker] = useState(false);
   const [showSuggestStartTimePicker, setShowSuggestStartTimePicker] = useState(false);
   const [showSuggestEndTimePicker, setShowSuggestEndTimePicker] = useState(false);
-  const scrollRef = useRef<ElementRef<typeof GestureScrollView>>(null);
+  const scrollRef = useRef<ComponentRef<typeof GestureScrollView>>(null);
   const scrollOffsetYRef = useRef(0);
   const commentsThreadSectionYRef = useRef(0);
   const commentsThreadCardYRef = useRef(0);
@@ -1239,7 +1239,7 @@ export default function EventDetailScreen() {
   const evEnd = displayTiming.displayEnd;
   const isMultiDay = evStart.toDateString() !== evEnd.toDateString();
   /** Event is considered ended only after its configured end instant has passed. */
-  const isPast  = Date.now() > evEnd.getTime();
+  const isPast = Date.now() > evEnd.getTime();
   const minN = displayEv.minAttendees || 0;
   const maxN = displayEv.maxAttendees || 0;
   const needsMore = minN > 0 && going.length < minN && !isPast;
@@ -1249,9 +1249,16 @@ export default function EventDetailScreen() {
   const myWaitlistPos = imWaitlisted ? getMyWaitlistPosition(rsvps, currentUserId) : null;
   const hoursLeft = Math.max(0, Math.floor((evStart.getTime() - Date.now()) / 3600000));
   const canEdit = ev.createdBy === currentUserId;
+  const isInProgress =
+    evStart.getTime() <= Date.now() && Date.now() < evEnd.getTime();
+  /** Title and start fields locked while the event is running; after it ends, only description + photos stay editable. */
+  const canEditTitle = canEdit && !isPast && !isInProgress;
+  const canEditStartFields = canEdit && !isPast && !isInProgress;
   const canEditLive = canEdit && !isPast;
+  /** Host may edit description and cover photos even after the event has ended. */
+  const canEditDescriptionAndPhotos = canEdit;
   function requestClose() {
-    const hasUnsavedDetailChanges = canEditLive && detailsDirty;
+    const hasUnsavedDetailChanges = canEdit && detailsDirty;
     if (!hasUnsavedDetailChanges) {
       dismiss();
       return;
@@ -1270,7 +1277,8 @@ export default function EventDetailScreen() {
     ev.createdBy === currentUserId ||
     group.superAdminId === currentUserId ||
     (group.adminIds ?? []).includes(currentUserId);
-  const canDeleteEventLive = canDeleteEvent && !isPast;
+  /** Host and group admins/super-admins may delete past occurrences (API matches). */
+  const canDeleteEventLive = canDeleteEvent;
   const gScoped = group as GroupScoped;
   const canCollaborateActivities =
     !!currentUserId &&
@@ -1359,6 +1367,22 @@ export default function EventDetailScreen() {
   };
 
   const executeDetailSave = async (seriesScope?: SeriesUpdateScope) => {
+    if (isPast) {
+      if (!currentUserId) return;
+      try {
+        await updateEventMutation.mutateAsync({
+          description: draftDesc.trim(),
+          updatedBy: currentUserId,
+        });
+        Toast.show({ type: 'success', text1: 'Changes saved' });
+        setShowDetailSaveScopeModal(false);
+      } catch (e: any) {
+        const msg = e?.body?.error ?? e?.response?.data?.error ?? e?.message ?? 'Failed to save changes';
+        if (Platform.OS === 'web') window.alert(msg);
+        else Alert.alert('Error', msg);
+      }
+      return;
+    }
     const title = draftTitle.trim();
     if (!title) {
       if (Platform.OS === 'web') window.alert('Event title is required');
@@ -1404,13 +1428,18 @@ export default function EventDetailScreen() {
       return;
     }
     try {
-      const startIso = draftAllDay
-        ? localWallDateStartOfDayToUtcIso(draftStartDate)
-        : localWallDateTimeToUtcIso(draftStartDate, draftStartTime);
+      const savedStartMs = new Date(ev.start as string).getTime();
+      /** Recompute at save so a stale render cannot move start after the event has begun. */
+      const eventHasStarted = Number.isFinite(savedStartMs) && Date.now() >= savedStartMs;
+      const startIso = eventHasStarted
+        ? String(ev.start)
+        : draftAllDay
+          ? localWallDateStartOfDayToUtcIso(draftStartDate)
+          : localWallDateTimeToUtcIso(draftStartDate, draftStartTime);
       const endIso = draftAllDay
         ? localWallDateEndOfDayToUtcIso(draftEndDate)
         : localWallDateTimeToUtcIso(draftEndDate, draftEndTime);
-      const isAllDaySingle = draftAllDay && draftStartDate === draftEndDate;
+      const isAllDaySingle = !eventHasStarted && draftAllDay && draftStartDate === draftEndDate;
       const hasMaxCap = maxAttendees != null && maxAttendees > 0;
       let rsvpDeadlineOut: string | null = null;
       if (draftRsvpDeadlineEnabled) {
@@ -1428,13 +1457,23 @@ export default function EventDetailScreen() {
           return;
         }
       }
+      const newStartMs = new Date(startIso).getTime();
+      if (newStartMs < Date.now() && newStartMs !== savedStartMs) {
+        const msg = 'New events cannot be scheduled in the past.';
+        if (Platform.OS === 'web') {
+          window.alert(msg);
+        } else {
+          Alert.alert('Cannot create event', msg);
+        }
+        return;
+      }
       await updateEventMutation.mutateAsync({
         title,
         description: draftDesc.trim(),
         location: draftLocation.trim(),
         start: startIso,
         end: endIso,
-        isAllDay: isAllDaySingle || undefined,
+        ...(eventHasStarted ? {} : { isAllDay: isAllDaySingle || undefined }),
         minAttendees,
         maxAttendees,
         enableWaitlist: hasMaxCap ? !!displayEv.enableWaitlist : false,
@@ -1448,6 +1487,7 @@ export default function EventDetailScreen() {
           ? { seriesUpdateScope: seriesScope }
           : {}),
       });
+      Toast.show({ type: 'success', text1: 'Changes saved' });
       setShowDetailSaveScopeModal(false);
     } catch (e: any) {
       const msg = e?.body?.error ?? e?.response?.data?.error ?? e?.message ?? 'Failed to save changes';
@@ -1457,6 +1497,11 @@ export default function EventDetailScreen() {
   };
 
   const onDetailSavePress = () => {
+    if (isPast) {
+      if (!currentUserId) return;
+      void executeDetailSave();
+      return;
+    }
     if (!draftTitle.trim()) {
       if (Platform.OS === 'web') window.alert('Event title is required');
       else Alert.alert('Error', 'Event title is required');
@@ -1561,8 +1606,10 @@ export default function EventDetailScreen() {
     }
   };
 
-  const coverPhotosForDisplay = canEditLive ? localCoverPhotos : (displayEv.coverPhotos ?? []);
-  const showEventPhotosSection = coverPhotosForDisplay.length > 0 || canEditLive;
+  const coverPhotosForDisplay = canEditDescriptionAndPhotos
+    ? localCoverPhotos
+    : (displayEv.coverPhotos ?? []);
+  const showEventPhotosSection = coverPhotosForDisplay.length > 0 || canEditDescriptionAndPhotos;
 
   const persistCoverPhotos = async (next: string[]) => {
     if (!currentUserId) return;
@@ -1573,7 +1620,7 @@ export default function EventDetailScreen() {
   };
 
   const removeCoverPhotoAt = async (index: number) => {
-    if (!currentUserId || !canEditLive) return;
+    if (!currentUserId || !canEditDescriptionAndPhotos) return;
     const prev = localCoverPhotos;
     const next = prev.filter((_, j) => j !== index);
     setLocalCoverPhotos(next);
@@ -1586,7 +1633,7 @@ export default function EventDetailScreen() {
   };
 
   const addCoverPhotoFromPicker = async () => {
-    if (!currentUserId || !canEditLive || coverPhotoBusy) return;
+    if (!currentUserId || !canEditDescriptionAndPhotos || coverPhotoBusy) return;
     setCoverPhotoBusy(true);
     try {
       const url = await pickAndUploadCoverPhoto(currentUserId);
@@ -1694,7 +1741,6 @@ export default function EventDetailScreen() {
         text1: 'Event is full',
         text2: 'This event has reached maximum capacity.',
         visibilityTime: 3200,
-        position: 'top',
       });
       return;
     }
@@ -1711,7 +1757,6 @@ export default function EventDetailScreen() {
           type: 'success',
           text1: 'Response cleared',
           visibilityTime: 2200,
-          position: 'top',
         });
       } else {
         await createOrUpdateRSVPMutation.mutateAsync({
@@ -1724,7 +1769,6 @@ export default function EventDetailScreen() {
           text1: rsvpSavedToastTitle(status),
           ...(noteSaved ? { text2: 'Note saved' } : {}),
           visibilityTime: noteSaved ? 2800 : 2200,
-          position: 'top',
         });
       }
     } catch {
@@ -1733,7 +1777,6 @@ export default function EventDetailScreen() {
         text1: 'Could not update RSVP',
         text2: 'Please try again.',
         visibilityTime: 3200,
-        position: 'top',
       });
     }
   };
@@ -1953,7 +1996,8 @@ export default function EventDetailScreen() {
   ].filter(Boolean).join(' · ');
 
   const showHoursBanner = !isPast && hoursLeft <= 6 && hoursLeft > 0;
-  const hasBanners = showHoursBanner || isPast || needsMore || showLowSpots || imWaitlisted;
+  const hasBanners =
+    showHoursBanner || isPast || needsMore || showLowSpots || imWaitlisted;
 
   return (
     <EventFormPopoverChrome onClose={requestClose}>
@@ -2007,7 +2051,7 @@ export default function EventDetailScreen() {
             <Ionicons name="trash-outline" size={20} color={Colors.text} />
           </TouchableOpacity>
         ) : null}
-        {canEditLive && detailsDirty ? (
+        {canEdit && detailsDirty ? (
           <View style={styles.navEditActions}>
             <TouchableOpacity
               onPress={resetDetailsDrafts}
@@ -2019,10 +2063,14 @@ export default function EventDetailScreen() {
             </TouchableOpacity>
             <TouchableOpacity
               onPress={onDetailSavePress}
-              disabled={!draftTitle.trim() || !detailTimeRangeValid || updateEventMutation.isPending}
+              disabled={
+                updateEventMutation.isPending ||
+                (!isPast && (!draftTitle.trim() || !detailTimeRangeValid))
+              }
               style={[
                 styles.draftBarBtnPrimary,
-                (!draftTitle.trim() || !detailTimeRangeValid || updateEventMutation.isPending) &&
+                (updateEventMutation.isPending ||
+                  (!isPast && (!draftTitle.trim() || !detailTimeRangeValid))) &&
                   styles.draftBarBtnPrimaryDisabled,
               ]}
               activeOpacity={0.8}
@@ -2036,6 +2084,15 @@ export default function EventDetailScreen() {
           </View>
         ) : null}
       </View>
+
+      {isInProgress ? (
+        <View style={styles.modalInProgressBanner}>
+          <View style={[styles.bannerInner, styles.bannerProgress]}>
+            <Ionicons name="radio-button-on" size={14} color="#1D4ED8" />
+            <Text style={styles.bannerProgressText}>This event is in progress</Text>
+          </View>
+        </View>
+      ) : null}
 
       <GestureScrollView
         ref={scrollRef}
@@ -2113,47 +2170,58 @@ export default function EventDetailScreen() {
               </Text>
               <Ionicons name="chevron-forward" size={14} color={Colors.textMuted} style={{ marginTop: 1 }} />
             </TouchableOpacity>
-            {canEditLive ? (
-              <TextInput
-                value={draftTitle}
-                onChangeText={setDraftTitle}
-                placeholder="Event title"
-                placeholderTextColor={Colors.textMuted}
-                style={styles.eventTitleInput}
-                autoCapitalize="sentences"
-                autoCorrect
-              />
+            {canEditTitle ? (
+              <View style={styles.eventTitleField}>
+                <Text style={formSectionTitleStyle}>
+                  Event title
+                  <Text style={styles.requiredMark} accessibilityLabel="required">
+                    {' '}
+                    *
+                  </Text>
+                </Text>
+                <TextInput
+                  value={draftTitle}
+                  onChangeText={setDraftTitle}
+                  placeholder="e.g. Saturday soccer"
+                  placeholderTextColor={Colors.textMuted}
+                  style={styles.eventTitleInput}
+                  autoCapitalize="sentences"
+                  autoCorrect
+                />
+              </View>
             ) : (
               <Text style={styles.eventTitle}>{displayEv.title}</Text>
             )}
-            {canEditLive ? (
-              <View style={[styles.descBox, { marginTop: 10 }]}>
-                <TextInput
-                  value={draftDesc}
-                  onChangeText={setDraftDesc}
-                  placeholder="Description"
-                  placeholderTextColor={Colors.textMuted}
-                  style={styles.eventDescInput}
-                  multiline
-                />
+            {canEditDescriptionAndPhotos ? (
+              <View style={styles.eventDescField}>
+                <Text style={formSectionTitleStyle}>Description</Text>
+                <View style={styles.eventDescBoxEdit}>
+                  <TextInput
+                    value={draftDesc}
+                    onChangeText={setDraftDesc}
+                    placeholder="Optional"
+                    placeholderTextColor={Colors.textMuted}
+                    style={styles.eventDescInput}
+                    multiline
+                    scrollEnabled
+                  />
+                </View>
               </View>
             ) : displayEv.description?.trim() ? (
-              <View style={[styles.descBox, { marginTop: 10 }]}>
-                <Text style={styles.descText}>
-                  <DescText text={displayEv.description} />
-                </Text>
+              <View style={styles.eventDescField}>
+                <Text style={formSectionTitleStyle}>Description</Text>
+                <View style={styles.eventDescBoxReadOnly}>
+                  <Text style={styles.descText}>
+                    <DescText text={displayEv.description} />
+                  </Text>
+                </View>
               </View>
             ) : null}
           </View>
 
           {/* Photos */}
           {showEventPhotosSection ? (
-            <View
-              style={{
-                marginTop:
-                  canEditLive || displayEv.description?.trim() ? 4 : 10,
-              }}
-            >
+            <View style={{ marginTop: 10 }}>
               <View style={{ paddingHorizontal: 16 }}>
                 <Text style={formSectionTitleStyle}>
                   Photos{coverPhotosForDisplay.length > 0 ? ` · ${coverPhotosForDisplay.length}` : ''}
@@ -2163,7 +2231,7 @@ export default function EventDetailScreen() {
                 <PhotoCarousel
                   photos={coverPhotosForDisplay}
                   urlMap={resolvedImageMap}
-                  canRemove={canEditLive}
+                  canRemove={canEditDescriptionAndPhotos}
                   onRemoveAt={(i) => void removeCoverPhotoAt(i)}
                   onPhotoPress={(url, index) =>
                     setLightbox({
@@ -2175,7 +2243,7 @@ export default function EventDetailScreen() {
                   }
                 />
               ) : null}
-              {canEditLive ? (
+              {canEditDescriptionAndPhotos ? (
                 <View
                   style={{
                     paddingHorizontal: 16,
@@ -2217,8 +2285,9 @@ export default function EventDetailScreen() {
                         <Text style={[formSectionTitleStyle, styles.detailTimeHeading]}>When</Text>
                         <TouchableOpacity
                           onPress={() => setDraftAllDay((v) => !v)}
-                          style={styles.detailAllDayChip}
+                          style={[styles.detailAllDayChip, !canEditStartFields && { opacity: 0.45 }]}
                           activeOpacity={0.7}
+                          disabled={!canEditStartFields}
                         >
                           <Text style={[styles.detailAllDayChipText, draftAllDay && styles.detailAllDayChipTextActive]}>
                             All-day
@@ -2231,58 +2300,70 @@ export default function EventDetailScreen() {
                       <View style={styles.detailEventTimeStack}>
                         <View style={styles.detailEventTimeLine}>
                           <Text style={styles.detailEventTimeLineLabel}>From</Text>
-                          <View style={styles.detailEventTimeRow}>
-                            {Platform.OS === 'web' ? (
-                              <View style={[styles.detailEventTimeCell, styles.detailEventTimeFieldDate]}>
-                                <input
-                                  type="date"
-                                  value={draftStartDate}
-                                  min={formatLocalDateInput(new Date())}
-                                  onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                                    setDraftStartDate(e.target.value)
-                                  }
-                                  style={webDetailTimeInputStyle(false)}
-                                />
-                              </View>
-                            ) : (
-                              <View style={[styles.detailEventTimeCell, styles.detailEventTimeFieldDate]}>
-                                <TouchableOpacity
-                                  onPress={() => setShowDetailStartDatePicker(true)}
-                                  activeOpacity={0.85}
-                                  style={styles.detailEventTimeSegment}
-                                >
-                                  <Text style={styles.detailEventTimeSegmentText} numberOfLines={1}>
-                                    {draftStartDate}
-                                  </Text>
-                                </TouchableOpacity>
-                              </View>
-                            )}
-                            {!draftAllDay &&
-                              (Platform.OS === 'web' ? (
-                                <View style={[styles.detailEventTimeCell, styles.detailEventTimeFieldTime]}>
+                          {canEditStartFields ? (
+                            <View style={styles.detailEventTimeRow}>
+                              {Platform.OS === 'web' ? (
+                                <View style={[styles.detailEventTimeCell, styles.detailEventTimeFieldDate]}>
                                   <input
-                                    type="time"
-                                    value={draftStartTime}
+                                    type="date"
+                                    value={draftStartDate}
+                                    min={formatLocalDateInput(new Date())}
                                     onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                                      setDraftStartTime(e.target.value)
+                                      setDraftStartDate(e.target.value)
                                     }
                                     style={webDetailTimeInputStyle(false)}
                                   />
                                 </View>
                               ) : (
-                                <View style={[styles.detailEventTimeCell, styles.detailEventTimeFieldTime]}>
+                                <View style={[styles.detailEventTimeCell, styles.detailEventTimeFieldDate]}>
                                   <TouchableOpacity
-                                    onPress={() => setShowDetailStartTimePicker(true)}
+                                    onPress={() => setShowDetailStartDatePicker(true)}
                                     activeOpacity={0.85}
                                     style={styles.detailEventTimeSegment}
                                   >
                                     <Text style={styles.detailEventTimeSegmentText} numberOfLines={1}>
-                                      {draftStartTime}
+                                      {draftStartDate}
                                     </Text>
                                   </TouchableOpacity>
                                 </View>
-                              ))}
-                          </View>
+                              )}
+                              {!draftAllDay &&
+                                (Platform.OS === 'web' ? (
+                                  <View style={[styles.detailEventTimeCell, styles.detailEventTimeFieldTime]}>
+                                    <input
+                                      type="time"
+                                      value={draftStartTime}
+                                      onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                                        setDraftStartTime(e.target.value)
+                                      }
+                                      style={webDetailTimeInputStyle(false)}
+                                    />
+                                  </View>
+                                ) : (
+                                  <View style={[styles.detailEventTimeCell, styles.detailEventTimeFieldTime]}>
+                                    <TouchableOpacity
+                                      onPress={() => setShowDetailStartTimePicker(true)}
+                                      activeOpacity={0.85}
+                                      style={styles.detailEventTimeSegment}
+                                    >
+                                      <Text style={styles.detailEventTimeSegmentText} numberOfLines={1}>
+                                        {draftStartTime}
+                                      </Text>
+                                    </TouchableOpacity>
+                                  </View>
+                                ))}
+                            </View>
+                          ) : (
+                            <View style={[styles.detailEventTimeRow, { alignItems: 'center', minHeight: 40 }]}>
+                              <View style={[styles.detailEventTimeSegment, { flex: 1, borderWidth: 0 }]}>
+                                <Text style={styles.detailEventTimeSegmentText}>
+                                  {draftAllDay
+                                    ? `${draftStartDate} · All day`
+                                    : `${draftStartDate} · ${draftStartTime}`}
+                                </Text>
+                              </View>
+                            </View>
+                          )}
                         </View>
                         <View style={styles.detailEventTimeLine}>
                           <Text style={styles.detailEventTimeLineLabel}>To</Text>
@@ -4689,6 +4770,13 @@ const styles = StyleSheet.create({
   },
   eventTogglePad:   { paddingHorizontal: 16 },
   commentsEmptyInsideCard: { paddingVertical: 28, paddingHorizontal: 16, alignItems: 'center', gap: 8 },
+  modalInProgressBanner: {
+    paddingHorizontal: 20,
+    paddingTop: 4,
+    paddingBottom: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.border,
+  },
   bannerStack:      { paddingHorizontal: 20, paddingTop: 10, gap: 5 },
   bannerInner:      { paddingVertical: 6, paddingHorizontal: 10, borderRadius: Radius.md },
   bannerAmber:      { backgroundColor: '#FFFBEB', borderWidth: 1, borderColor: '#FDE68A' },
@@ -4696,6 +4784,15 @@ const styles = StyleSheet.create({
   bannerAmberText:  { flex: 1, fontSize: 13, color: '#92400E', fontFamily: Fonts.regular },
   bannerGray:       { backgroundColor: Colors.bg, borderWidth: 1, borderColor: Colors.border },
   bannerGrayText:   { fontSize: 13, color: Colors.textMuted, fontFamily: Fonts.regular },
+  bannerProgress: {
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  bannerProgressText: { flex: 1, fontSize: 13, color: '#1E40AF', fontFamily: Fonts.regular },
   photoGallery:     { marginBottom: 0 },
   photoGalleryContent: { paddingHorizontal: 20, position: 'relative' },
   photoGridRow:     { flexDirection: 'row', flexWrap: 'wrap' },
@@ -4726,13 +4823,16 @@ const styles = StyleSheet.create({
     width: '90%',
     height: '80%',
   },
+  eventTitleField: { marginBottom: 2 },
+  requiredMark: { color: Colors.todayRed, fontFamily: Fonts.semiBold },
   eventTitle:       { fontSize: 21, fontFamily: Fonts.extraBold, color: Colors.text, lineHeight: 28, marginBottom: 4 },
   eventTitleInput:  {
     width: '100%',
-    paddingVertical: Platform.OS === 'ios' ? 8 : 4,
+    minHeight: 40,
+    paddingVertical: Platform.OS === 'ios' ? 6 : 4,
     paddingHorizontal: 0,
     margin: 0,
-    marginBottom: 4,
+    marginTop: 2,
     borderWidth: 0,
     backgroundColor: 'transparent',
     fontSize: 21,
@@ -4741,7 +4841,28 @@ const styles = StyleSheet.create({
     lineHeight: 28,
     ...(Platform.OS === 'web' ? ({ outlineStyle: 'none', outlineWidth: 0 } as object) : null),
   },
+  eventDescField: { marginTop: 10 },
+  eventDescBoxEdit: {
+    backgroundColor: Colors.bg,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: 12,
+    marginTop: 6,
+    marginBottom: 16,
+    height: 112,
+  },
+  eventDescBoxReadOnly: {
+    backgroundColor: Colors.bg,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: 12,
+    marginTop: 6,
+    marginBottom: 16,
+  },
   eventDescInput:   {
+    flex: 1,
     width: '100%',
     minHeight: 88,
     padding: 0,
@@ -4886,7 +5007,6 @@ const styles = StyleSheet.create({
     flex: 1,
     ...(Platform.OS === 'android' ? ({ includeFontPadding: false } as const) : null),
   },
-  descBox:          { backgroundColor: Colors.bg, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border, padding: 12, marginBottom: 16 },
   descText:         { fontSize: 14, color: Colors.text, fontFamily: Fonts.regular, lineHeight: 22 },
   link:             { color: Colors.going, textDecorationLine: 'underline' },
   mentionInComment: { color: Colors.accent, fontFamily: Fonts.semiBold },

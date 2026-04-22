@@ -1,71 +1,64 @@
 import { View, Text, StyleSheet, Platform } from 'react-native';
 import type { ToastConfig } from 'react-native-toast-message';
-import { Colors, Fonts, Radius, Shadows } from '../constants/theme';
+import { Fonts } from '../constants/theme';
 
-function ToastCard({
-  text1,
-  text2,
-  accent,
-}: {
-  text1?: string;
-  text2?: string;
-  accent: string;
-}) {
+/** Translucent dark pill for every toast type. */
+function ToastPill({ text1, text2 }: { text1?: string; text2?: string }) {
   return (
-    <View style={styles.card}>
-      <View style={[styles.accentBar, { backgroundColor: accent }]} />
-      <View style={styles.body}>
-        {text1 ? <Text style={styles.line1}>{text1}</Text> : null}
-        {text2 ? <Text style={styles.line2}>{text2}</Text> : null}
-      </View>
+    <View style={styles.pill}>
+      {text1 ? (
+        <Text style={styles.line1} numberOfLines={4}>
+          {text1}
+        </Text>
+      ) : null}
+      {text2 ? (
+        <Text style={styles.line2} numberOfLines={4}>
+          {text2}
+        </Text>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    marginHorizontal: 20,
-    maxWidth: 400,
+  pill: {
     alignSelf: 'center',
-    width: '100%',
-    flexDirection: 'row',
-    borderRadius: Radius.lg,
-    overflow: 'hidden',
-    backgroundColor: Colors.surface,
+    maxWidth: 420,
+    marginHorizontal: 28,
+    paddingVertical: 12,
+    paddingHorizontal: 22,
+    borderRadius: 9999,
+    backgroundColor: 'rgba(10, 10, 10, 0.62)',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.border,
-    ...(Platform.OS === 'ios' ? (Shadows.md as object) : { elevation: 6 }),
-  },
-  accentBar: {
-    width: 4,
-  },
-  body: {
-    flex: 1,
-    paddingVertical: 14,
-    paddingHorizontal: 14,
+    borderColor: 'rgba(255,255,255,0.18)',
+    ...(Platform.OS === 'ios'
+      ? {
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.35,
+          shadowRadius: 12,
+        }
+      : { elevation: 12 }),
   },
   line1: {
     fontFamily: Fonts.semiBold,
     fontSize: 15,
-    color: Colors.text,
+    lineHeight: 20,
+    color: '#FAFAFA',
+    textAlign: 'center',
   },
   line2: {
     fontFamily: Fonts.regular,
     fontSize: 13,
-    color: Colors.textSub,
-    marginTop: 4,
     lineHeight: 18,
+    color: 'rgba(250,250,250,0.78)',
+    textAlign: 'center',
+    marginTop: 4,
   },
 });
 
 export const appToastConfig: ToastConfig = {
-  success: (props) => (
-    <ToastCard text1={props.text1} text2={props.text2} accent={Colors.going} />
-  ),
-  error: (props) => (
-    <ToastCard text1={props.text1} text2={props.text2} accent={Colors.notGoing} />
-  ),
-  info: (props) => (
-    <ToastCard text1={props.text1} text2={props.text2} accent={Colors.maybe} />
-  ),
+  success: (props) => <ToastPill text1={props.text1} text2={props.text2} />,
+  error: (props) => <ToastPill text1={props.text1} text2={props.text2} />,
+  info: (props) => <ToastPill text1={props.text1} text2={props.text2} />,
 };

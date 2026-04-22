@@ -17,6 +17,7 @@ import { useRouter, usePathname } from 'expo-router';
 import { Colors, Fonts, Radius } from '../constants/theme';
 import { useJoinByInviteCode } from '../hooks/api';
 import { withReturnTo } from '../utils/navigationReturn';
+import { NoGroupForActionModal } from './NoGroupForActionModal';
 
 const webInputNoFocusRing = {
   outlineWidth: 0,
@@ -166,26 +167,11 @@ export function CreateOrJoinButton({ userId, eventEligibleGroupCount }: Props) {
         </View>
       </Modal>
 
-      <Modal
+      <NoGroupForActionModal
         visible={noGroupFor !== null}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setNoGroupFor(null)}
-      >
-        <View style={styles.alertOverlay}>
-          <View style={styles.alertBox}>
-            <Text style={styles.alertTitle}>No Groups</Text>
-            <Text style={styles.alertMessage}>
-              {noGroupFor === 'poll'
-                ? 'You need to join or create a group before creating a poll.'
-                : 'You need to join or create a group before creating an event.'}
-            </Text>
-            <TouchableOpacity onPress={() => setNoGroupFor(null)} style={styles.alertButton}>
-              <Text style={styles.alertButtonText}>OK</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+        variant={noGroupFor === 'poll' ? 'poll' : 'event'}
+        onDismiss={() => setNoGroupFor(null)}
+      />
     </>
   );
 }
@@ -285,36 +271,4 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.accent,
   },
   inviteJoinBtnText: { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.accentFg },
-  alertOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  alertBox: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius['2xl'],
-    padding: 24,
-    width: '100%',
-    maxWidth: 320,
-    alignItems: 'center',
-  },
-  alertTitle: { fontSize: 18, fontFamily: Fonts.bold, color: Colors.text, marginBottom: 12 },
-  alertMessage: {
-    fontSize: 14,
-    fontFamily: Fonts.regular,
-    color: Colors.textSub,
-    textAlign: 'center',
-    marginBottom: 20,
-    lineHeight: 20,
-  },
-  alertButton: {
-    paddingHorizontal: 32,
-    paddingVertical: 10,
-    borderRadius: Radius.lg,
-    backgroundColor: Colors.accent,
-    width: '100%',
-  },
-  alertButtonText: { fontSize: 15, fontFamily: Fonts.semiBold, color: Colors.accentFg, textAlign: 'center' },
 });

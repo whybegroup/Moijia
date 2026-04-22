@@ -11,6 +11,8 @@ export type EventsScreenPersistedV1 = {
   calendarFocusIso: string;
   /** Vertical scroll offset for each calendar scope (day/week timeline, month grid, year grid). */
   calendarBodyScrollY?: Partial<Record<CalendarScopeMode, number>>;
+  /** Year view: horizontal scroll of the mini-month strip; `year` is the calendar year that strip shows. */
+  calendarYearMonthStrip?: { year: number; x: number };
   selectedGroupIds: string[];
   filterRsvp: string[];
   filterNeeds: boolean;
@@ -29,6 +31,17 @@ function isScopeMode(x: unknown): x is CalendarScopeMode {
 
 function isDateMode(x: unknown): x is 'specific' | 'now' | 'allTime' {
   return x === 'specific' || x === 'now' || x === 'allTime';
+}
+
+function parseCalendarYearMonthStrip(raw: unknown): { year: number; x: number } | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const o = raw as Record<string, unknown>;
+  const year = o.year;
+  const x = o.x;
+  if (typeof year !== 'number' || !Number.isFinite(year)) return undefined;
+  if (typeof x !== 'number' || !Number.isFinite(x)) return undefined;
+  return { year: Math.round(year), x: Math.max(0, Math.round(x)) };
 }
 
 function parseCalendarBodyScrollY(raw: unknown): Partial<Record<CalendarScopeMode, number>> | undefined {
@@ -61,6 +74,8 @@ export async function loadEventsScreenPrefs(): Promise<Partial<EventsScreenPersi
     if (typeof p.calendarFocusIso === 'string') out.calendarFocusIso = p.calendarFocusIso;
     const scrollY = parseCalendarBodyScrollY(p.calendarBodyScrollY);
     if (scrollY) out.calendarBodyScrollY = scrollY;
+    const yearStrip = parseCalendarYearMonthStrip(p.calendarYearMonthStrip);
+    if (yearStrip) out.calendarYearMonthStrip = yearStrip;
     if (Array.isArray(p.selectedGroupIds) && p.selectedGroupIds.every((id) => typeof id === 'string'))
       out.selectedGroupIds = p.selectedGroupIds;
     if (Array.isArray(p.filterRsvp) && p.filterRsvp.every((k) => typeof k === 'string' && RSVP_KEYS.has(k)))

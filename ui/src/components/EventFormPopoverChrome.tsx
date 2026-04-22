@@ -2,6 +2,7 @@ import { type ReactNode, useMemo } from 'react';
 import { View, Pressable, StyleSheet, useWindowDimensions } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Radius, Shadows } from '../constants/theme';
+import { AppToastMount } from './AppToastMount';
 
 const POPOVER_MAX_W = 560;
 
@@ -50,6 +51,7 @@ export function EventFormPopoverChrome({ children, onClose }: Props) {
       <SafeAreaView edges={['top', 'bottom', 'left', 'right']} style={sheetStyle}>
         {children}
       </SafeAreaView>
+      <AppToastMount />
     </View>
   );
 }

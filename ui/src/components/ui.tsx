@@ -270,7 +270,15 @@ export function SectionLabel({ label }: { label: string }) {
 export function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
   return (
     <View style={{ marginBottom: 18 }}>
-      <Text style={styles.fieldLabel}>{label}{required ? ' *' : ''}</Text>
+      <Text style={styles.fieldLabel}>
+        {label}
+        {required ? (
+          <Text style={styles.fieldRequiredMark} accessibilityLabel="required">
+            {' '}
+            *
+          </Text>
+        ) : null}
+      </Text>
       {children}
     </View>
   );
@@ -417,6 +425,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   fieldLabel: formSectionTitleStyle,
+  fieldRequiredMark: { color: Colors.todayRed, fontFamily: Fonts.semiBold },
   tInput: {
     padding: 10, paddingHorizontal: 14,
     borderRadius: Radius.lg, borderWidth: 1.5,

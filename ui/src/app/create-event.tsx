@@ -268,6 +268,16 @@ export default function CreateEventScreen() {
       const start = new Date(startIso);
       const end = new Date(endIso);
 
+      if (start.getTime() < Date.now()) {
+        const msg = 'New events cannot be scheduled in the past.';
+        if (Platform.OS === 'web') {
+          window.alert(msg);
+        } else {
+          Alert.alert('Cannot create event', msg);
+        }
+        return;
+      }
+
       const isAllDay = form.allDay && form.startDate === form.endDate;
 
       let coverPhotos: string[] = [];
@@ -675,11 +685,17 @@ export default function CreateEventScreen() {
           </ScrollView>
         </Field>
 
-        <Field label="Event Title" required>
-          <TextInput value={form.title} onChangeText={v => set('title', v)} placeholder="e.g. Game Night" placeholderTextColor={Colors.textMuted} style={styles.input} />
+        <Field label="Event title" required>
+          <TextInput
+            value={form.title}
+            onChangeText={(v) => set('title', v)}
+            placeholder="e.g. Game night"
+            placeholderTextColor={Colors.textMuted}
+            style={styles.input}
+          />
         </Field>
 
-        <Field label="Event description">
+        <Field label="Description">
           <View style={styles.descBox}>
             <TextInput
               value={form.description}

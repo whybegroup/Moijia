@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -46,6 +46,7 @@ import { queryKeys } from '../../config/queryClient';
 import { useCurrentUserContext } from '../../contexts/CurrentUserContext';
 import { EventsCalendarGlyph } from '../../components/TabScreenIcons';
 import { CreateOrJoinButton } from '../../components/CreateOrJoinButton';
+import { NoGroupForActionModal } from '../../components/NoGroupForActionModal';
 import {
   loadEventsScreenPrefs,
   saveEventsScreenPrefs,
@@ -78,7 +79,7 @@ export default function EventsScreen() {
     EventUpdate.seriesUpdateScope.THIS_OCCURRENCE
   );
   const groups = allGroups.filter(g => g.membershipStatus === 'member' || g.membershipStatus === 'admin');
-  
+
   // Manual polling for notifications every 5 seconds
   useEffect(() => {
     const interval = setInterval(() => {
@@ -148,12 +149,38 @@ export default function EventsScreen() {
     return dt;
   };
   const [showNotifs, setShowNotifs] = useState(false);
+  const [noGroupCalendarModal, setNoGroupCalendarModal] = useState(false);
+  /** Bumped to clear in-grid create preview when leaving create-event / events tab or closing no-group alert. */
+  const [clearWeekSlotDraftSeq, setClearWeekSlotDraftSeq] = useState(0);
+  const prevPathnameForSlotDraftRef = useRef<string | undefined>(undefined);
+
+  const EVENTS_TAB_PATH_MARKER = '(tabs)/events';
+  useEffect(() => {
+    const prev = prevPathnameForSlotDraftRef.current;
+    prevPathnameForSlotDraftRef.current = pathname;
+    if (prev === undefined) return;
+    const now = pathname ?? '';
+    const wasCreate = prev.includes('create-event');
+    const nowCreate = now.includes('create-event');
+    if (wasCreate && !nowCreate) {
+      setClearWeekSlotDraftSeq((n) => n + 1);
+    }
+    const wasEventsTab = prev.includes(EVENTS_TAB_PATH_MARKER);
+    const nowEventsTab = now.includes(EVENTS_TAB_PATH_MARKER);
+    if (wasEventsTab && !nowEventsTab && !nowCreate) {
+      setClearWeekSlotDraftSeq((n) => n + 1);
+    }
+  }, [pathname]);
+
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
   const [calendarScopeMode, setCalendarScopeMode] = useState<CalendarScopeMode>('week');
   const [calendarFocusDate, setCalendarFocusDate] = useState(() => new Date());
   const [calendarBodyScrollY, setCalendarBodyScrollY] = useState<
     Partial<Record<CalendarScopeMode, number>>
   >({});
+  const [calendarYearMonthStrip, setCalendarYearMonthStrip] = useState<
+    { year: number; x: number } | undefined
+  >(undefined);
   const [prefsReady, setPrefsReady] = useState(false);
   const unread = notifs.filter(n => !n.read).length;
 
@@ -169,6 +196,7 @@ export default function EventsScreen() {
           setCalendarFocusDate(parseCalendarFocusIso(partial.calendarFocusIso));
         }
         if (partial.calendarBodyScrollY) setCalendarBodyScrollY(partial.calendarBodyScrollY);
+        if (partial.calendarYearMonthStrip) setCalendarYearMonthStrip(partial.calendarYearMonthStrip);
         if (partial.selectedGroupIds !== undefined) setSelectedGroupIds(partial.selectedGroupIds);
         if (partial.filterRsvp !== undefined) setFilterRsvp(partial.filterRsvp);
         if (partial.filterNeeds !== undefined) setFilterNeeds(partial.filterNeeds);
@@ -186,6 +214,12 @@ export default function EventsScreen() {
   }, []);
 
   useEffect(() => {
+    if (viewMode !== 'calendar') {
+      setClearWeekSlotDraftSeq((n) => n + 1);
+    }
+  }, [viewMode]);
+
+  useEffect(() => {
     if (!prefsReady) return;
     const payload: EventsScreenPersistedV1 = {
       v: 1,
@@ -193,6 +227,7 @@ export default function EventsScreen() {
       calendarScopeMode,
       calendarFocusIso: calendarFocusDate.toISOString(),
       calendarBodyScrollY: Object.keys(calendarBodyScrollY).length ? calendarBodyScrollY : undefined,
+      calendarYearMonthStrip,
       selectedGroupIds,
       filterRsvp,
       filterNeeds,
@@ -209,6 +244,7 @@ export default function EventsScreen() {
     calendarScopeMode,
     calendarFocusDate,
     calendarBodyScrollY,
+    calendarYearMonthStrip,
     selectedGroupIds,
     filterRsvp,
     filterNeeds,
@@ -221,6 +257,10 @@ export default function EventsScreen() {
 
   const onCalendarBodyScrollYCommit = useCallback((mode: CalendarScopeMode, y: number) => {
     setCalendarBodyScrollY((prev) => ({ ...prev, [mode]: y }));
+  }, []);
+
+  const onCalendarYearMonthStripCommit = useCallback((payload: { year: number; x: number }) => {
+    setCalendarYearMonthStrip(payload);
   }, []);
 
   const filtered = useMemo(() => {
@@ -335,7 +375,11 @@ export default function EventsScreen() {
           {/* View toggle */}
           <View style={styles.viewToggle}>
             <TouchableOpacity
-              style={[styles.viewBtn, viewMode === 'list' && styles.viewBtnActive]}
+              style={[
+                styles.viewBtn,
+                styles.viewToggleSegLeft,
+                viewMode === 'list' && styles.viewBtnActive,
+              ]}
               onPress={() => setViewMode('list')}
               activeOpacity={0.7}
             >
@@ -353,7 +397,11 @@ export default function EventsScreen() {
               </Svg>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.viewBtn, viewMode === 'calendar' && styles.viewBtnActive]}
+              style={[
+                styles.viewBtn,
+                styles.viewToggleSegRight,
+                viewMode === 'calendar' && styles.viewBtnActive,
+              ]}
               onPress={() => setViewMode('calendar')}
               activeOpacity={0.7}
             >
@@ -736,13 +784,13 @@ export default function EventsScreen() {
             onCalendarScopeModeChange={setCalendarScopeMode}
             calendarBodyScrollY={calendarBodyScrollY}
             onCalendarBodyScrollYCommit={onCalendarBodyScrollYCommit}
+            calendarYearMonthStrip={calendarYearMonthStrip}
+            onCalendarYearMonthStripCommit={onCalendarYearMonthStripCommit}
             calendarScrollPrefsReady={prefsReady}
+            clearWeekSlotDraftSeq={clearWeekSlotDraftSeq}
             onWeekCreateEvent={(start, end) => {
               if (groups.length === 0) {
-                Alert.alert(
-                  'No Groups',
-                  'You need to join or create a group before creating an event.'
-                );
+                setNoGroupCalendarModal(true);
                 return;
               }
               router.push(
@@ -840,6 +888,15 @@ export default function EventsScreen() {
         isLoading={notifsLoading}
         groups={groups.map((g) => ({ id: g.id, name: g.name }))}
         groupColors={groupColors}
+      />
+
+      <NoGroupForActionModal
+        visible={noGroupCalendarModal}
+        variant="event"
+        onDismiss={() => {
+          setNoGroupCalendarModal(false);
+          setClearWeekSlotDraftSeq((n) => n + 1);
+        }}
       />
 
       <Modal
@@ -944,8 +1001,25 @@ const styles = StyleSheet.create({
   pageTitle:   { fontSize: 18, fontFamily: Fonts.extraBold, color: Colors.text },
   filtersContainer: { backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border },
   actions:     { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  viewToggle:  { flexDirection: 'row', alignItems: 'stretch', height: 34, backgroundColor: Colors.bg, borderRadius: 10, borderWidth: 1, borderColor: Colors.border, padding: 2, gap: 2 },
-  viewBtn:     { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 10, borderRadius: 8 },
+  viewToggle:  {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    height: 36,
+    minWidth: 118,
+    backgroundColor: Colors.bg,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    overflow: 'hidden',
+  },
+  viewBtn:     {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+  },
+  viewToggleSegLeft: { borderTopLeftRadius: 9, borderBottomLeftRadius: 9 },
+  viewToggleSegRight: { borderTopRightRadius: 9, borderBottomRightRadius: 9 },
   viewBtnActive: { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border },
   iconBtn:     { width: 34, height: 34, borderRadius: 17, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surface, alignItems: 'center', justifyContent: 'center' },
   iconBtnActive:{ backgroundColor: Colors.bg, borderColor: Colors.accent },

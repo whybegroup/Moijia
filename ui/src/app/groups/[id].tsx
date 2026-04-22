@@ -35,6 +35,7 @@ import { UserAvatar } from '../../components/UserAvatar';
 import { deleteManagedUploadFireAndForget } from '../../services/managedUploadDelete';
 import { ResolvableImage } from '../../components/ResolvableImage';
 import { pickAndUploadCoverPhoto } from '../../services/pickAndUploadImage';
+import Toast from 'react-native-toast-message';
 
 const AVATAR_SIZE = 56;
 
@@ -343,6 +344,7 @@ export default function GroupDetailScreen() {
         desc: draftDesc.trim(),
         updatedBy: currentUserId ?? '',
       });
+      Toast.show({ type: 'success', text1: 'Changes saved' });
     } catch {
       if (Platform.OS === 'web') window.alert('Failed to save changes');
       else Alert.alert('Error', 'Failed to save changes');
@@ -400,7 +402,7 @@ export default function GroupDetailScreen() {
   const groupPhotosBlock = showGroupCoverSection ? (
     <View
       style={{
-        marginTop: isAdmin || draftDesc.trim() || group.desc?.trim() ? 4 : 10,
+        marginTop: 10,
         marginBottom:
           isAdmin && !isPending
             ? 0
@@ -491,7 +493,7 @@ export default function GroupDetailScreen() {
       <NavBar
         onClose={requestClose}
         right={
-          profileDirty ? (
+          isAdmin && profileDirty ? (
             <View style={styles.navEditActions}>
               <TouchableOpacity
                 onPress={resetProfileDrafts}
@@ -557,15 +559,24 @@ export default function GroupDetailScreen() {
               />
             </TouchableOpacity>
             {isAdmin ? (
-              <TextInput
-                value={draftName}
-                onChangeText={setDraftName}
-                placeholder="Group name"
-                placeholderTextColor={Colors.textMuted}
-                style={styles.groupTitleInput}
-                autoCapitalize="words"
-                autoCorrect={false}
-              />
+              <View style={styles.groupNameField}>
+                <Text style={formSectionTitleStyle}>
+                  Group name
+                  <Text style={styles.requiredMark} accessibilityLabel="required">
+                    {' '}
+                    *
+                  </Text>
+                </Text>
+                <TextInput
+                  value={draftName}
+                  onChangeText={setDraftName}
+                  placeholder="e.g. Weekend hikers"
+                  placeholderTextColor={Colors.textMuted}
+                  style={styles.groupTitleInput}
+                  autoCapitalize="words"
+                  autoCorrect={false}
+                />
+              </View>
             ) : (
               <Text
                 style={[styles.groupTitleReadOnly, !group.name.trim() && styles.readOnlyPlaceholder]}
@@ -575,19 +586,26 @@ export default function GroupDetailScreen() {
               </Text>
             )}
             {isAdmin ? (
-              <View style={[styles.groupDescBox, { marginTop: 10 }]}>
-                <TextInput
-                  value={draftDesc}
-                  onChangeText={setDraftDesc}
-                  placeholder="Description"
-                  placeholderTextColor={Colors.textMuted}
-                  style={styles.groupDescInput}
-                  multiline
-                />
+              <View style={styles.groupDescField}>
+                <Text style={formSectionTitleStyle}>Description</Text>
+                <View style={styles.groupDescBox}>
+                  <TextInput
+                    value={draftDesc}
+                    onChangeText={setDraftDesc}
+                    placeholder="Optional"
+                    placeholderTextColor={Colors.textMuted}
+                    style={styles.groupDescInput}
+                    multiline
+                    scrollEnabled
+                  />
+                </View>
               </View>
             ) : group.desc?.trim() ? (
-              <View style={[styles.groupDescBox, { marginTop: 10 }]}>
-                <Text style={styles.groupDescText}>{group.desc}</Text>
+              <View style={styles.groupDescField}>
+                <Text style={formSectionTitleStyle}>Description</Text>
+                <View style={styles.groupDescBoxReadOnly}>
+                  <Text style={styles.groupDescText}>{group.desc}</Text>
+                </View>
               </View>
             ) : null}
           </View>
@@ -1062,12 +1080,15 @@ const styles = StyleSheet.create({
   groupMainCardWrap:{ marginHorizontal: 20, marginTop: 10, marginBottom: 4 },
   groupMainCard:    { backgroundColor: Colors.surface, borderRadius: Radius['2xl'], overflow: 'hidden' },
   groupSettingsSection: { marginHorizontal: 20, marginTop: 14 },
+  groupNameField: { marginBottom: 2 },
+  requiredMark: { color: Colors.todayRed, fontFamily: Fonts.semiBold },
   groupTitleInput:  {
     width: '100%',
-    paddingVertical: Platform.OS === 'ios' ? 8 : 4,
+    minHeight: 40,
+    paddingVertical: Platform.OS === 'ios' ? 6 : 4,
     paddingHorizontal: 0,
     margin: 0,
-    marginBottom: 4,
+    marginTop: 2,
     borderWidth: 0,
     backgroundColor: 'transparent',
     fontSize: 21,
@@ -1087,9 +1108,29 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     fontFamily: Fonts.regular,
   },
-  /** Match event detail `descBox` / `eventDescInput` */
-  groupDescBox:     { backgroundColor: Colors.bg, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border, padding: 12, marginBottom: 16 },
+  groupDescField: { marginTop: 10 },
+  /** Fixed height so typing in description does not shift content below */
+  groupDescBox: {
+    backgroundColor: Colors.bg,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: 12,
+    marginTop: 6,
+    marginBottom: 16,
+    height: 112,
+  },
+  groupDescBoxReadOnly: {
+    backgroundColor: Colors.bg,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: 12,
+    marginTop: 6,
+    marginBottom: 16,
+  },
   groupDescInput:   {
+    flex: 1,
     width: '100%',
     minHeight: 88,
     padding: 0,

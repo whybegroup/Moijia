@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect, useLayoutEffect, useRef } from 'react';
+import { useState, useMemo, useCallback, useEffect, useLayoutEffect, useRef, type ComponentRef } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   Modal,
   Pressable,
   Platform,
+  PixelRatio,
   useWindowDimensions,
   type NativeSyntheticEvent,
   type NativeScrollEvent,
@@ -19,6 +20,7 @@ import { isSameDay, isToday } from '../utils/helpers';
 import type { EventDetailed, GroupScoped } from '@moijia/client';
 import { useCurrentUserContext } from '../contexts/CurrentUserContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ScrollView as GestureScrollView } from 'react-native-gesture-handler';
 import { WeekDayTimelineGestures } from './WeekDayTimelineGestures';
 import { WeekTimedEventDraggable } from './WeekTimedEventDraggable';
 import { EventRow } from './EventRow';
@@ -51,6 +53,32 @@ interface CalendarViewProps {
   onCalendarBodyScrollYCommit?: (mode: CalendarScopeMode, y: number) => void;
   /** False until parent finished loading prefs — avoids locking scroll restore before stored Y is applied. */
   calendarScrollPrefsReady?: boolean;
+  /** Increment when leaving create-event or the events tab so an in-grid slot draft is cleared. */
+  clearWeekSlotDraftSeq?: number;
+  /** Persisted horizontal scroll of the year mini-month strip (see `onCalendarYearMonthStripCommit`). */
+  calendarYearMonthStrip?: { year: number; x: number };
+  onCalendarYearMonthStripCommit?: (payload: { year: number; x: number }) => void;
+}
+
+const YEAR_STRIP_PAD_H = 12;
+const YEAR_STRIP_CARD_MARGIN = 10;
+
+function yearStripContentWidth(cardSize: number): number {
+  return YEAR_STRIP_PAD_H * 2 + 12 * cardSize + 12 * YEAR_STRIP_CARD_MARGIN;
+}
+
+function yearStripScrollToCenterMonth(monthIndex: number, cardSize: number, viewportW: number): number {
+  const contentW = yearStripContentWidth(cardSize);
+  const cardLeft = YEAR_STRIP_PAD_H + monthIndex * (cardSize + YEAR_STRIP_CARD_MARGIN);
+  const raw = cardLeft + cardSize / 2 - viewportW / 2;
+  const maxScroll = Math.max(0, contentW - viewportW);
+  return Math.max(0, Math.min(maxScroll, Math.round(raw)));
+}
+
+function yearStripClampScroll(x: number, cardSize: number, viewportW: number): number {
+  const contentW = yearStripContentWidth(cardSize);
+  const maxScroll = Math.max(0, contentW - viewportW);
+  return Math.max(0, Math.min(maxScroll, Math.round(x)));
 }
 
 const HOUR_HEIGHT = 40;
@@ -147,7 +175,7 @@ function timedSegmentForDay(
   const clipE = evE < de ? evE : de;
   const dayMs = 24 * 60 * 60 * 1000;
   const top = ((clipS.getTime() - ds.getTime()) / dayMs) * TIMELINE_HEIGHT;
-  const height = Math.max(((clipE.getTime() - clipS.getTime()) / dayMs) * TIMELINE_HEIGHT, 20);
+  const height = ((clipE.getTime() - clipS.getTime()) / dayMs) * TIMELINE_HEIGHT;
   return { top, height };
 }
 
@@ -298,6 +326,9 @@ export function CalendarView({
   calendarBodyScrollY,
   onCalendarBodyScrollYCommit,
   calendarScrollPrefsReady = false,
+  clearWeekSlotDraftSeq = 0,
+  calendarYearMonthStrip,
+  onCalendarYearMonthStripCommit,
 }: CalendarViewProps) {
   const { userId: meId } = useCurrentUserContext();
   const { width: winW, height: winH } = useWindowDimensions();
@@ -317,6 +348,13 @@ export function CalendarView({
     top: number;
     height: number;
   } | null>(null);
+
+  useEffect(() => {
+    if (clearWeekSlotDraftSeq > 0) {
+      setWeekSlotDraft(null);
+    }
+  }, [clearWeekSlotDraftSeq]);
+
   /** Actual width of the week day strip (avoids using full window width when parent is narrower). */
   const [weekDaysStripMeasuredW, setWeekDaysStripMeasuredW] = useState<number | null>(null);
   /** Source day column lifted above siblings while a timed event is dragged across days. */
@@ -383,9 +421,17 @@ export function CalendarView({
     }
   }, [scopeMode]);
 
-  const weekBodyVerticalRef = useRef<ScrollView>(null);
+  const weekBodyVerticalRef = useRef<ComponentRef<typeof GestureScrollView>>(null);
   const monthVerticalRef = useRef<ScrollView>(null);
   const yearVerticalRef = useRef<ScrollView>(null);
+  const yearMonthStripScrollRef = useRef<ScrollView>(null);
+  const yearStripViewportWRef = useRef(0);
+  const [yearStripViewportW, setYearStripViewportW] = useState(0);
+  const latestYearStripXRef = useRef(0);
+  const yearStripSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** After we auto-center once for a calendar year (no saved strip), ignore until `year` changes. */
+  const appliedDefaultYearStripForYearRef = useRef<number | null>(null);
+  const stripScrollYearRef = useRef(0);
   const bodyScrollMapRef = useRef(calendarBodyScrollY);
   bodyScrollMapRef.current = calendarBodyScrollY;
   const scopeModeRef = useRef(scopeMode);
@@ -426,19 +472,57 @@ export function CalendarView({
     if (y != null) onCalendarBodyScrollYCommit(mode, Math.max(0, Math.round(y)));
   }, [onCalendarBodyScrollYCommit]);
 
+  const scheduleYearStripScrollPersist = useCallback(
+    (stripYear: number, x: number) => {
+      if (!onCalendarYearMonthStripCommit) return;
+      latestYearStripXRef.current = x;
+      if (yearStripSaveTimerRef.current) clearTimeout(yearStripSaveTimerRef.current);
+      yearStripSaveTimerRef.current = setTimeout(() => {
+        yearStripSaveTimerRef.current = null;
+        onCalendarYearMonthStripCommit({
+          year: stripYear,
+          x: Math.max(0, Math.round(x)),
+        });
+      }, 280);
+    },
+    [onCalendarYearMonthStripCommit]
+  );
+
+  const flushYearStripScrollPersist = useCallback(() => {
+    if (!onCalendarYearMonthStripCommit) return;
+    if (yearStripSaveTimerRef.current) {
+      clearTimeout(yearStripSaveTimerRef.current);
+      yearStripSaveTimerRef.current = null;
+    }
+    onCalendarYearMonthStripCommit({
+      year: stripScrollYearRef.current,
+      x: Math.max(0, Math.round(latestYearStripXRef.current)),
+    });
+  }, [onCalendarYearMonthStripCommit]);
+
   useEffect(() => {
     return () => {
       if (bodyScrollSaveTimerRef.current) {
         clearTimeout(bodyScrollSaveTimerRef.current);
         bodyScrollSaveTimerRef.current = null;
       }
+      if (yearStripSaveTimerRef.current) {
+        clearTimeout(yearStripSaveTimerRef.current);
+        yearStripSaveTimerRef.current = null;
+      }
       if (onCalendarBodyScrollYCommit) {
         const mode = scopeModeRef.current;
         const y = latestBodyScrollYRef.current[mode];
         if (y != null) onCalendarBodyScrollYCommit(mode, Math.max(0, Math.round(y)));
       }
+      if (onCalendarYearMonthStripCommit && scopeModeRef.current === 'year') {
+        onCalendarYearMonthStripCommit({
+          year: stripScrollYearRef.current,
+          x: Math.max(0, Math.round(latestYearStripXRef.current)),
+        });
+      }
     };
-  }, [onCalendarBodyScrollYCommit]);
+  }, [onCalendarBodyScrollYCommit, onCalendarYearMonthStripCommit]);
 
   useEffect(() => {
     if (!calendarScrollPrefsReady) return;
@@ -484,6 +568,17 @@ export function CalendarView({
 
   const year = focusDate.getFullYear();
   const month = focusDate.getMonth();
+  stripScrollYearRef.current = year;
+
+  const onYearMonthStripScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (scopeMode !== 'year') return;
+      const x = e.nativeEvent.contentOffset.x;
+      latestYearStripXRef.current = x;
+      scheduleYearStripScrollPersist(year, x);
+    },
+    [scopeMode, year, scheduleYearStripScrollPersist]
+  );
 
   const grid = useMemo(() => getMonthGrid(year, month), [year, month]);
 
@@ -492,6 +587,7 @@ export function CalendarView({
     () => Math.min(200, Math.max(96, Math.round(winW - 48))),
     [winW]
   );
+
   const yearCardPad = 6;
   const yearCardTitleBand = 14;
   const yearCardDowBand = 12;
@@ -501,6 +597,76 @@ export function CalendarView({
   const yearCellH = Math.max(8, Math.floor(yearGridInnerH / 6));
   const yearDayNumSize = Math.max(7, Math.min(11, Math.floor(Math.min(yearCellW, yearCellH) * 0.52)));
   const yearCellBox = { width: yearCellW, height: yearCellH };
+
+  useEffect(() => {
+    if (scopeMode !== 'year') {
+      appliedDefaultYearStripForYearRef.current = null;
+    }
+  }, [scopeMode]);
+
+  const scrollYearStripToCenterMonth = useCallback(
+    (calendarYear: number, monthIdx: number, animated: boolean) => {
+      stripScrollYearRef.current = calendarYear;
+      const vw = yearStripViewportWRef.current || yearStripViewportW;
+      if (vw < 8) return;
+      const x = yearStripScrollToCenterMonth(monthIdx, yearMonthCardSize, vw);
+      yearMonthStripScrollRef.current?.scrollTo({ x, animated });
+      latestYearStripXRef.current = x;
+      if (yearStripSaveTimerRef.current) {
+        clearTimeout(yearStripSaveTimerRef.current);
+        yearStripSaveTimerRef.current = null;
+      }
+      onCalendarYearMonthStripCommit?.({ year: calendarYear, x });
+    },
+    [yearMonthCardSize, yearStripViewportW, onCalendarYearMonthStripCommit]
+  );
+
+  useLayoutEffect(() => {
+    if (scopeMode !== 'year' || !calendarScrollPrefsReady || yearStripViewportW < 8) return;
+    const vw = yearStripViewportW;
+    const cardSize = yearMonthCardSize;
+    const saved = calendarYearMonthStrip;
+    const stripRef = yearMonthStripScrollRef.current;
+    if (!stripRef) return;
+
+    if (saved?.year === year) {
+      appliedDefaultYearStripForYearRef.current = year;
+      const x = yearStripClampScroll(saved.x, cardSize, vw);
+      stripRef.scrollTo({ x, animated: false });
+      latestYearStripXRef.current = x;
+      return;
+    }
+
+    if (appliedDefaultYearStripForYearRef.current === year) {
+      return;
+    }
+    appliedDefaultYearStripForYearRef.current = year;
+    const today = new Date();
+    const centerMo = year === today.getFullYear() ? today.getMonth() : month;
+    const x = yearStripScrollToCenterMonth(centerMo, cardSize, vw);
+    stripRef.scrollTo({ x, animated: false });
+    latestYearStripXRef.current = x;
+    onCalendarYearMonthStripCommit?.({ year, x });
+  }, [
+    scopeMode,
+    year,
+    month,
+    calendarScrollPrefsReady,
+    calendarYearMonthStrip,
+    yearMonthCardSize,
+    yearStripViewportW,
+    onCalendarYearMonthStripCommit,
+  ]);
+
+  const goToToday = useCallback(() => {
+    const t = new Date();
+    setFocusDate(t);
+    if (scopeMode === 'year') {
+      requestAnimationFrame(() => {
+        scrollYearStripToCenterMonth(t.getFullYear(), t.getMonth(), true);
+      });
+    }
+  }, [scopeMode, scrollYearStripToCenterMonth]);
 
   const groupsMap = useMemo(() => {
     const map: Record<string, GroupScoped> = {};
@@ -528,8 +694,6 @@ export function CalendarView({
     () => eventsOverlappingCalendarMonth(year, month, events),
     [year, month, events]
   );
-
-  const goToToday = () => setFocusDate(new Date());
 
   const prevNav = () => {
     setFocusDate((d) => {
@@ -731,7 +895,7 @@ export function CalendarView({
                       <WeekDayTimelineGestures
                         day={day}
                         timelineHeight={TIMELINE_HEIGHT}
-                        requireLongPressToPaint={scopeMode === 'week'}
+                        requireLongPressToPaint={scopeMode === 'week' || scopeMode === 'day'}
                         onDraftChange={(d) =>
                           setWeekSlotDraft(d ? { dayKey: dateKey(day), ...d } : null)
                         }
@@ -759,7 +923,8 @@ export function CalendarView({
                     const segKey = `wk-${ev.id}-${String(ev.start)}-${dateKey(day)}`;
                     const creatorCanDragWeek =
                       !!onWeekEventTimeMove && !!meId && ev.createdBy === meId;
-                    if (creatorCanDragWeek) {
+                    const eventEnded = new Date(ev.end).getTime() < Date.now();
+                    if (creatorCanDragWeek && !eventEnded) {
                       return (
                         <WeekTimedEventDraggable
                           key={segKey}
@@ -853,8 +1018,8 @@ export function CalendarView({
     weekDragSourceDayKey,
   ]);
 
-  const weekHeaderHRef = useRef<ScrollView>(null);
-  const weekBodyHRef = useRef<ScrollView>(null);
+  const weekHeaderHRef = useRef<ComponentRef<typeof GestureScrollView>>(null);
+  const weekBodyHRef = useRef<ComponentRef<typeof GestureScrollView>>(null);
   const weekHSyncLock = useRef(false);
 
   const onWeekHeaderHScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -956,7 +1121,7 @@ export function CalendarView({
             <View style={styles.weekPinnedHeaderRow}>
               <View style={[styles.weekHeaderGutterSpacer, { width: TIME_GUTTER_W }]} />
               {needsWeekHorizontalScroll ? (
-                <ScrollView
+                <GestureScrollView
                   ref={weekHeaderHRef}
                   horizontal
                   showsHorizontalScrollIndicator
@@ -967,7 +1132,7 @@ export function CalendarView({
                   scrollEventThrottle={16}
                 >
                   <View style={{ width: weekScrollContentWidth }}>{timelineParts.header}</View>
-                </ScrollView>
+                </GestureScrollView>
               ) : (
                 <View
                   style={styles.weekScrollableDays}
@@ -980,7 +1145,7 @@ export function CalendarView({
                 </View>
               )}
             </View>
-            <ScrollView
+            <GestureScrollView
               ref={weekBodyVerticalRef}
               style={styles.weekBodyVerticalScroll}
               nestedScrollEnabled
@@ -1002,7 +1167,7 @@ export function CalendarView({
                   </View>
                 </View>
                 {needsWeekHorizontalScroll ? (
-                  <ScrollView
+                  <GestureScrollView
                     ref={weekBodyHRef}
                     horizontal
                     showsHorizontalScrollIndicator
@@ -1013,14 +1178,14 @@ export function CalendarView({
                     scrollEventThrottle={16}
                   >
                     <View style={{ width: weekScrollContentWidth }}>{timelineParts.body}</View>
-                  </ScrollView>
+                  </GestureScrollView>
                 ) : (
                   <View style={styles.weekScrollableDays}>
                     <View style={styles.weekDaysInnerStretch}>{timelineParts.body}</View>
                   </View>
                 )}
               </View>
-            </ScrollView>
+            </GestureScrollView>
           </View>
         </View>
       )}
@@ -1160,11 +1325,22 @@ export function CalendarView({
         >
           {renderMonthNavigation()}
           <ScrollView
+            ref={yearMonthStripScrollRef}
             horizontal
             nestedScrollEnabled
             showsHorizontalScrollIndicator
             style={[styles.yearMonthStrip, { height: yearMonthCardSize + 16 }]}
             contentContainerStyle={styles.yearMonthStripContent}
+            onLayout={(e) => {
+              const w = Math.round(e.nativeEvent.layout.width);
+              if (w < 1) return;
+              yearStripViewportWRef.current = w;
+              setYearStripViewportW(w);
+            }}
+            onScroll={onYearMonthStripScroll}
+            scrollEventThrottle={32}
+            onScrollEndDrag={flushYearStripScrollPersist}
+            onMomentumScrollEnd={flushYearStripScrollPersist}
           >
             {Array.from({ length: 12 }, (_, m) => {
               const monthStart = new Date(year, m, 1);
@@ -1575,8 +1751,9 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#9AA3AF',
+    borderTopWidth: 1 / Math.max(PixelRatio.get(), 1),
+    borderTopColor: 'rgba(24, 24, 27, 0.11)',
+    borderStyle: 'solid',
   },
   nowLine: {
     position: 'absolute',
@@ -1595,7 +1772,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.accent,
     backgroundColor: 'rgba(24, 24, 27, 0.12)',
-    zIndex: 1,
+    zIndex: 25,
   },
   timedEventBlock: {
     position: 'absolute',

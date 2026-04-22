@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef } from 'react';
-import { Platform, StyleSheet, Text, type TransformsStyle } from 'react-native';
+import { Alert, Platform, StyleSheet, Text, type TransformsStyle } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   runOnJS,
@@ -133,6 +133,15 @@ export function WeekTimedEventDraggable({
     onDragActiveRef.current?.(active);
   }, []);
 
+  const showMoveToPastError = useCallback(() => {
+    const msg = 'Events cannot be moved to a time in the past.';
+    if (Platform.OS === 'web') {
+      window.alert(msg);
+    } else {
+      Alert.alert('Cannot move event', msg);
+    }
+  }, []);
+
   const finishDrag = useCallback(
     (translationX: number, translationY: number) => {
       if (!canDrag || movePending) return;
@@ -149,9 +158,22 @@ export function WeekTimedEventDraggable({
       const os = new Date(ev.start).getTime();
       const oe = new Date(ev.end).getTime();
       if (start.getTime() === os && end.getTime() === oe) return;
+      if (start.getTime() < Date.now()) {
+        showMoveToPastError();
+        return;
+      }
       onMoveRef.current(start, end);
     },
-    [canDrag, movePending, ev, columnDay, weekDays, columnStride, timelineHeight]
+    [
+      canDrag,
+      movePending,
+      ev,
+      columnDay,
+      weekDays,
+      columnStride,
+      timelineHeight,
+      showMoveToPastError,
+    ]
   );
 
   const animatedStyle = useAnimatedStyle(() => ({

@@ -19,11 +19,9 @@ import { getGroupColor, getDefaultGroupThemeFromName, groupAvatarBorderRadius } 
 import { NavBar, formSectionTitleStyle, Avatar, Toggle } from '../components/ui';
 import { EventFormPopoverChrome } from '../components/EventFormPopoverChrome';
 import { useCreateGroup } from '../hooks/api/useGroups';
-import { useUsers } from '../hooks/api';
 import { useAuth } from '../contexts/AuthContext';
 import { GroupAvatar } from '../components/GroupAvatar';
 import { AvatarPickerModal } from '../components/AvatarPickerModal';
-import { UserAvatar } from '../components/UserAvatar';
 import type { PendingAvatarFile } from '../services/pickAndUploadImage';
 import { uploadPendingAvatarFile } from '../services/pickAndUploadImage';
 import { ResolvableImage } from '../components/ResolvableImage';
@@ -39,8 +37,6 @@ export default function CreateGroupScreen() {
   const { returnTo: returnToRaw } = useLocalSearchParams<{ returnTo?: string | string[] }>();
   const groupReturnTo = parseReturnToParam(firstSearchParam(returnToRaw));
   const { user } = useAuth();
-  const { data: usersData } = useUsers();
-  const users = usersData ?? [];
   const createGroup = useCreateGroup();
   const [groupId] = useState(() => Crypto.randomUUID());
 
@@ -179,12 +175,7 @@ export default function CreateGroupScreen() {
   const themeName = draftName.trim() || 'Group';
 
   const groupPhotosBlock = (
-    <View
-      style={{
-        marginTop: draftDesc.trim() || draftName.trim() ? 4 : 10,
-        marginBottom: 0,
-      }}
-    >
+    <View style={{ marginTop: 10, marginBottom: 0 }}>
       <View style={{ paddingHorizontal: 16 }}>
         <Text style={formSectionTitleStyle}>
           Photos{coverPhotosForDisplay.length > 0 ? ` · ${coverPhotosForDisplay.length}` : ''}
@@ -259,14 +250,6 @@ export default function CreateGroupScreen() {
 
   const displayNameForChrome = draftName.trim() || 'New group';
 
-  const meUser = users.find((u) => u.id === user?.uid);
-  const meDisplayName =
-    meUser?.displayName?.trim() ||
-    meUser?.name?.trim() ||
-    user?.displayName?.trim() ||
-    user?.email?.split('@')[0] ||
-    'You';
-
   return (
     <>
       <EventFormPopoverChrome onClose={requestClose}>
@@ -274,33 +257,34 @@ export default function CreateGroupScreen() {
           <NavBar
             onClose={requestClose}
             right={
-              createFormDirty ? (
-                <View style={styles.navEditActions}>
-                  <TouchableOpacity
-                    onPress={resetCreateForm}
-                    disabled={createGroup.isPending}
-                    style={[styles.draftBarBtnSecondary, createGroup.isPending && { opacity: 0.45 }]}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={styles.draftBarBtnSecondaryText}>Reset</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={() => void handleCreate()}
-                    disabled={!valid || createGroup.isPending}
-                    style={[
-                      styles.draftBarBtnPrimary,
-                      (!valid || createGroup.isPending) && styles.draftBarBtnPrimaryDisabled,
-                    ]}
-                    activeOpacity={0.8}
-                  >
-                    {createGroup.isPending ? (
-                      <ActivityIndicator size="small" color={Colors.accentFg} />
-                    ) : (
-                      <Text style={styles.draftBarBtnPrimaryText}>Create</Text>
-                    )}
-                  </TouchableOpacity>
-                </View>
-              ) : undefined
+              <View style={styles.navEditActions}>
+                <TouchableOpacity
+                  onPress={resetCreateForm}
+                  disabled={!createFormDirty || createGroup.isPending}
+                  style={[
+                    styles.draftBarBtnSecondary,
+                    (!createFormDirty || createGroup.isPending) && { opacity: 0.45 },
+                  ]}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.draftBarBtnSecondaryText}>Reset</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => void handleCreate()}
+                  disabled={!valid || createGroup.isPending}
+                  style={[
+                    styles.draftBarBtnPrimary,
+                    (!valid || createGroup.isPending) && styles.draftBarBtnPrimaryDisabled,
+                  ]}
+                  activeOpacity={0.8}
+                >
+                  {createGroup.isPending ? (
+                    <ActivityIndicator size="small" color={Colors.accentFg} />
+                  ) : (
+                    <Text style={styles.draftBarBtnPrimaryText}>Create</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
             }
           />
 
@@ -334,31 +318,44 @@ export default function CreateGroupScreen() {
                       style={{ width: AVATAR_SIZE, height: AVATAR_SIZE }}
                     />
                   </TouchableOpacity>
-                  <TextInput
-                    value={draftName}
-                    onChangeText={(text) => {
-                      setDraftName(text);
-                      if (text) {
-                        setDraftSeed(text);
-                      } else {
-                        setDraftSeed(DEFAULT_AVATAR_SEED);
-                      }
-                    }}
-                    placeholder="Group name"
-                    placeholderTextColor={Colors.textMuted}
-                    style={styles.groupTitleInput}
-                    autoCapitalize="words"
-                    autoCorrect={false}
-                  />
-                  <View style={[styles.groupDescBox, { marginTop: 10 }]}>
+                  <View style={styles.groupNameField}>
+                    <Text style={formSectionTitleStyle}>
+                      Group name
+                      <Text style={styles.requiredMark} accessibilityLabel="required">
+                        {' '}
+                        *
+                      </Text>
+                    </Text>
                     <TextInput
-                      value={draftDesc}
-                      onChangeText={setDraftDesc}
-                      placeholder="Description"
+                      value={draftName}
+                      onChangeText={(text) => {
+                        setDraftName(text);
+                        if (text) {
+                          setDraftSeed(text);
+                        } else {
+                          setDraftSeed(DEFAULT_AVATAR_SEED);
+                        }
+                      }}
+                      placeholder="e.g. Weekend hikers"
                       placeholderTextColor={Colors.textMuted}
-                      style={styles.groupDescInput}
-                      multiline
+                      style={styles.groupTitleInput}
+                      autoCapitalize="words"
+                      autoCorrect={false}
                     />
+                  </View>
+                  <View style={styles.groupDescField}>
+                    <Text style={formSectionTitleStyle}>Description</Text>
+                    <View style={styles.groupDescBox}>
+                      <TextInput
+                        value={draftDesc}
+                        onChangeText={setDraftDesc}
+                        placeholder="Optional"
+                        placeholderTextColor={Colors.textMuted}
+                        style={styles.groupDescInput}
+                        multiline
+                        scrollEnabled
+                      />
+                    </View>
                   </View>
                 </View>
 
@@ -375,30 +372,6 @@ export default function CreateGroupScreen() {
                   label="Require approval to join?"
                   style={{ borderBottomWidth: 0, paddingHorizontal: 16 }}
                 />
-              </View>
-
-              <Text style={styles.sectionLabel}>MEMBERS · 1</Text>
-              <View style={[styles.card, { marginBottom: 16 }]}>
-                <View style={styles.memberRow}>
-                  <UserAvatar
-                    seed={meDisplayName}
-                    backgroundColor={
-                      meUser?.avatarSeed != null && meUser.avatarSeed !== ''
-                        ? [meUser.avatarSeed]
-                        : undefined
-                    }
-                    thumbnail={meUser?.thumbnail}
-                    size={38}
-                  />
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.memberName}>
-                      {meDisplayName}
-                      <Text style={styles.youLabel}> · you</Text>
-                    </Text>
-                    <Text style={styles.memberRole}>Super Admin</Text>
-                  </View>
-                  <Ionicons name="star" size={16} color="#CA8A04" />
-                </View>
               </View>
             </View>
 
@@ -513,19 +486,18 @@ const styles = StyleSheet.create({
   },
   sectionLabelSpaced: { marginTop: 8 },
   card: { backgroundColor: Colors.surface, borderRadius: Radius['2xl'], overflow: 'hidden' },
-  memberRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, paddingHorizontal: 16 },
-  memberName: { fontSize: 14, fontFamily: Fonts.medium, color: Colors.text },
-  youLabel: { fontSize: 12, color: Colors.textMuted, fontFamily: Fonts.regular },
-  memberRole: { fontSize: 11, color: Colors.textMuted, fontFamily: Fonts.regular, marginTop: 1 },
   groupMainCardWrap: { marginHorizontal: 20, marginTop: 10, marginBottom: 4 },
   groupMainCard: { backgroundColor: Colors.surface, borderRadius: Radius['2xl'], overflow: 'hidden' },
   groupThumb: { width: AVATAR_SIZE, height: AVATAR_SIZE, borderWidth: 1, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  groupNameField: { marginBottom: 2 },
+  requiredMark: { color: Colors.todayRed, fontFamily: Fonts.semiBold },
   groupTitleInput: {
     width: '100%',
-    paddingVertical: Platform.OS === 'ios' ? 8 : 4,
+    minHeight: 40,
+    paddingVertical: Platform.OS === 'ios' ? 6 : 4,
     paddingHorizontal: 0,
     margin: 0,
-    marginBottom: 4,
+    marginTop: 2,
     borderWidth: 0,
     backgroundColor: 'transparent',
     fontSize: 21,
@@ -534,15 +506,19 @@ const styles = StyleSheet.create({
     lineHeight: 28,
     ...(Platform.OS === 'web' ? ({ outlineStyle: 'none', outlineWidth: 0 } as object) : null),
   },
+  groupDescField: { marginTop: 10 },
   groupDescBox: {
     backgroundColor: Colors.bg,
     borderRadius: Radius.lg,
     borderWidth: 1,
     borderColor: Colors.border,
     padding: 12,
+    marginTop: 6,
     marginBottom: 16,
+    height: 112,
   },
   groupDescInput: {
+    flex: 1,
     width: '100%',
     minHeight: 88,
     padding: 0,
