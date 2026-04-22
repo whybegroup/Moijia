@@ -37,6 +37,7 @@ model User {
   createdActivityOptions  EventActivityOption[] @relation("ActivityOptionAuthor")
   createdPolls            Poll[]               @relation("PollCreator")
   pollOptionVotes         PollOptionVote[]
+  pollTextAnswers         PollTextAnswer[]
 
   @@map("users")
 }
@@ -321,6 +322,7 @@ model Poll {
   photos  PollPhoto[]
   options PollOption[]
   votes   PollOptionVote[]
+  textAnswers PollTextAnswer[]
 
   @@map("polls")
 }
@@ -373,6 +375,23 @@ model PollOptionVote {
   @@index([pollId, userId])
   @@unique([pollId, pollOptionId, userId])
   @@map("poll_option_votes")
+}
+
+model PollTextAnswer {
+  id          String   @id @default(uuid())
+  pollId      String
+  questionKey String
+  userId      String
+  answer      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  poll Poll @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([pollId, questionKey])
+  @@unique([pollId, questionKey, userId])
+  @@map("poll_text_answers")
 }
 
 // ============================================

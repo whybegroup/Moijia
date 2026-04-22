@@ -59,7 +59,7 @@ type ParsedQuestionMeta = {
   questionKey: string;
   questionIndex: number;
   questionTitle: string;
-  questionType: 'single' | 'multiple' | 'rating';
+  questionType: 'single' | 'multiple' | 'rating' | 'text';
   optionLabel: string;
 };
 
@@ -72,7 +72,9 @@ function parseQuestionMetaFromOptionText(text: string): ParsedQuestionMeta | nul
   const rawType = m[3].trim().toLowerCase();
   const optionLabel = m[4].trim();
   const questionType =
-    rawType.includes('rating')
+    rawType.includes('text')
+      ? 'text'
+      : rawType.includes('rating')
       ? 'rating'
       : rawType.includes('multiple')
         ? 'multiple'
@@ -111,7 +113,8 @@ export class PollService {
       where: { groupId_userId: { groupId: poll.groupId, userId } },
       select: { status: true },
     });
-    return m?.status === 'active';
+    // "Joined" visibility includes pending + active membership states.
+    return m?.status === 'active' || m?.status === 'pending';
   }
 
   private mapOption(row: {
@@ -185,8 +188,8 @@ export class PollService {
     textFont: string;
     dateTimeValue: Date | null;
   }> {
-    if (!options || options.length < 2) {
-      throw Object.assign(new Error('At least two poll options are required'), { status: 400 });
+    if (!options || options.length < 1) {
+      throw Object.assign(new Error('At least one poll option is required'), { status: 400 });
     }
     const sorted = [...options].sort((a, b) => a.sortOrder - b.sortOrder);
     const out: Array<{
@@ -315,7 +318,7 @@ export class PollService {
 
   public async listForUser(userId: string): Promise<Poll[]> {
     const memberships = await prisma.groupMember.findMany({
-      where: { userId, status: 'active' },
+      where: { userId, status: { in: ['active', 'pending'] } },
       select: { groupId: true },
     });
     const groupIds = memberships.map((m) => m.groupId);
@@ -332,7 +335,12 @@ export class PollService {
     return rows.map((row) => this.mapPoll(row));
   }
 
-  public async submitVote(pollId: string, userId: string, optionIds: string[]): Promise<PollResults> {
+  public async submitVote(
+    pollId: string,
+    userId: string,
+    optionIds: string[],
+    textAnswers: Array<{ questionKey: string; answer: string }> = [],
+  ): Promise<PollResults> {
     if (!Array.isArray(optionIds)) {
       throw Object.assign(new Error('optionIds must be an array'), { status: 400 });
     }
@@ -355,7 +363,7 @@ export class PollService {
 
     const byQuestion = new Map<
       string,
-      { type: 'single' | 'multiple' | 'rating'; optionIds: string[] }
+      { type: 'single' | 'multiple' | 'rating' | 'text'; optionIds: string[] }
     >();
     for (const o of poll.options) {
       const text = o.textHtml?.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() ?? '';
@@ -366,22 +374,52 @@ export class PollService {
       byQuestion.get(key)!.optionIds.push(o.id);
     }
 
+    const normalizedPicked: string[] = [];
     for (const [, q] of byQuestion) {
       const qPicked = picked.filter((id) => q.optionIds.includes(id));
-      if (q.type === 'single' && qPicked.length > 1) {
-        throw Object.assign(new Error('Single choice questions allow only one option'), { status: 400 });
+      if (q.type === 'text') {
+        continue;
       }
+      if (q.type === 'single') {
+        if (qPicked.length > 0) normalizedPicked.push(qPicked[0]!);
+        continue;
+      }
+      normalizedPicked.push(...qPicked);
     }
+
+    const cleanedTextAnswers = (textAnswers ?? [])
+      .map((t) => ({
+        questionKey: String(t.questionKey || '').trim(),
+        answer: String(t.answer || '').trim(),
+      }))
+      .filter((t) => t.questionKey && t.answer);
+
+    const validTextAnswers = cleanedTextAnswers.filter((t) => {
+      const q = byQuestion.get(t.questionKey);
+      return !!q && q.type === 'text';
+    });
 
     await prisma.$transaction(async (tx) => {
       await tx.pollOptionVote.deleteMany({ where: { pollId, userId } });
-      if (picked.length > 0) {
+      await tx.pollTextAnswer.deleteMany({ where: { pollId, userId } });
+      if (normalizedPicked.length > 0) {
         await tx.pollOptionVote.createMany({
-          data: picked.map((pollOptionId) => ({
+          data: normalizedPicked.map((pollOptionId) => ({
             id: randomUUID(),
             pollId,
             pollOptionId,
             userId,
+          })),
+        });
+      }
+      if (validTextAnswers.length > 0) {
+        await tx.pollTextAnswer.createMany({
+          data: validTextAnswers.map((t) => ({
+            id: randomUUID(),
+            pollId,
+            userId,
+            questionKey: t.questionKey,
+            answer: t.answer,
           })),
         });
       }
@@ -395,7 +433,8 @@ export class PollService {
       where: { id: pollId },
       include: {
         options: true,
-        votes: true,
+        votes: { include: { user: { select: { id: true, name: true, displayName: true } } } },
+        textAnswers: { include: { user: { select: { id: true, name: true, displayName: true } } } },
       },
     });
     if (!poll) throw Object.assign(new Error('Poll not found'), { status: 404 });
@@ -417,26 +456,51 @@ export class PollService {
           questionTitle: meta?.questionTitle ?? poll.title,
           questionType: meta?.questionType ?? 'single',
           totalVotes: 0,
+          textResponseCount: 0,
+          textResponses: [],
           options: [],
         });
       }
-      const votes = poll.votes.filter((v) => v.pollOptionId === o.id).length;
+      const optionVotes = poll.votes.filter((v) => v.pollOptionId === o.id);
+      const votes = optionVotes.length;
       grouped.get(key)!.options.push({
         optionId: o.id,
         label: meta?.optionLabel ?? (text || 'Option'),
         votes,
         pct: 0,
+        voters: optionVotes.map((v) => ({
+          userId: v.userId,
+          userName: v.user.displayName || v.user.name,
+        })),
       });
     }
 
     const questions = Array.from(grouped.values()).sort((a, b) => a.questionIndex - b.questionIndex);
     for (const q of questions) {
-      const total = q.options.reduce((n, o) => n + o.votes, 0);
-      q.totalVotes = total;
-      q.options = q.options.map((o) => ({
-        ...o,
-        pct: total > 0 ? Math.round((o.votes / total) * 100) : 0,
-      }));
+      if (q.questionType === 'text') {
+        const responses = poll.textAnswers
+          .filter((t) => t.questionKey === q.questionKey)
+          .map((t) => ({
+            userId: t.userId,
+            userName: t.user.displayName || t.user.name,
+            answer: t.answer,
+          }));
+        q.textResponses = responses;
+        q.textResponseCount = responses.length;
+        q.totalVotes = responses.length;
+        q.options = [];
+      } else {
+        const total = q.options.reduce((n, o) => n + o.votes, 0);
+        q.totalVotes = total;
+        q.options = q.options.map((o) => ({
+          ...o,
+          pct: total > 0 ? Math.round((o.votes / total) * 100) : 0,
+        }));
+      }
+      if (poll.anonymousVotes) {
+        q.options = q.options.map((o) => ({ ...o, voters: [] }));
+        q.textResponses = [];
+      }
     }
 
     return { pollId, myOptionIds, questions };

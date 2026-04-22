@@ -66,19 +66,33 @@ export interface Poll {
 export interface PollVoteInput {
   userId: string;
   optionIds: string[];
+  textAnswers?: Array<{
+    questionKey: string;
+    answer: string;
+  }>;
 }
 
 export interface PollQuestionResult {
   questionKey: string;
   questionIndex: number;
   questionTitle: string;
-  questionType: 'single' | 'multiple' | 'rating';
+  questionType: 'single' | 'multiple' | 'rating' | 'text';
   totalVotes: number;
+  textResponseCount?: number;
+  textResponses?: Array<{
+    userId: string;
+    userName: string;
+    answer: string;
+  }>;
   options: Array<{
     optionId: string;
     label: string;
     votes: number;
     pct: number;
+    voters?: Array<{
+      userId: string;
+      userName: string;
+    }>;
   }>;
 }
 

@@ -45,7 +45,16 @@ export function useSubmitPollVote(id: string, userId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (optionIds: string[]) => PollsService.submitVote(id, { userId, optionIds }),
+    mutationFn: (payload: { optionIds: string[]; textAnswers?: Array<{ questionKey: string; answer: string }> }) => {
+      const body: { userId: string; optionIds: string[]; textAnswers?: Array<{ questionKey: string; answer: string }> } = {
+        userId,
+        optionIds: payload.optionIds,
+      };
+      if (payload.textAnswers && payload.textAnswers.length > 0) {
+        body.textAnswers = payload.textAnswers;
+      }
+      return PollsService.submitVote(id, body);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.polls.results(id, userId) });
     },

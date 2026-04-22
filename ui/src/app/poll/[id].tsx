@@ -7,6 +7,8 @@ import {
   ActivityIndicator,
   TouchableOpacity,
   Alert,
+  TextInput,
+  Modal,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { Colors, Fonts, Radius } from '../../constants/theme';
@@ -24,7 +26,7 @@ function stripHtmlPreview(html: string): string {
     .trim();
 }
 
-type ParsedQuestionType = 'single' | 'multiple' | 'rating';
+type ParsedQuestionType = 'single' | 'multiple' | 'rating' | 'text';
 type ParsedQuestion = {
   key: string;
   index: number;
@@ -35,6 +37,7 @@ type ParsedQuestion = {
 
 function parseQuestionType(raw: string): ParsedQuestionType {
   const t = raw.trim().toLowerCase();
+  if (t.includes('text')) return 'text';
   if (t.includes('multiple')) return 'multiple';
   if (t.includes('rating')) return 'rating';
   return 'single';
@@ -77,7 +80,9 @@ function parseStructuredPollQuestions(poll: NonNullable<ReturnType<typeof usePol
         options: [],
       });
     }
-    map.get(key)!.options.push({ id: o.id, label: optionLabel || '—' });
+    if (qType !== 'text') {
+      map.get(key)!.options.push({ id: o.id, label: optionLabel || '—' });
+    }
   }
   return Array.from(map.values()).sort((a, b) => a.index - b.index);
 }
@@ -92,7 +97,12 @@ export default function PollDetailScreen() {
   const { data: results } = usePollResults(id ?? '', userId ?? '');
   const submitVoteMutation = useSubmitPollVote(id ?? '', userId ?? '');
   const [selectedByQuestion, setSelectedByQuestion] = useState<Record<string, string[]>>({});
+  const [textAnswerByQuestion, setTextAnswerByQuestion] = useState<Record<string, string>>({});
   const [submittedOnce, setSubmittedOnce] = useState(false);
+  const [detailModal, setDetailModal] = useState<{
+    title: string;
+    rows: string[];
+  } | null>(null);
   const parsedQuestions = useMemo(() => (poll ? parseStructuredPollQuestions(poll) : []), [poll]);
 
   useEffect(() => {
@@ -140,10 +150,49 @@ export default function PollDetailScreen() {
                   <View style={styles.questionHeader}>
                     <Text style={styles.questionTitle}>{q.index}. {q.title}</Text>
                     <Text style={styles.questionTypeChip}>
-                      {q.type === 'multiple' ? 'Multiple choice' : q.type === 'rating' ? 'Ranking' : 'Single choice'}
+                      {q.type === 'text'
+                        ? 'Text'
+                        : q.type === 'multiple'
+                          ? 'Multiple choice'
+                          : q.type === 'rating'
+                            ? 'Ranking'
+                            : 'Single choice'}
                     </Text>
                   </View>
                   <View style={{ gap: 8 }}>
+                    {q.type === 'text' ? (
+                      <>
+                        <TextInput
+                          value={textAnswerByQuestion[q.key] ?? ''}
+                          onChangeText={(v) => setTextAnswerByQuestion((prev) => ({ ...prev, [q.key]: v }))}
+                          placeholder="Type your answer"
+                          placeholderTextColor={Colors.textMuted}
+                          style={styles.textAnswerInput}
+                          multiline
+                        />
+                        {(submittedOnce || results) ? (
+                          <TouchableOpacity
+                            style={styles.textResponseBtn}
+                            onPress={() => {
+                              const resultQuestion = results?.questions.find((rq) => rq.questionKey === q.key);
+                              if (!resultQuestion) return;
+                              if (poll.anonymousVotes) return;
+                              const rows =
+                                resultQuestion.textResponses?.map((r) => `${r.userName}: ${r.answer}`) ?? [];
+                              setDetailModal({
+                                title: `${q.title} responses`,
+                                rows,
+                              });
+                            }}
+                            disabled={!!poll.anonymousVotes}
+                          >
+                            <Text style={styles.textResponseBtnText}>
+                              {results?.questions.find((rq) => rq.questionKey === q.key)?.textResponseCount ?? 0} responded
+                            </Text>
+                          </TouchableOpacity>
+                        ) : null}
+                      </>
+                    ) : null}
                     {q.options.map((opt) => {
                       const sel = selectedByQuestion[q.key] ?? [];
                       const selected = sel.includes(opt.id);
@@ -180,9 +229,24 @@ export default function PollDetailScreen() {
                                 <View style={styles.resultTrack}>
                                   <View style={[styles.resultFill, { width: `${resultOption.pct}%` }]} />
                                 </View>
-                                <Text style={styles.resultText}>
-                                  {resultOption.votes} votes ({resultOption.pct}%)
-                                </Text>
+                                {poll.anonymousVotes ? (
+                                  <Text style={styles.resultText}>
+                                    {resultOption.votes} votes ({resultOption.pct}%)
+                                  </Text>
+                                ) : (
+                                  <TouchableOpacity
+                                    onPress={() =>
+                                      setDetailModal({
+                                        title: `${opt.label} voters`,
+                                        rows: (resultOption.voters ?? []).map((v) => v.userName),
+                                      })
+                                    }
+                                  >
+                                    <Text style={[styles.resultText, styles.resultTextLink]}>
+                                      {resultOption.votes} votes ({resultOption.pct}%)
+                                    </Text>
+                                  </TouchableOpacity>
+                                )}
                               </View>
                             ) : null}
                           </View>
@@ -197,12 +261,26 @@ export default function PollDetailScreen() {
                 disabled={submitVoteMutation.isPending}
                 onPress={async () => {
                   const optionIds = Object.values(selectedByQuestion).flat();
+                  const textAnswers = parsedQuestions
+                    .filter((q) => q.type === 'text')
+                    .map((q) => ({
+                      questionKey: q.key,
+                      answer: (textAnswerByQuestion[q.key] ?? '').trim(),
+                    }))
+                    .filter((x) => x.answer.length > 0);
                   try {
-                    await submitVoteMutation.mutateAsync(optionIds);
+                    await submitVoteMutation.mutateAsync({ optionIds, textAnswers });
                     setSubmittedOnce(true);
                     Alert.alert('Vote submitted', 'Results are now updated for each question.');
                   } catch (e: any) {
-                    Alert.alert('Could not submit vote', e?.message ?? 'Please try again.');
+                    const msg =
+                      e?.body?.error ||
+                      e?.body?.message ||
+                      e?.response?.data?.error ||
+                      e?.response?.data?.message ||
+                      e?.message ||
+                      'Please try again.';
+                    Alert.alert('Could not submit vote', String(msg));
                   }
                 }}
               >
@@ -214,6 +292,39 @@ export default function PollDetailScreen() {
             </>
           )}
         </ScrollView>
+        <Modal visible={!!detailModal} transparent animationType="fade" onRequestClose={() => setDetailModal(null)}>
+          <View style={styles.modalBackdrop}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>{detailModal?.title ?? ''}</Text>
+              <ScrollView style={{ maxHeight: 320 }} contentContainerStyle={{ gap: 8 }}>
+                {(detailModal?.rows ?? []).map((r, i) => {
+                  const sep = r.indexOf(':');
+                  const hasAnswerShape = sep > 0;
+                  const responder = hasAnswerShape ? r.slice(0, sep).trim() : r.trim();
+                  const answer = hasAnswerShape ? r.slice(sep + 1).trim() : '';
+                  const initial = responder ? responder.charAt(0).toUpperCase() : '?';
+                  return (
+                    <View key={`${i}-${r}`} style={styles.modalRowCard}>
+                      <View style={styles.modalAvatar}>
+                        <Text style={styles.modalAvatarText}>{initial}</Text>
+                      </View>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={styles.modalResponderName}>{responder || 'Responder'}</Text>
+                        {answer ? <Text style={styles.modalResponseText}>{answer}</Text> : null}
+                      </View>
+                    </View>
+                  );
+                })}
+                {(detailModal?.rows ?? []).length === 0 ? (
+                  <Text style={styles.modalEmpty}>No responses yet.</Text>
+                ) : null}
+              </ScrollView>
+              <TouchableOpacity style={styles.modalCloseBtn} onPress={() => setDetailModal(null)}>
+                <Text style={styles.modalCloseText}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
       </View>
     </EventFormPopoverChrome>
   );
@@ -305,6 +416,28 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   voteOptionText: { flex: 1, minWidth: 0, fontSize: 15, fontFamily: Fonts.medium, color: Colors.text },
+  textAnswerInput: {
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    backgroundColor: '#F9FAFB',
+    borderRadius: Radius.lg,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    minHeight: 70,
+    fontSize: 14,
+    color: Colors.text,
+    fontFamily: Fonts.regular,
+    textAlignVertical: 'top',
+  },
+  textResponseBtn: {
+    alignSelf: 'flex-start',
+    paddingVertical: 4,
+  },
+  textResponseBtnText: {
+    fontSize: 12,
+    fontFamily: Fonts.semiBold,
+    color: '#6B7280',
+  },
   resultWrap: {
     marginTop: 6,
     flexDirection: 'row',
@@ -330,6 +463,9 @@ const styles = StyleSheet.create({
     minWidth: 72,
     textAlign: 'right',
   },
+  resultTextLink: {
+    textDecorationLine: 'underline',
+  },
   submitVoteBtn: {
     marginTop: 8,
     borderRadius: Radius.xl,
@@ -348,5 +484,80 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: Fonts.regular,
     color: Colors.textMuted,
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 460,
+    backgroundColor: '#FFFFFF',
+    borderRadius: Radius.xl,
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    padding: 14,
+    gap: 10,
+  },
+  modalTitle: {
+    fontSize: 16,
+    fontFamily: Fonts.bold,
+    color: Colors.text,
+  },
+  modalRowCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    padding: 10,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    backgroundColor: '#F9FAFB',
+  },
+  modalAvatar: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#E5E7EB',
+  },
+  modalAvatarText: {
+    fontSize: 13,
+    fontFamily: Fonts.bold,
+    color: '#4B5563',
+  },
+  modalResponderName: {
+    fontSize: 13,
+    fontFamily: Fonts.semiBold,
+    color: '#374151',
+  },
+  modalResponseText: {
+    marginTop: 3,
+    fontSize: 14,
+    lineHeight: 20,
+    fontFamily: Fonts.regular,
+    color: '#111827',
+  },
+  modalEmpty: {
+    fontSize: 13,
+    fontFamily: Fonts.regular,
+    color: Colors.textMuted,
+    paddingVertical: 8,
+  },
+  modalCloseBtn: {
+    alignSelf: 'flex-end',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: Radius.lg,
+    backgroundColor: '#E5E7EB',
+  },
+  modalCloseText: {
+    fontSize: 13,
+    fontFamily: Fonts.semiBold,
+    color: '#374151',
   },
 });

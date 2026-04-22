@@ -58,13 +58,14 @@ function webPollDatetimeInputStyle(): Record<string, string | number> {
   };
 }
 
-type QuestionType = 'choice' | 'rating';
+type QuestionType = 'choice' | 'text';
 
 type QuestionDraft = {
   id: string;
   title: string;
   options: string[];
   multipleChoice: boolean;
+  enableRating: boolean;
   type: QuestionType;
 };
 
@@ -74,6 +75,7 @@ function newQuestionDraft(): QuestionDraft {
     title: '',
     options: ['', ''],
     multipleChoice: false,
+    enableRating: false,
     type: 'choice',
   };
 }
@@ -115,6 +117,7 @@ function serializeCreatePollDraft(args: {
       options: q.options,
       multipleChoice: q.multipleChoice,
       type: q.type,
+      enableRating: q.enableRating,
     })),
   });
 }
@@ -257,6 +260,7 @@ export default function CreatePollScreen() {
     () =>
       questionDrafts.every((q) => {
         const titleOk = q.title.trim().length > 0;
+        if (q.type === 'text') return titleOk;
         const validOptions = q.options.filter((o) => stripForLength(o) > 0);
         return titleOk && validOptions.length >= 2;
       }),
@@ -358,7 +362,23 @@ export default function CreatePollScreen() {
 
     const options = questionDrafts.flatMap((q, qi) => {
       const typeLabel =
-        q.type === 'rating' ? 'Rating' : q.multipleChoice ? 'Multiple choice' : 'Single choice';
+        q.type === 'text'
+          ? 'Text'
+          : q.enableRating
+            ? 'Rating'
+            : q.multipleChoice
+              ? 'Multiple choice'
+              : 'Single choice';
+      if (q.type === 'text') {
+        return [
+          {
+            id: uid(),
+            inputKind: PollOptionInputKind.TEXT,
+            sortOrder: qi * 1000,
+            textHtml: `Q${qi + 1}: ${q.title.trim()} [${typeLabel}] - __TEXT_RESPONSE__`,
+          },
+        ];
+      }
       const cleanOptions = q.options.map((o) => o.trim()).filter((o) => o.length > 0);
       return cleanOptions.map((opt, oi) => ({
         id: uid(),
@@ -378,8 +398,8 @@ export default function CreatePollScreen() {
       coverPhotos,
       options,
       anonymousVotes: form.anonymousVotes,
-      multipleChoice: form.multipleChoice,
-      ranking: form.ranking,
+      multipleChoice: questionDrafts.some((q) => q.multipleChoice),
+      ranking: questionDrafts.some((q) => q.enableRating),
     };
 
     try {
@@ -556,6 +576,13 @@ export default function CreatePollScreen() {
               </View>
             ) : null}
           </Field>
+          <Field label="Privacy">
+            <Toggle
+              value={form.anonymousVotes}
+              onChange={(v) => set('anonymousVotes', v)}
+              label="Enable anonymous vote"
+            />
+          </Field>
 
           <View style={styles.photosSection}>
             {Platform.OS === 'web' && (
@@ -615,7 +642,7 @@ export default function CreatePollScreen() {
 
           <Field label="Questions" required>
             <Text style={styles.optionsHint}>
-              Add question blocks. Each question needs at least 2 text options.
+              Choice questions need at least 2 options. Text questions accept free-form answers.
             </Text>
             {questionDrafts.map((q, qIndex) => (
               <View key={q.id} style={styles.optionCard}>
@@ -631,11 +658,17 @@ export default function CreatePollScreen() {
                       </Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      onPress={() => updateQuestion(q.id, { type: 'rating' })}
-                      style={[styles.kindChip, q.type === 'rating' && styles.kindChipOn]}
+                      onPress={() =>
+                        updateQuestion(q.id, {
+                          type: 'text',
+                          multipleChoice: false,
+                          enableRating: false,
+                        })
+                      }
+                      style={[styles.kindChip, q.type === 'text' && styles.kindChipOn]}
                     >
-                      <Text style={[styles.kindChipText, q.type === 'rating' && styles.kindChipTextOn]}>
-                        Rating
+                      <Text style={[styles.kindChipText, q.type === 'text' && styles.kindChipTextOn]}>
+                        Text
                       </Text>
                     </TouchableOpacity>
                   </View>
@@ -658,37 +691,56 @@ export default function CreatePollScreen() {
                   placeholderTextColor={Colors.textMuted}
                   style={styles.input}
                 />
-                <View style={{ marginTop: 10 }}>
-                  <Toggle
-                    value={q.multipleChoice}
-                    onChange={(v) => updateQuestion(q.id, { multipleChoice: v })}
-                    label="Enable multiple choice"
-                  />
-                </View>
-
-                <View style={{ gap: 8, marginTop: 10 }}>
-                  {q.options.map((opt, oi) => (
-                    <View key={`${q.id}-o-${oi}`} style={styles.questionOptionRow}>
-                      <TextInput
-                        value={opt}
-                        onChangeText={(v) => updateQuestionOption(q.id, oi, v)}
-                        placeholder={`Option ${oi + 1}`}
-                        placeholderTextColor={Colors.textMuted}
-                        style={[styles.input, { flex: 1 }]}
+                {q.type === 'choice' ? (
+                  <>
+                    <View style={{ marginTop: 10 }}>
+                      <Toggle
+                        value={q.multipleChoice}
+                        onChange={(v) =>
+                          updateQuestion(q.id, {
+                            multipleChoice: v,
+                            enableRating: v ? q.enableRating : false,
+                          })
+                        }
+                        label="Enable multiple choice"
                       />
-                      {q.options.length > 2 ? (
-                        <TouchableOpacity onPress={() => removeQuestionOption(q.id, oi)} style={styles.optionRemoveBtn}>
-                          <Ionicons name="close" size={14} color={Colors.textMuted} />
-                        </TouchableOpacity>
-                      ) : null}
                     </View>
-                  ))}
-                </View>
+                    {q.multipleChoice ? (
+                      <View style={{ marginTop: 10 }}>
+                        <Toggle
+                          value={q.enableRating}
+                          onChange={(v) => updateQuestion(q.id, { enableRating: v })}
+                          label="Enable rating"
+                        />
+                      </View>
+                    ) : null}
+                    <View style={{ gap: 8, marginTop: 10 }}>
+                      {q.options.map((opt, oi) => (
+                        <View key={`${q.id}-o-${oi}`} style={styles.questionOptionRow}>
+                          <TextInput
+                            value={opt}
+                            onChangeText={(v) => updateQuestionOption(q.id, oi, v)}
+                            placeholder={`Option ${oi + 1}`}
+                            placeholderTextColor={Colors.textMuted}
+                            style={[styles.input, { flex: 1 }]}
+                          />
+                          {q.options.length > 2 ? (
+                            <TouchableOpacity onPress={() => removeQuestionOption(q.id, oi)} style={styles.optionRemoveBtn}>
+                              <Ionicons name="close" size={14} color={Colors.textMuted} />
+                            </TouchableOpacity>
+                          ) : null}
+                        </View>
+                      ))}
+                    </View>
 
-                <TouchableOpacity onPress={() => addQuestionOption(q.id)} style={styles.addOptionBtn}>
-                  <Ionicons name="add-circle-outline" size={18} color={Colors.accent} />
-                  <Text style={styles.addOptionText}>Add option</Text>
-                </TouchableOpacity>
+                    <TouchableOpacity onPress={() => addQuestionOption(q.id)} style={styles.addOptionBtn}>
+                      <Ionicons name="add-circle-outline" size={18} color={Colors.accent} />
+                      <Text style={styles.addOptionText}>Add option</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <Text style={styles.optionsHint}>Responders will submit free-form text for this question.</Text>
+                )}
               </View>
             ))}
             <TouchableOpacity onPress={addQuestion} style={styles.addOptionBtn}>

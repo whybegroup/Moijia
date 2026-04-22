@@ -66,7 +66,7 @@ export class PollController extends Controller {
       this.setStatus(400);
       throw new Error('userId is required');
     }
-    return this.pollService.submitVote(id, body.userId, body.optionIds ?? []);
+    return this.pollService.submitVote(id, body.userId, body.optionIds ?? [], body.textAnswers ?? []);
   }
 
   /**
