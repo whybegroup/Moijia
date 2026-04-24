@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Path, Post, Query, Route, SuccessResponse, Tags } from 'tsoa';
-import { Poll, PollInput, PollResults, PollVoteInput } from '../models';
+import { Body, Controller, Delete, Get, Path, Post, Put, Query, Route, SuccessResponse, Tags } from 'tsoa';
+import { Poll, PollInput, PollResults, PollVoteInput, PollWatchInput } from '../models';
 import { PollService } from '../services/PollService';
 
 @Route('polls')
@@ -55,6 +55,22 @@ export class PollController extends Controller {
   }
 
   /**
+   * Watch / unwatch this poll for default notifications.
+   */
+  @Put('{id}/watch')
+  public async setPollWatch(
+    @Path() id: string,
+    @Query() userId: string,
+    @Body() body: PollWatchInput
+  ): Promise<{ watching: boolean; defaultWatching: boolean }> {
+    if (!userId) {
+      this.setStatus(400);
+      throw new Error('userId is required');
+    }
+    return this.pollService.setPollWatch(id, userId, body);
+  }
+
+  /**
    * Submit or replace the user's votes for this poll.
    */
   @Post('{id}/vote')
@@ -79,5 +95,19 @@ export class PollController extends Controller {
       throw new Error('userId is required');
     }
     return this.pollService.getResults(id, userId);
+  }
+
+  /**
+   * Delete a poll (creator or group admin).
+   */
+  @Delete('{id}')
+  @SuccessResponse('204', 'No Content')
+  public async deletePoll(@Path() id: string, @Query() userId: string): Promise<void> {
+    if (!userId) {
+      this.setStatus(400);
+      throw new Error('userId is required');
+    }
+    await this.pollService.delete(id, userId);
+    this.setStatus(204);
   }
 }

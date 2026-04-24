@@ -67,6 +67,7 @@ type QuestionDraft = {
   multipleChoice: boolean;
   enableRating: boolean;
   type: QuestionType;
+  anonymousVotes: boolean;
 };
 
 function newQuestionDraft(): QuestionDraft {
@@ -77,6 +78,7 @@ function newQuestionDraft(): QuestionDraft {
     multipleChoice: false,
     enableRating: false,
     type: 'choice',
+    anonymousVotes: false,
   };
 }
 
@@ -91,7 +93,6 @@ function serializeCreatePollDraft(args: {
     description: string;
     groupId: string;
     coverPhotoDrafts: CoverPhotoDraft[];
-    anonymousVotes: boolean;
     multipleChoice: boolean;
     ranking: boolean;
   };
@@ -107,7 +108,6 @@ function serializeCreatePollDraft(args: {
     coverPhotos: form.coverPhotoDrafts.map((d) =>
       d.kind === 'remote' ? `r:${d.url}` : `p:${d.previewUri}`
     ),
-    anonymousVotes: form.anonymousVotes,
     multipleChoice: form.multipleChoice,
     ranking: form.ranking,
     deadlineDate,
@@ -118,6 +118,7 @@ function serializeCreatePollDraft(args: {
       multipleChoice: q.multipleChoice,
       type: q.type,
       enableRating: q.enableRating,
+      anonymousVotes: q.anonymousVotes,
     })),
   });
 }
@@ -139,7 +140,6 @@ export default function CreatePollScreen() {
     description: '',
     groupId: '',
     coverPhotoDrafts: [] as CoverPhotoDraft[],
-    anonymousVotes: false,
     multipleChoice: false,
     ranking: false,
   });
@@ -369,13 +369,14 @@ export default function CreatePollScreen() {
             : q.multipleChoice
               ? 'Multiple choice'
               : 'Single choice';
+      const metaLabel = q.anonymousVotes ? `${typeLabel}|anon` : typeLabel;
       if (q.type === 'text') {
         return [
           {
             id: uid(),
             inputKind: PollOptionInputKind.TEXT,
             sortOrder: qi * 1000,
-            textHtml: `Q${qi + 1}: ${q.title.trim()} [${typeLabel}] - __TEXT_RESPONSE__`,
+            textHtml: `Q${qi + 1}: ${q.title.trim()} [${metaLabel}] - __TEXT_RESPONSE__`,
           },
         ];
       }
@@ -384,7 +385,7 @@ export default function CreatePollScreen() {
         id: uid(),
         inputKind: PollOptionInputKind.TEXT,
         sortOrder: qi * 1000 + oi,
-        textHtml: `Q${qi + 1}: ${q.title.trim()} [${typeLabel}] - ${opt}`,
+        textHtml: `Q${qi + 1}: ${q.title.trim()} [${metaLabel}] - ${opt}`,
       }));
     });
 
@@ -397,7 +398,7 @@ export default function CreatePollScreen() {
       deadline: localWallDateTimeToUtcIso(deadlineDate, deadlineTime),
       coverPhotos,
       options,
-      anonymousVotes: form.anonymousVotes,
+      anonymousVotes: false,
       multipleChoice: questionDrafts.some((q) => q.multipleChoice),
       ranking: questionDrafts.some((q) => q.enableRating),
     };
@@ -576,14 +577,6 @@ export default function CreatePollScreen() {
               </View>
             ) : null}
           </Field>
-          <Field label="Privacy">
-            <Toggle
-              value={form.anonymousVotes}
-              onChange={(v) => set('anonymousVotes', v)}
-              label="Enable anonymous vote"
-            />
-          </Field>
-
           <View style={styles.photosSection}>
             {Platform.OS === 'web' && (
               <input
@@ -695,6 +688,13 @@ export default function CreatePollScreen() {
                   <>
                     <View style={{ marginTop: 10 }}>
                       <Toggle
+                        value={q.anonymousVotes}
+                        onChange={(v) => updateQuestion(q.id, { anonymousVotes: v })}
+                        label="Enable anonymous vote"
+                      />
+                    </View>
+                    <View style={{ marginTop: 10 }}>
+                      <Toggle
                         value={q.multipleChoice}
                         onChange={(v) =>
                           updateQuestion(q.id, {
@@ -739,7 +739,16 @@ export default function CreatePollScreen() {
                     </TouchableOpacity>
                   </>
                 ) : (
-                  <Text style={styles.optionsHint}>Responders will submit free-form text for this question.</Text>
+                  <>
+                    <View style={{ marginTop: 10, marginBottom: 8 }}>
+                      <Toggle
+                        value={q.anonymousVotes}
+                        onChange={(v) => updateQuestion(q.id, { anonymousVotes: v })}
+                        label="Enable anonymous vote"
+                      />
+                    </View>
+                    <Text style={styles.optionsHint}>Responders will submit free-form text for this question.</Text>
+                  </>
                 )}
               </View>
             ))}

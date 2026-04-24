@@ -38,6 +38,7 @@ model User {
   createdPolls            Poll[]               @relation("PollCreator")
   pollOptionVotes         PollOptionVote[]
   pollTextAnswers         PollTextAnswer[]
+  pollWatches             PollWatch[]
 
   @@map("users")
 }
@@ -323,8 +324,25 @@ model Poll {
   options PollOption[]
   votes   PollOptionVote[]
   textAnswers PollTextAnswer[]
+  watches PollWatch[]
 
   @@map("polls")
+}
+
+// Explicit watch/follow for poll notifications (default: creator watches)
+model PollWatch {
+  id        String   @id @default(uuid())
+  pollId    String
+  userId    String
+  watching  Boolean
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  poll Poll @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([pollId, userId])
+  @@map("poll_watches")
 }
 
 model PollPhoto {
@@ -365,6 +383,8 @@ model PollOptionVote {
   pollId       String
   pollOptionId String
   userId       String
+  /// Ranking position for ranking-type questions (1 = best). Defaults to 1.
+  rank         Int      @default(1)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

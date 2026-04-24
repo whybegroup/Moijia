@@ -1,6 +1,36 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { PollsService, type Poll, type PollInput, type PollResults } from '@moijia/client';
+import { OpenAPI, PollsService, type Poll, type PollInput, type PollResults, type PollWatchInput } from '@moijia/client';
 import { queryKeys } from '../../config/queryClient';
+import '../../config/apiBase';
+
+/** Works when Metro serves a stale `@moijia/client` bundle without `deletePoll`. */
+async function deletePollNetwork(pollId: string, uid: string): Promise<void> {
+  const del = (PollsService as unknown as { deletePoll?: (a: string, b: string) => Promise<void> }).deletePoll;
+  if (typeof del === 'function') {
+    await del(pollId, uid);
+    return;
+  }
+  const base = String(OpenAPI.BASE ?? '').replace(/\/$/, '');
+  const url = `${base}/polls/${encodeURIComponent(pollId)}?${new URLSearchParams({ userId: uid }).toString()}`;
+  const res = await fetch(url, { method: 'DELETE' });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const text = await res.text();
+      if (text) {
+        try {
+          const j = JSON.parse(text) as { error?: string; message?: string };
+          detail = (j.message || j.error || text).trim();
+        } catch {
+          detail = text.trim() || detail;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    throw Object.assign(new Error(detail || `Request failed (${res.status})`), { status: res.status });
+  }
+}
 
 export function usePolls(userId: string) {
   return useQuery<Poll[]>({
@@ -33,6 +63,22 @@ export function useCreatePoll(userId: string) {
   });
 }
 
+export function useSetPollWatch(id: string, userId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: PollWatchInput) => {
+      if (!userId) throw new Error('Not signed in');
+      return PollsService.setPollWatch(id, userId, body);
+    },
+    onSuccess: () => {
+      if (userId) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.polls.detail(id, userId) });
+        queryClient.invalidateQueries({ queryKey: queryKeys.polls.list(userId) });
+      }
+    },
+  });
+}
+
 export function usePollResults(id: string, userId: string) {
   return useQuery<PollResults>({
     queryKey: queryKeys.polls.results(id, userId),
@@ -57,6 +103,23 @@ export function useSubmitPollVote(id: string, userId: string) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.polls.results(id, userId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.polls.list(userId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.polls.detail(id, userId) });
+    },
+  });
+}
+
+export function useDeletePoll(userId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (pollId: string) => {
+      if (!userId) throw new Error('Not signed in');
+      return deletePollNetwork(pollId, userId);
+    },
+    onSuccess: (_data, pollId) => {
+      queryClient.invalidateQueries({ queryKey: ['polls'] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.polls.detail(pollId, userId) });
     },
   });
 }
