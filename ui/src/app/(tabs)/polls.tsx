@@ -12,11 +12,12 @@ import {
   useNotifications,
   usePolls,
 } from '../../hooks/api';
-import { getDefaultGroupThemeFromName, getGroupColor } from '../../utils/helpers';
+import { dayShort, fmtDateShort, getDefaultGroupThemeFromName, getGroupColor, isToday } from '../../utils/helpers';
 import { withReturnTo } from '../../utils/navigationReturn';
 import { CreateOrJoinButton } from '../../components/CreateOrJoinButton';
 import { Pill } from '../../components/ui';
 import { NotificationsPanelModal } from '../../components/NotificationsPanelModal';
+import { PollRow } from '../../components/PollRow';
 import Svg, { Path } from 'react-native-svg';
 
 let WebDatePicker: any = null;
@@ -41,6 +42,18 @@ function deadlineForPoll(poll: Poll): Date | null {
     if (Number.isFinite(ts) && ts < minTs) minTs = ts;
   }
   return Number.isFinite(minTs) ? new Date(minTs) : null;
+}
+
+function startDateKeyLocal(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function dateFromLocalKey(key: string): Date {
+  const [ys, ms, ds] = key.split('-').map(Number);
+  return new Date(ys, ms - 1, ds);
 }
 
 export default function PollsScreen() {
@@ -160,12 +173,49 @@ export default function PollsScreen() {
   ]);
   const sortedPolls = useMemo(() => {
     return [...filteredPolls].sort((a, b) => {
-      const ad = deadlineForPoll(a)?.getTime() ?? Number.NEGATIVE_INFINITY;
-      const bd = deadlineForPoll(b)?.getTime() ?? Number.NEGATIVE_INFINITY;
+      const ad = deadlineForPoll(a)?.getTime() ?? Number.POSITIVE_INFINITY;
+      const bd = deadlineForPoll(b)?.getTime() ?? Number.POSITIVE_INFINITY;
       if (ad !== bd) return ad - bd;
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
   }, [filteredPolls]);
+
+  type PollListRow =
+    | { kind: 'divider'; key: string; label: string; highlightToday?: boolean }
+    | { kind: 'poll'; key: string; poll: Poll };
+
+  const pollListRows = useMemo((): PollListRow[] => {
+    if (sortedPolls.length === 0) return [];
+    const buckets = new Map<string, Poll[]>();
+    for (const poll of sortedPolls) {
+      const dl = deadlineForPoll(poll);
+      const key = dl ? startDateKeyLocal(dl) : '__none__';
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key)!.push(poll);
+    }
+    const dateKeys = Array.from(buckets.keys())
+      .filter((k) => k !== '__none__')
+      .sort();
+    if ((buckets.get('__none__')?.length ?? 0) > 0) dateKeys.push('__none__');
+
+    const out: PollListRow[] = [];
+    for (const dayKey of dateKeys) {
+      if (dayKey === '__none__') {
+        out.push({ kind: 'divider', key: 'div-none', label: 'No deadline' });
+        for (const p of buckets.get('__none__')!) out.push({ kind: 'poll', key: p.id, poll: p });
+        continue;
+      }
+      const d = dateFromLocalKey(dayKey);
+      out.push({
+        kind: 'divider',
+        key: `div-${dayKey}`,
+        label: `${dayShort(d)} · ${fmtDateShort(d)}, ${d.getFullYear()}`,
+        highlightToday: isToday(d),
+      });
+      for (const p of buckets.get(dayKey) ?? []) out.push({ kind: 'poll', key: p.id, poll: p });
+    }
+    return out;
+  }, [sortedPolls]);
 
   const eventEligibleGroupCount = groups.filter(
     (g) => g.membershipStatus === 'member' || g.membershipStatus === 'admin'
@@ -429,7 +479,10 @@ export default function PollsScreen() {
         </View>
       </View>
 
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 100 }}>
+      <ScrollView
+        style={styles.pollsScroll}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 100 }}
+      >
         {sortedPolls.length === 0 ? (
           <View style={styles.emptyState}>
             <Ionicons name="pie-chart-outline" size={50} color={Colors.textMuted} />
@@ -437,41 +490,33 @@ export default function PollsScreen() {
             <Text style={styles.emptyDesc}>Create a poll to see it here.</Text>
           </View>
         ) : (
-          <View style={styles.card}>
-            {sortedPolls.map((poll, i) => {
-              const group = groupsById[poll.groupId];
-              const colorHex = groupColors[poll.groupId] || getDefaultGroupThemeFromName(group?.name ?? 'Group');
-              const palette = getGroupColor(colorHex);
-              const deadline = deadlineForPoll(poll);
+          pollListRows.map((row) => {
+            if (row.kind === 'divider') {
+              const today = row.highlightToday;
               return (
-                <TouchableOpacity
-                  key={poll.id}
-                  style={[styles.row, i < sortedPolls.length - 1 && styles.rowBorder]}
-                  onPress={() => router.push(withReturnTo(`/poll/${poll.id}`, pathname))}
-                  activeOpacity={0.72}
-                >
-                  <View style={[styles.groupDot, { backgroundColor: palette.dot }]} />
-                  <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={styles.pollTitle} numberOfLines={1}>
-                      {poll.title}
-                    </Text>
-                    <Text style={styles.pollMeta} numberOfLines={1}>
-                      {group?.name ?? 'Group'}
-                      {deadline
-                        ? ` · Deadline ${deadline.toLocaleString('default', {
-                            month: 'short',
-                            day: 'numeric',
-                            hour: 'numeric',
-                            minute: '2-digit',
-                          })}`
-                        : ' · No deadline'}
-                    </Text>
-                  </View>
-                  <Text style={styles.chevron}>›</Text>
-                </TouchableOpacity>
+                <View key={row.key} style={styles.dateDividerRow}>
+                  <View style={[styles.dividerLine, today && styles.dividerLineToday]} />
+                  <Text style={[styles.dateDividerLabel, today && styles.dateDividerLabelToday]}>{row.label}</Text>
+                  <View style={[styles.dividerLine, today && styles.dividerLineToday]} />
+                </View>
               );
-            })}
-          </View>
+            }
+            const poll = row.poll;
+            const group = groupsById[poll.groupId];
+            const colorHex = groupColors[poll.groupId] || getDefaultGroupThemeFromName(group?.name ?? 'Group');
+            return (
+              <View key={row.key} style={styles.pollCardWrap}>
+                <PollRow
+                  poll={poll}
+                  group={group}
+                  groupColorHex={colorHex}
+                  onPress={() => router.push(withReturnTo(`/poll/${poll.id}`, pathname))}
+                  onGroupPress={(gid) => router.push(withReturnTo(`/groups/${gid}`, pathname))}
+                  isLast={false}
+                />
+              </View>
+            );
+          })
         )}
       </ScrollView>
 
@@ -490,6 +535,40 @@ export default function PollsScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.bg },
+  pollsScroll: { flex: 1, backgroundColor: Colors.bg },
+  dateDividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: Colors.border,
+  },
+  dividerLineToday: {
+    backgroundColor: Colors.todayRed,
+  },
+  dateDividerLabel: {
+    fontSize: 11,
+    fontFamily: Fonts.medium,
+    color: Colors.textMuted,
+    flexShrink: 0,
+  },
+  dateDividerLabelToday: {
+    color: Colors.todayRed,
+    fontFamily: Fonts.semiBold,
+  },
+  pollCardWrap: {
+    backgroundColor: Colors.surface,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    overflow: 'hidden',
+    marginBottom: 0.5,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -600,17 +679,4 @@ const styles = StyleSheet.create({
   },
   emptyTitle: { fontSize: 18, fontFamily: Fonts.bold, color: Colors.text },
   emptyDesc: { fontSize: 14, fontFamily: Fonts.medium, color: Colors.textMuted },
-  card: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    overflow: 'hidden',
-  },
-  row: { flexDirection: 'row', alignItems: 'center', padding: 14, gap: 10 },
-  rowBorder: { borderBottomWidth: 1, borderBottomColor: Colors.border },
-  groupDot: { width: 10, height: 10, borderRadius: 5 },
-  pollTitle: { fontSize: 15, fontFamily: Fonts.semiBold, color: Colors.text },
-  pollMeta: { marginTop: 2, fontSize: 12, fontFamily: Fonts.medium, color: Colors.textMuted },
-  chevron: { color: Colors.textMuted, fontSize: 18 },
 });

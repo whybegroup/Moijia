@@ -8,6 +8,7 @@ import type {
   PollQuestionResult,
   PollResults,
   PollTextFont,
+  PollWatchInput,
 } from '../models';
 
 const prisma = new PrismaClient();
@@ -61,6 +62,7 @@ type ParsedQuestionMeta = {
   questionTitle: string;
   questionType: 'single' | 'multiple' | 'rating' | 'text';
   optionLabel: string;
+  anonymousVotes: boolean;
 };
 
 function parseQuestionMetaFromOptionText(text: string): ParsedQuestionMeta | null {
@@ -70,13 +72,16 @@ function parseQuestionMetaFromOptionText(text: string): ParsedQuestionMeta | nul
   const idx = Number(m[1]);
   const title = m[2].trim();
   const rawType = m[3].trim().toLowerCase();
+  const tokens = rawType.split('|').map((t) => t.trim()).filter(Boolean);
+  const baseType = tokens[0] ?? rawType;
+  const anonymousVotes = tokens.includes('anon') || tokens.includes('anonymous');
   const optionLabel = m[4].trim();
   const questionType =
-    rawType.includes('text')
+    baseType.includes('text')
       ? 'text'
-      : rawType.includes('rating')
+      : baseType.includes('rating')
       ? 'rating'
-      : rawType.includes('multiple')
+      : baseType.includes('multiple')
         ? 'multiple'
         : 'single';
   return {
@@ -85,10 +90,68 @@ function parseQuestionMetaFromOptionText(text: string): ParsedQuestionMeta | nul
     questionTitle: title || `Question ${idx}`,
     questionType,
     optionLabel: optionLabel || 'Option',
+    anonymousVotes,
   };
 }
 
 export class PollService {
+  private isMissingPollWatchTableError(err: unknown): boolean {
+    if (!err || typeof err !== 'object') return false;
+    const e = err as { code?: string; message?: string };
+    const msg = String(e.message || '').toLowerCase();
+    return e.code === 'P2021' || msg.includes('poll_watches') || msg.includes('pollwatch');
+  }
+
+  /** Users who have any poll_option_vote or poll_text_answer row for the poll. */
+  private async respondentCountsByPollIds(pollIds: string[]): Promise<Record<string, number>> {
+    if (pollIds.length === 0) return {};
+    const [optRows, textRows] = await Promise.all([
+      prisma.pollOptionVote.findMany({
+        where: { pollId: { in: pollIds } },
+        distinct: ['pollId', 'userId'],
+        select: { pollId: true, userId: true },
+      }),
+      prisma.pollTextAnswer.findMany({
+        where: { pollId: { in: pollIds } },
+        distinct: ['pollId', 'userId'],
+        select: { pollId: true, userId: true },
+      }),
+    ]);
+    const sets = new Map<string, Set<string>>();
+    for (const id of pollIds) sets.set(id, new Set());
+    for (const r of optRows) sets.get(r.pollId)?.add(r.userId);
+    for (const r of textRows) sets.get(r.pollId)?.add(r.userId);
+    const out: Record<string, number> = {};
+    for (const [id, s] of sets) out[id] = s.size;
+    return out;
+  }
+
+  /** Default watch state when no explicit PollWatch row exists. */
+  private defaultWatching(poll: { createdBy: string }, userId: string): boolean {
+    return poll.createdBy === userId;
+  }
+
+  private async enrichWithViewerWatch(poll: Poll, userId: string): Promise<Poll> {
+    const defaultWatch = this.defaultWatching(poll, userId);
+    try {
+      const row = await prisma.pollWatch.findUnique({
+        where: {
+          pollId_userId: {
+            pollId: poll.id,
+            userId,
+          },
+        },
+      });
+      const effective = row !== null ? row.watching : defaultWatch;
+      return { ...poll, viewerWatching: effective, viewerWatchDefault: defaultWatch };
+    } catch (err) {
+      if (this.isMissingPollWatchTableError(err)) {
+        return { ...poll, viewerWatching: defaultWatch, viewerWatchDefault: defaultWatch };
+      }
+      throw err;
+    }
+  }
+
   private async getActiveMemberRole(
     groupId: string,
     userId: string,
@@ -177,6 +240,7 @@ export class PollService {
       options: opts,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
+      respondentCount: 0,
     };
   }
 
@@ -313,7 +377,9 @@ export class PollService {
     });
     if (!row) return null;
     if (!(await this.userCanAccessPoll(row, userId))) return null;
-    return this.mapPoll(row);
+    const mapped = this.mapPoll(row);
+    const counts = await this.respondentCountsByPollIds([row.id]);
+    return this.enrichWithViewerWatch({ ...mapped, respondentCount: counts[row.id] ?? 0 }, userId);
   }
 
   public async listForUser(userId: string): Promise<Poll[]> {
@@ -332,7 +398,57 @@ export class PollService {
       },
       orderBy: { createdAt: 'desc' },
     });
-    return rows.map((row) => this.mapPoll(row));
+    const counts = await this.respondentCountsByPollIds(rows.map((r) => r.id));
+    const mapped = rows.map((row) => ({ ...this.mapPoll(row), respondentCount: counts[row.id] ?? 0 }));
+    return Promise.all(mapped.map((p) => this.enrichWithViewerWatch(p, userId)));
+  }
+
+  /**
+   * Any user who can open the poll may set their own watch preference.
+   */
+  public async setPollWatch(
+    pollId: string,
+    userId: string,
+    input: PollWatchInput
+  ): Promise<{ watching: boolean; defaultWatching: boolean }> {
+    const poll = await prisma.poll.findUnique({
+      where: { id: pollId },
+      select: { id: true, groupId: true, createdBy: true },
+    });
+    if (!poll) throw Object.assign(new Error('Poll not found'), { status: 404 });
+    if (!(await this.userCanAccessPoll(poll, userId))) {
+      throw Object.assign(new Error('Forbidden'), { status: 403 });
+    }
+    const defaultWatch = this.defaultWatching(poll, userId);
+    const want = !!input.watching;
+    try {
+      if (want === defaultWatch) {
+        await prisma.pollWatch.deleteMany({ where: { pollId, userId } });
+      } else {
+        await prisma.pollWatch.upsert({
+          where: {
+            pollId_userId: { pollId, userId },
+          },
+          create: {
+            pollId,
+            userId,
+            watching: want,
+          },
+          update: {
+            watching: want,
+          },
+        });
+      }
+    } catch (err) {
+      if (this.isMissingPollWatchTableError(err)) {
+        throw Object.assign(
+          new Error('Poll watch settings are unavailable until database migrations are applied'),
+          { status: 503 },
+        );
+      }
+      throw err;
+    }
+    return { watching: want, defaultWatching: defaultWatch };
   }
 
   public async submitVote(
@@ -374,17 +490,21 @@ export class PollService {
       byQuestion.get(key)!.optionIds.push(o.id);
     }
 
-    const normalizedPicked: string[] = [];
+    const normalizedPicked: Array<{ pollOptionId: string; rank: number }> = [];
     for (const [, q] of byQuestion) {
       const qPicked = picked.filter((id) => q.optionIds.includes(id));
       if (q.type === 'text') {
         continue;
       }
       if (q.type === 'single') {
-        if (qPicked.length > 0) normalizedPicked.push(qPicked[0]!);
+        if (qPicked.length > 0) normalizedPicked.push({ pollOptionId: qPicked[0]!, rank: 1 });
         continue;
       }
-      normalizedPicked.push(...qPicked);
+      if (q.type === 'rating') {
+        normalizedPicked.push(...qPicked.map((pollOptionId, idx) => ({ pollOptionId, rank: idx + 1 })));
+        continue;
+      }
+      normalizedPicked.push(...qPicked.map((pollOptionId) => ({ pollOptionId, rank: 1 })));
     }
 
     const cleanedTextAnswers = (textAnswers ?? [])
@@ -404,11 +524,12 @@ export class PollService {
       await tx.pollTextAnswer.deleteMany({ where: { pollId, userId } });
       if (normalizedPicked.length > 0) {
         await tx.pollOptionVote.createMany({
-          data: normalizedPicked.map((pollOptionId) => ({
+          data: normalizedPicked.map((pickedOption) => ({
             id: randomUUID(),
             pollId,
-            pollOptionId,
+            pollOptionId: pickedOption.pollOptionId,
             userId,
+            rank: pickedOption.rank,
           })),
         });
       }
@@ -455,6 +576,7 @@ export class PollService {
           questionIndex: meta?.questionIndex ?? 1,
           questionTitle: meta?.questionTitle ?? poll.title,
           questionType: meta?.questionType ?? 'single',
+          anonymousVotes: !!meta?.anonymousVotes,
           totalVotes: 0,
           textResponseCount: 0,
           textResponses: [],
@@ -462,7 +584,9 @@ export class PollService {
         });
       }
       const optionVotes = poll.votes.filter((v) => v.pollOptionId === o.id);
-      const votes = optionVotes.length;
+      const votes = grouped.get(key)?.questionType === 'rating'
+        ? optionVotes.reduce((sum, v) => sum + (v.rank ?? 1), 0)
+        : optionVotes.length;
       grouped.get(key)!.options.push({
         optionId: o.id,
         label: meta?.optionLabel ?? (text || 'Option'),
@@ -489,6 +613,14 @@ export class PollService {
         q.textResponseCount = responses.length;
         q.totalVotes = responses.length;
         q.options = [];
+      } else if (q.questionType === 'rating') {
+        // Lower rank sum is better (e.g. 1+2+1 beats 2+2+2).
+        const best = Math.min(...q.options.map((o) => o.votes));
+        q.totalVotes = q.options.reduce((n, o) => n + o.votes, 0);
+        q.options = q.options.map((o) => ({
+          ...o,
+          pct: o.votes > 0 ? Math.round((best / o.votes) * 100) : 0,
+        }));
       } else {
         const total = q.options.reduce((n, o) => n + o.votes, 0);
         q.totalVotes = total;
@@ -497,12 +629,27 @@ export class PollService {
           pct: total > 0 ? Math.round((o.votes / total) * 100) : 0,
         }));
       }
-      if (poll.anonymousVotes) {
+      if (poll.anonymousVotes || q.anonymousVotes) {
         q.options = q.options.map((o) => ({ ...o, voters: [] }));
         q.textResponses = [];
       }
     }
 
     return { pollId, myOptionIds, questions };
+  }
+
+  public async delete(id: string, actorUserId: string): Promise<void> {
+    const poll = await prisma.poll.findUnique({
+      where: { id },
+      select: { id: true, groupId: true, createdBy: true },
+    });
+    if (!poll) throw Object.assign(new Error('Poll not found'), { status: 404 });
+    const isCreator = poll.createdBy === actorUserId;
+    const role = await this.getActiveMemberRole(poll.groupId, actorUserId);
+    const isAdmin = role === 'admin' || role === 'superadmin';
+    if (!isCreator && !isAdmin) {
+      throw Object.assign(new Error('Forbidden'), { status: 403 });
+    }
+    await prisma.poll.delete({ where: { id } });
   }
 }

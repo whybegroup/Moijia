@@ -61,6 +61,17 @@ export interface Poll {
   options: PollOption[];
   createdAt: string;
   updatedAt: string;
+  /** Distinct group members who submitted at least one option vote or text answer. */
+  respondentCount: number;
+  /** Effective watcher status for the viewer (when loaded with userId). */
+  viewerWatching?: boolean;
+  /** Default watcher status for the viewer when no explicit PollWatch row exists. */
+  viewerWatchDefault?: boolean;
+}
+
+/** Body for PUT /polls/{id}/watch */
+export interface PollWatchInput {
+  watching: boolean;
 }
 
 export interface PollVoteInput {
@@ -77,6 +88,7 @@ export interface PollQuestionResult {
   questionIndex: number;
   questionTitle: string;
   questionType: 'single' | 'multiple' | 'rating' | 'text';
+  anonymousVotes?: boolean;
   totalVotes: number;
   textResponseCount?: number;
   textResponses?: Array<{
