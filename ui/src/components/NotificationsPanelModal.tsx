@@ -91,7 +91,7 @@ export function NotificationsPanelModal({
                       if (n.dest === Notification.dest.EVENT && n.eventId) {
                         router.push(withReturnTo(`/event/${n.eventId}`, pathname));
                       } else if (n.dest === Notification.dest.GROUP && n.groupId) {
-                        router.push(withReturnTo(`/groups/${n.groupId}`, pathname));
+                        router.push(withReturnTo(`/(tabs)/groups/${n.groupId}`, pathname));
                       }
                     }}
                     style={[

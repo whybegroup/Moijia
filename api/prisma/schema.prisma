@@ -51,6 +51,7 @@ model Group {
   id         String    @id @default(uuid())
   name       String
   desc       String
+  announcement String?  // Group announcement visible to all members
   thumbnail  String?
   avatarSeed String?  // DiceBear icons seed for generated avatar
   inviteCode String?   @unique

@@ -12,7 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, usePathname } from 'expo-router';
 import { withReturnTo } from '../../../utils/navigationReturn';
-import { Colors, Fonts, Layout, Radius } from '../../../constants/theme';
+import { Colors, Fonts, Radius } from '../../../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName, groupAvatarBorderRadius } from '../../../utils/helpers';
 import {
   useGroups,
@@ -22,11 +22,10 @@ import {
   useRecoverGroup,
 } from '../../../hooks/api';
 import { useCurrentUserContext } from '../../../contexts/CurrentUserContext';
-import Svg, { Path } from 'react-native-svg';
 import { GroupAvatar } from '../../../components/GroupAvatar';
 import { NotificationsPanelModal } from '../../../components/NotificationsPanelModal';
-import { GroupsPeopleGlyph } from '../../../components/TabScreenIcons';
-import { CreateOrJoinButton } from '../../../components/CreateOrJoinButton';
+import { GroupsTopHeader } from '../../../components/GroupsTopHeader';
+import { GroupsBreadcrumbTrail } from '../../../components/GroupsBreadcrumbTrail';
 
 export default function GroupsScreen() {
   const router = useRouter();
@@ -64,30 +63,17 @@ export default function GroupsScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <View style={styles.header}>
-        <View style={styles.headerTitleRow}>
-          <GroupsPeopleGlyph size={22} color={Colors.text} />
-          <Text style={styles.title} numberOfLines={1}>
-            Groups
-          </Text>
-        </View>
-        <View style={styles.headerActions}>
-          <CreateOrJoinButton userId={currentUserId} eventEligibleGroupCount={eventEligibleGroupCount} />
-          <TouchableOpacity
-            onPress={() => setShowNotifs((p) => !p)}
-            style={[styles.iconBtn, showNotifs && { borderColor: Colors.borderStrong, backgroundColor: Colors.bg }]}
-          >
-            <Svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke={Colors.text} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-              <Path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-              <Path d="M13.73 21a2 2 0 0 1-3.46 0" />
-            </Svg>
-            {unread > 0 && <View style={styles.bellDot} />}
-          </TouchableOpacity>
-        </View>
-      </View>
+      <GroupsTopHeader
+        userId={currentUserId}
+        eventEligibleGroupCount={eventEligibleGroupCount}
+        showNotifs={showNotifs}
+        onToggleNotifs={() => setShowNotifs((p) => !p)}
+        unreadCount={unread}
+      />
 
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 100 }}>
-        <Text style={styles.sectionLabel}>My groups</Text>
+      <GroupsBreadcrumbTrail segments={[{ label: 'All Groups' }]} />
+
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }}>
         {groups.length === 0 ? (
           <View style={styles.myEmpty}>
             <Ionicons name="people-outline" size={48} color={Colors.textMuted} style={styles.emptyGlyph} />
@@ -101,6 +87,7 @@ export default function GroupsScreen() {
                 {activeGroups.map((g, i) => {
                   const userColorHex = groupColors[g.id] || getDefaultGroupThemeFromName(g.name);
                   const p = getGroupColor(userColorHex);
+                  const announcementTrim = (g.announcement ?? '').trim();
                   const evCount = events.filter((e) => {
                     const start = new Date(e.start);
                     return e.groupId === g.id && start >= new Date();
@@ -109,7 +96,7 @@ export default function GroupsScreen() {
                   return (
                     <TouchableOpacity
                       key={g.id}
-                      onPress={() => router.push(withReturnTo(`/groups/${g.id}`, pathname))}
+                      onPress={() => router.push(withReturnTo(`/(tabs)/groups/${g.id}`, pathname))}
                       style={[styles.row, hasMore && styles.rowBorder]}
                       activeOpacity={0.7}
                     >
@@ -124,6 +111,14 @@ export default function GroupsScreen() {
                           {g.memberCount} members
                           {evCount > 0 ? ` · ${evCount} upcoming events` : ''}
                         </Text>
+                        {announcementTrim ? (
+                          <View style={styles.groupAnnouncementRow}>
+                            <Ionicons name="megaphone-outline" size={14} color={Colors.maybe} style={{ flexShrink: 0 }} />
+                            <Text style={styles.groupAnnouncementText} numberOfLines={1} ellipsizeMode="tail">
+                              {announcementTrim}
+                            </Text>
+                          </View>
+                        ) : null}
                       </View>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                         {g.membershipStatus === 'pending' && (
@@ -158,7 +153,7 @@ export default function GroupsScreen() {
                     return (
                       <TouchableOpacity
                         key={g.id}
-                        onPress={() => router.push(withReturnTo(`/groups/${g.id}`, pathname))}
+                        onPress={() => router.push(withReturnTo(`/(tabs)/groups/${g.id}`, pathname))}
                         style={[styles.row, styles.deletedRow, i < deletedGroups.length - 1 && styles.rowBorder]}
                         activeOpacity={0.7}
                       >
@@ -206,41 +201,6 @@ export default function GroupsScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.bg },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    minHeight: Layout.tabHeaderMinHeight,
-    backgroundColor: Colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-  },
-  headerTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1, minWidth: 0 },
-  title: { fontSize: 18, fontFamily: Fonts.extraBold, color: Colors.text, flexShrink: 1 },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 0 },
-  iconBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    backgroundColor: Colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  bellDot: {
-    position: 'absolute',
-    top: 1,
-    right: 1,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: Colors.notGoing,
-    borderWidth: 2,
-    borderColor: Colors.surface,
-  },
   card: { backgroundColor: Colors.surface, borderRadius: 16, borderWidth: 1, borderColor: Colors.border, overflow: 'hidden' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 14 },
   rowBorder: { borderBottomWidth: 1, borderBottomColor: Colors.border },
@@ -264,6 +224,21 @@ const styles = StyleSheet.create({
   },
   groupName: { fontSize: 15, fontFamily: Fonts.semiBold, color: Colors.text, marginBottom: 2 },
   groupMeta: { fontSize: 12, color: Colors.textMuted, fontFamily: Fonts.regular },
+  groupAnnouncementRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 6,
+    minWidth: 0,
+  },
+  groupAnnouncementText: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 13,
+    fontFamily: Fonts.medium,
+    color: '#92400E',
+    lineHeight: 18,
+  },
   adminBadge: {
     paddingHorizontal: 8,
     paddingVertical: 2,

@@ -93,13 +93,16 @@ export function EventRow({ ev, group, groupColorHex, onPress, onGroupPress, isLa
     >
       {/* Content */}
       <View style={styles.content}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <Text style={styles.title} numberOfLines={1}>{ev.title}</Text>
-          {isOngoing && (
-            <View style={styles.liveBadge}>
-              <View style={styles.liveDot} />
+        <View style={styles.titleRow}>
+          <Text style={styles.title} numberOfLines={1}>
+            {ev.title}
+          </Text>
+          {isOngoing ? (
+            <View style={styles.inProgressPill}>
+              <Ionicons name="radio-button-on" size={11} color="#1D4ED8" />
+              <Text style={styles.inProgressPillText}>In progress</Text>
             </View>
-          )}
+          ) : null}
         </View>
         {showGroup && group && (
           <Pressable
@@ -202,8 +205,35 @@ const styles = StyleSheet.create({
     borderBottomColor: Colors.border,
   },
   content: { flex: 1, minWidth: 0 },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 2,
+  },
   title: {
-    fontSize: 15, fontFamily: Fonts.semiBold, color: Colors.text, marginBottom: 2,
+    flex: 1,
+    minWidth: 0,
+    fontSize: 15,
+    fontFamily: Fonts.semiBold,
+    color: Colors.text,
+  },
+  inProgressPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexShrink: 0,
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    borderRadius: Radius.md,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  inProgressPillText: {
+    fontSize: 11,
+    fontFamily: Fonts.regular,
+    color: '#1E40AF',
   },
   groupNameWrap: {
     alignSelf: 'flex-start',
@@ -289,19 +319,5 @@ const styles = StyleSheet.create({
   },
   avatarRow: {
     marginTop: 6,
-  },
-  liveBadge: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#10B981',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  liveDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#10B981',
   },
 });

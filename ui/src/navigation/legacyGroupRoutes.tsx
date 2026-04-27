@@ -10,7 +10,7 @@ function useLegacyGroupIdParam(): string | null {
 export function LegacyRedirectToGroupDetail() {
   const gid = useLegacyGroupIdParam();
   if (!gid) return null;
-  return <Redirect href={`/groups/${gid}`} />;
+  return <Redirect href={`/(tabs)/groups/${gid}`} />;
 }
 
 /** Old `/group/invite?id=` → groups invite flow */

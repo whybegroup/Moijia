@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,9 +6,6 @@ import {
   TouchableOpacity,
   StyleSheet,
   Platform,
-  Alert,
-  Modal,
-  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -40,13 +37,11 @@ import {
   useGroups,
   useNotifications,
   useAllGroupMemberColors,
-  useWeekEventTimeMove,
 } from '../../hooks/api';
 import { queryKeys } from '../../config/queryClient';
 import { useCurrentUserContext } from '../../contexts/CurrentUserContext';
 import { EventsCalendarGlyph } from '../../components/TabScreenIcons';
 import { CreateOrJoinButton } from '../../components/CreateOrJoinButton';
-import { NoGroupForActionModal } from '../../components/NoGroupForActionModal';
 import {
   loadEventsScreenPrefs,
   saveEventsScreenPrefs,
@@ -54,11 +49,7 @@ import {
   type EventsScreenPersistedV1,
   type CalendarScopeMode,
 } from '../../utils/eventsScreenPrefs';
-import { EventUpdate, type EventDetailed } from '@moijia/client';
-import {
-  SERIES_SCOPE_OPTIONS,
-  type SeriesUpdateScope,
-} from '../../utils/seriesUpdateScopeOptions';
+import { type EventDetailed } from '@moijia/client';
 import { withReturnTo } from '../../utils/navigationReturn';
 
 export default function EventsScreen() {
@@ -71,13 +62,6 @@ export default function EventsScreen() {
   const { data: allGroups = [] } = useGroups(currentUserId ?? '');
   const { data: notifs = [], isLoading: notifsLoading } = useNotifications(currentUserId || '');
   const { data: groupColors = {} } = useAllGroupMemberColors(currentUserId || '');
-  const weekEventTimeMove = useWeekEventTimeMove(currentUserId ?? '');
-  const [weekMoveDraft, setWeekMoveDraft] = useState<null | { ev: EventDetailed; start: Date; end: Date }>(
-    null
-  );
-  const [weekMoveScope, setWeekMoveScope] = useState<SeriesUpdateScope>(
-    EventUpdate.seriesUpdateScope.THIS_OCCURRENCE
-  );
   const groups = allGroups.filter(g => g.membershipStatus === 'member' || g.membershipStatus === 'admin');
 
   // Manual polling for notifications every 5 seconds
@@ -149,28 +133,6 @@ export default function EventsScreen() {
     return dt;
   };
   const [showNotifs, setShowNotifs] = useState(false);
-  const [noGroupCalendarModal, setNoGroupCalendarModal] = useState(false);
-  /** Bumped to clear in-grid create preview when leaving create-event / events tab or closing no-group alert. */
-  const [clearWeekSlotDraftSeq, setClearWeekSlotDraftSeq] = useState(0);
-  const prevPathnameForSlotDraftRef = useRef<string | undefined>(undefined);
-
-  const EVENTS_TAB_PATH_MARKER = '(tabs)/events';
-  useEffect(() => {
-    const prev = prevPathnameForSlotDraftRef.current;
-    prevPathnameForSlotDraftRef.current = pathname;
-    if (prev === undefined) return;
-    const now = pathname ?? '';
-    const wasCreate = prev.includes('create-event');
-    const nowCreate = now.includes('create-event');
-    if (wasCreate && !nowCreate) {
-      setClearWeekSlotDraftSeq((n) => n + 1);
-    }
-    const wasEventsTab = prev.includes(EVENTS_TAB_PATH_MARKER);
-    const nowEventsTab = now.includes(EVENTS_TAB_PATH_MARKER);
-    if (wasEventsTab && !nowEventsTab && !nowCreate) {
-      setClearWeekSlotDraftSeq((n) => n + 1);
-    }
-  }, [pathname]);
 
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
   const [calendarScopeMode, setCalendarScopeMode] = useState<CalendarScopeMode>('week');
@@ -212,12 +174,6 @@ export default function EventsScreen() {
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-    if (viewMode !== 'calendar') {
-      setClearWeekSlotDraftSeq((n) => n + 1);
-    }
-  }, [viewMode]);
 
   useEffect(() => {
     if (!prefsReady) return;
@@ -766,7 +722,7 @@ export default function EventsScreen() {
               onSelect={(ev) =>
                 router.push(withReturnTo(`/event/${(ev as EventDetailed).id}`, pathname))
               }
-              onSelectGroup={groupId => router.push(withReturnTo(`/groups/${groupId}`, pathname))}
+              onSelectGroup={groupId => router.push(withReturnTo(`/(tabs)/groups/${groupId}`, pathname))}
             />
           )
         ) : (
@@ -777,7 +733,7 @@ export default function EventsScreen() {
             onSelectEvent={(ev) =>
               router.push(withReturnTo(`/event/${(ev as EventDetailed).id}`, pathname))
             }
-            onSelectGroup={groupId => router.push(withReturnTo(`/groups/${groupId}`, pathname))}
+            onSelectGroup={groupId => router.push(withReturnTo(`/(tabs)/groups/${groupId}`, pathname))}
             calendarFocusDate={calendarFocusDate}
             onCalendarFocusDateChange={setCalendarFocusDate}
             calendarScopeMode={calendarScopeMode}
@@ -787,51 +743,6 @@ export default function EventsScreen() {
             calendarYearMonthStrip={calendarYearMonthStrip}
             onCalendarYearMonthStripCommit={onCalendarYearMonthStripCommit}
             calendarScrollPrefsReady={prefsReady}
-            clearWeekSlotDraftSeq={clearWeekSlotDraftSeq}
-            onWeekCreateEvent={(start, end) => {
-              if (groups.length === 0) {
-                setNoGroupCalendarModal(true);
-                return;
-              }
-              router.push(
-                withReturnTo(
-                  `/create-event?start=${encodeURIComponent(start.toISOString())}&end=${encodeURIComponent(end.toISOString())}`,
-                  pathname
-                )
-              );
-            }}
-            onWeekEventTimeMove={
-              currentUserId
-                ? async (ev, start, end) => {
-                    const detailed = ev as EventDetailed;
-                    const inSeries = !!detailed.recurrenceSeriesId?.trim();
-                    if (!inSeries) {
-                      try {
-                        await weekEventTimeMove.mutateAsync({
-                          eventId: ev.id,
-                          start: start.toISOString(),
-                          end: end.toISOString(),
-                          viewerTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-                        });
-                        setCalendarFocusDate(
-                          new Date(start.getFullYear(), start.getMonth(), start.getDate())
-                        );
-                      } catch {
-                        Alert.alert('Error', 'Could not update event time');
-                      }
-                      return;
-                    }
-                    setWeekMoveScope(EventUpdate.seriesUpdateScope.THIS_OCCURRENCE);
-                    setWeekMoveDraft({ ev: detailed, start, end });
-                  }
-                : undefined
-            }
-            weekEventMovePendingId={
-              weekMoveDraft?.ev.id ??
-              (weekEventTimeMove.isPending && weekEventTimeMove.variables
-                ? weekEventTimeMove.variables.eventId
-                : null)
-            }
           />
         )}
       </View>
@@ -889,106 +800,6 @@ export default function EventsScreen() {
         groups={groups.map((g) => ({ id: g.id, name: g.name }))}
         groupColors={groupColors}
       />
-
-      <NoGroupForActionModal
-        visible={noGroupCalendarModal}
-        variant="event"
-        onDismiss={() => {
-          setNoGroupCalendarModal(false);
-          setClearWeekSlotDraftSeq((n) => n + 1);
-        }}
-      />
-
-      <Modal
-        visible={!!weekMoveDraft}
-        transparent
-        animationType="fade"
-        onRequestClose={() => !weekEventTimeMove.isPending && setWeekMoveDraft(null)}
-      >
-        <View style={styles.weekMoveOverlay}>
-          <View style={styles.weekMoveBox}>
-            <Text style={styles.weekMoveTitle}>Move repeating event</Text>
-            <Text style={styles.weekMoveMessage}>
-              Choose which occurrences get the new time from the calendar.
-            </Text>
-            <View style={styles.weekMoveSettingsCard}>
-              {SERIES_SCOPE_OPTIONS.map((opt, i) => {
-                const sel = weekMoveScope === opt.key;
-                return (
-                  <TouchableOpacity
-                    key={opt.key}
-                    onPress={() => !weekEventTimeMove.isPending && setWeekMoveScope(opt.key)}
-                    style={[
-                      styles.weekMoveScopeRow,
-                      i > 0 && styles.weekMoveScopeRowBorder,
-                      sel && styles.weekMoveScopeRowSelected,
-                    ]}
-                    activeOpacity={0.85}
-                    accessibilityRole="radio"
-                    accessibilityState={{ selected: sel }}
-                  >
-                    <View style={[styles.weekMoveRadioOuter, sel && styles.weekMoveRadioOuterOn]}>
-                      {sel ? <View style={styles.weekMoveRadioInner} /> : null}
-                    </View>
-                    <View style={styles.weekMoveScopeTextCol}>
-                      <Text style={styles.weekMoveScopeTitle}>{opt.title}</Text>
-                      <Text style={styles.weekMoveScopeSub}>{opt.sub}</Text>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-            <View style={styles.weekMoveActions}>
-              <TouchableOpacity
-                onPress={() => setWeekMoveDraft(null)}
-                style={[styles.weekMoveCancelBtn, { flex: 1 }]}
-                disabled={weekEventTimeMove.isPending}
-              >
-                <Text style={styles.weekMoveCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => {
-                  if (!weekMoveDraft || !currentUserId) return;
-                  const draft = weekMoveDraft;
-                  void (async () => {
-                    try {
-                      await weekEventTimeMove.mutateAsync({
-                        eventId: draft.ev.id,
-                        start: draft.start.toISOString(),
-                        end: draft.end.toISOString(),
-                        seriesUpdateScope: weekMoveScope,
-                        viewerTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-                      });
-                      setWeekMoveDraft(null);
-                      setCalendarFocusDate(
-                        new Date(
-                          draft.start.getFullYear(),
-                          draft.start.getMonth(),
-                          draft.start.getDate()
-                        )
-                      );
-                    } catch {
-                      Alert.alert('Error', 'Could not update event time');
-                    }
-                  })();
-                }}
-                style={[
-                  styles.weekMoveSaveBtn,
-                  { flex: 1 },
-                  weekEventTimeMove.isPending && styles.weekMoveSaveBtnDis,
-                ]}
-                disabled={weekEventTimeMove.isPending}
-              >
-                {weekEventTimeMove.isPending ? (
-                  <ActivityIndicator size="small" color={Colors.accentFg} />
-                ) : (
-                  <Text style={styles.weekMoveSaveText}>Apply</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
 
     </SafeAreaView>
   );
@@ -1287,88 +1098,4 @@ const styles = StyleSheet.create({
   emptyDesc:   { fontSize: 14, fontFamily: Fonts.regular, color: Colors.textMuted, textAlign: 'center', marginBottom: 24, lineHeight: 20 },
   emptyBtn:    { paddingHorizontal: 24, paddingVertical: 12, borderRadius: Radius.lg, backgroundColor: Colors.accent },
   emptyBtnText:{ fontSize: 15, fontFamily: Fonts.semiBold, color: Colors.accentFg },
-  weekMoveOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  weekMoveBox: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius['2xl'],
-    padding: 24,
-    width: '100%',
-    maxWidth: 400,
-  },
-  weekMoveTitle: { fontSize: 18, fontFamily: Fonts.bold, color: Colors.text, marginBottom: 8 },
-  weekMoveMessage: {
-    fontSize: 14,
-    color: Colors.textSub,
-    fontFamily: Fonts.regular,
-    lineHeight: 20,
-    marginBottom: 12,
-  },
-  weekMoveSettingsCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.xl,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    overflow: 'hidden',
-  },
-  weekMoveScopeRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-  },
-  weekMoveScopeRowBorder: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: Colors.border,
-  },
-  weekMoveScopeRowSelected: { backgroundColor: Colors.bg },
-  weekMoveRadioOuter: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: Colors.border,
-    marginTop: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  weekMoveRadioOuterOn: { borderColor: Colors.accent },
-  weekMoveRadioInner: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: Colors.accent,
-  },
-  weekMoveScopeTextCol: { flex: 1, minWidth: 0 },
-  weekMoveScopeTitle: { fontSize: 15, fontFamily: Fonts.semiBold, color: Colors.text },
-  weekMoveScopeSub: {
-    fontSize: 13,
-    fontFamily: Fonts.regular,
-    color: Colors.textMuted,
-    marginTop: 4,
-    lineHeight: 18,
-  },
-  weekMoveActions: { flexDirection: 'row', gap: 12, alignItems: 'stretch', marginTop: 18 },
-  weekMoveCancelBtn: {
-    paddingVertical: 12,
-    borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    alignItems: 'center',
-  },
-  weekMoveCancelText: { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.text },
-  weekMoveSaveBtn: {
-    paddingVertical: 12,
-    borderRadius: Radius.lg,
-    backgroundColor: Colors.accent,
-    alignItems: 'center',
-  },
-  weekMoveSaveBtnDis: { backgroundColor: Colors.border },
-  weekMoveSaveText: { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.accentFg },
 });

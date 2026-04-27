@@ -17,6 +17,8 @@ interface EventFilters {
   startAfter?: string;
   startBefore?: string;
   limit?: number;
+  /** When false, the query does not run (defaults to true when userId is set). */
+  enabled?: boolean;
 }
 
 export function useEvents(filters: EventFilters) {
@@ -30,7 +32,7 @@ export function useEvents(filters: EventFilters) {
         filters.startBefore,
         filters.limit
       ),
-    enabled: !!filters.userId,
+    enabled: filters.enabled !== false && !!filters.userId,
     staleTime: 0,
     refetchInterval: 3000,
     refetchOnWindowFocus: true,
@@ -96,36 +98,6 @@ export function useUpdateEvent(id: string, userId: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['events'] });
       invalidateEventQueries(queryClient, id, userId);
-    },
-  });
-}
-
-/** Update start/end (e.g. week calendar drag). Same `EventUpdate` path as the edit form, including recurring scope. */
-export function useWeekEventTimeMove(userId: string) {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: async (p: {
-      eventId: string;
-      start: string;
-      end: string;
-      seriesUpdateScope?: EventUpdate['seriesUpdateScope'];
-      viewerTimeZone?: string;
-    }) => {
-      if (!userId) throw new Error('Not signed in');
-      const tz =
-        p.viewerTimeZone?.trim() || Intl.DateTimeFormat().resolvedOptions().timeZone;
-      return EventsService.updateEvent(p.eventId, userId, {
-        start: p.start,
-        end: p.end,
-        updatedBy: userId,
-        viewerTimeZone: tz,
-        ...(p.seriesUpdateScope ? { seriesUpdateScope: p.seriesUpdateScope } : {}),
-      });
-    },
-    onSuccess: (_data, vars) => {
-      queryClient.invalidateQueries({ queryKey: ['events'] });
-      invalidateEventQueries(queryClient, vars.eventId, userId);
     },
   });
 }

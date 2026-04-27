@@ -338,7 +338,7 @@ export default function PollDetailScreen() {
                 <View style={{ paddingHorizontal: 16, paddingTop: 18 }}>
                   <TouchableOpacity
                     style={styles.groupChipAboveTitle}
-                    onPress={() => router.push(withReturnTo(`/groups/${poll.groupId}`, pathname))}
+                    onPress={() => router.push(withReturnTo(`/(tabs)/groups/${poll.groupId}`, pathname))}
                     activeOpacity={0.7}
                   >
                     <View style={[styles.groupDot, { backgroundColor: palette.dot }]} />

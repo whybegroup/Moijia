@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import { View, Text, StyleSheet, FlatList } from 'react-native';
+import { Fragment, useMemo } from 'react';
+import { View, Text, StyleSheet, FlatList, type StyleProp, type ViewStyle } from 'react-native';
 import { Colors, Fonts } from '../constants/theme';
 import { dayShort, fmtDateShort } from '../utils/helpers';
 import { EventRow } from './EventRow';
@@ -14,6 +14,10 @@ interface ListViewProps {
   onSelect: (ev: EventDetailed) => void;
   onSelectGroup?: (groupId: string) => void;
   showGroup?: boolean;
+  /** Use `embedded` inside an outer ScrollView (renders rows without FlatList). */
+  variant?: 'scroll' | 'embedded';
+  /** Applied to the scroll variant’s FlatList (e.g. `{ flex: 1 }` in a modal). */
+  listContainerStyle?: StyleProp<ViewStyle>;
 }
 
 type Row =
@@ -55,6 +59,8 @@ export function ListView({
   onSelect,
   onSelectGroup,
   showGroup = true,
+  variant = 'scroll',
+  listContainerStyle,
 }: ListViewProps) {
   const { data: allUsers = [] } = useUsers();
   const { userId: meId } = useCurrentUserContext();
@@ -133,8 +139,19 @@ export function ListView({
     );
   };
 
+  if (variant === 'embedded') {
+    return (
+      <>
+        {rows.map((item) => (
+          <Fragment key={item.key}>{renderItem({ item })}</Fragment>
+        ))}
+      </>
+    );
+  }
+
   return (
     <FlatList
+      style={listContainerStyle}
       data={rows}
       keyExtractor={item => item.key}
       renderItem={renderItem}

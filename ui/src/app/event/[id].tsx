@@ -2161,7 +2161,7 @@ export default function EventDetailScreen() {
           <View style={{ paddingHorizontal: 16, paddingTop: hasBanners ? 16 : 18 }}>
             <TouchableOpacity
               style={styles.groupChipAboveTitle}
-              onPress={() => router.push(withReturnTo(`/groups/${ev.groupId}`, pathname))}
+              onPress={() => router.push(withReturnTo(`/(tabs)/groups/${ev.groupId}`, pathname))}
               activeOpacity={0.7}
             >
               <View style={[styles.groupDot, { backgroundColor: p.dot }]} />

@@ -44,7 +44,8 @@ export function GroupMemberThemeAndNotifications({ groupId, userId, groupName }:
 
   return (
     <>
-      <Text style={[styles.sectionLabel, styles.sectionLabelSpaced]}>GROUP THEME COLOR (ONLY FOR ME)</Text>
+      <Text style={[styles.sectionLabel, styles.sectionLabelSpaced]}>GROUP THEME COLOR</Text>
+      <Text style={styles.sectionHint}>Personal color to use when displaying events and stuff from this group</Text>
       <View style={[styles.card, { marginBottom: 16 }]}>
         <TouchableOpacity
           style={styles.themeHeader}
@@ -70,8 +71,8 @@ export function GroupMemberThemeAndNotifications({ groupId, userId, groupName }:
         ) : null}
       </View>
 
-      <Text style={styles.sectionLabel}>NOTIFICATION SETTINGS FOR THIS GROUP</Text>
-      <Text style={styles.sectionHint}>Each type must be on here and in Profile → Notifications to deliver.</Text>
+      <Text style={styles.sectionLabel}>GROUP NOTIFICATIONS</Text>
+      <Text style={styles.sectionHint}>These notification settings only apply to this group. To change notification settings for all groups, go to your Profile → Notifications</Text>
       <View style={[styles.card, { marginBottom: 20 }]}>
         <View style={styles.notifSection}>
           {notifPrefsLoading ? (

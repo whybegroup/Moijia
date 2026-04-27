@@ -511,7 +511,7 @@ export default function PollsScreen() {
                   group={group}
                   groupColorHex={colorHex}
                   onPress={() => router.push(withReturnTo(`/poll/${poll.id}`, pathname))}
-                  onGroupPress={(gid) => router.push(withReturnTo(`/groups/${gid}`, pathname))}
+                  onGroupPress={(gid) => router.push(withReturnTo(`/(tabs)/groups/${gid}`, pathname))}
                   isLast={false}
                 />
               </View>

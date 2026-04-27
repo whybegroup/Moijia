@@ -3,7 +3,6 @@ import {
   View,
   Text,
   ScrollView,
-  TouchableOpacity,
   StyleSheet,
   Modal,
   Pressable,
@@ -14,15 +13,17 @@ import {
   type NativeScrollEvent,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import {
+  RectButton,
+  TouchableOpacity,
+  ScrollView as GestureScrollView,
+} from 'react-native-gesture-handler';
 import { Colors, Fonts, Radius } from '../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName } from '../utils/helpers';
 import { isSameDay, isToday } from '../utils/helpers';
 import type { EventDetailed, GroupScoped } from '@moijia/client';
 import { useCurrentUserContext } from '../contexts/CurrentUserContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ScrollView as GestureScrollView } from 'react-native-gesture-handler';
-import { WeekDayTimelineGestures } from './WeekDayTimelineGestures';
-import { WeekTimedEventDraggable } from './WeekTimedEventDraggable';
 import { EventRow } from './EventRow';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -42,19 +43,11 @@ interface CalendarViewProps {
   onCalendarFocusDateChange?: (date: Date) => void;
   calendarScopeMode?: CalendarScopeMode;
   onCalendarScopeModeChange?: (mode: CalendarScopeMode) => void;
-  /** Week view: tap or drag on the time grid to open create-event with that range (tap = 30 min). */
-  onWeekCreateEvent?: (start: Date, end: Date) => void;
-  /** Week view: hosts / group admins drag timed blocks to reschedule (start/end preserved duration). */
-  onWeekEventTimeMove?: (ev: EventDetailed, start: Date, end: Date) => void | Promise<void>;
-  /** While a week drag-update is in flight, that event id shows as busy. */
-  weekEventMovePendingId?: string | null;
   /** Persisted vertical offsets per scope (events screen AsyncStorage). */
   calendarBodyScrollY?: Partial<Record<CalendarScopeMode, number>>;
   onCalendarBodyScrollYCommit?: (mode: CalendarScopeMode, y: number) => void;
   /** False until parent finished loading prefs — avoids locking scroll restore before stored Y is applied. */
   calendarScrollPrefsReady?: boolean;
-  /** Increment when leaving create-event or the events tab so an in-grid slot draft is cleared. */
-  clearWeekSlotDraftSeq?: number;
   /** Persisted horizontal scroll of the year mini-month strip (see `onCalendarYearMonthStripCommit`). */
   calendarYearMonthStrip?: { year: number; x: number };
   onCalendarYearMonthStripCommit?: (payload: { year: number; x: number }) => void;
@@ -320,13 +313,9 @@ export function CalendarView({
   onCalendarFocusDateChange,
   calendarScopeMode: scopeModeProp,
   onCalendarScopeModeChange,
-  onWeekCreateEvent,
-  onWeekEventTimeMove,
-  weekEventMovePendingId,
   calendarBodyScrollY,
   onCalendarBodyScrollYCommit,
   calendarScrollPrefsReady = false,
-  clearWeekSlotDraftSeq = 0,
   calendarYearMonthStrip,
   onCalendarYearMonthStripCommit,
 }: CalendarViewProps) {
@@ -343,22 +332,9 @@ export function CalendarView({
     height: number;
   } | null>(null);
   const scopeDropdownRef = useRef<View>(null);
-  const [weekSlotDraft, setWeekSlotDraft] = useState<{
-    dayKey: string;
-    top: number;
-    height: number;
-  } | null>(null);
-
-  useEffect(() => {
-    if (clearWeekSlotDraftSeq > 0) {
-      setWeekSlotDraft(null);
-    }
-  }, [clearWeekSlotDraftSeq]);
 
   /** Actual width of the week day strip (avoids using full window width when parent is narrower). */
   const [weekDaysStripMeasuredW, setWeekDaysStripMeasuredW] = useState<number | null>(null);
-  /** Source day column lifted above siblings while a timed event is dragged across days. */
-  const [weekDragSourceDayKey, setWeekDragSourceDayKey] = useState<string | null>(null);
 
   const controlledFocus = focusDateProp != null && onCalendarFocusDateChange != null;
   const controlledScope = scopeModeProp != null && onCalendarScopeModeChange != null;
@@ -413,13 +389,6 @@ export function CalendarView({
     }
     return { top, left, width: menuW };
   }, [scopeMenuAnchor, winH, winW, insets.bottom, insets.top]);
-
-  useEffect(() => {
-    if (scopeMode !== 'week' && scopeMode !== 'day') {
-      setWeekSlotDraft(null);
-      setWeekDragSourceDayKey(null);
-    }
-  }, [scopeMode]);
 
   const weekBodyVerticalRef = useRef<ComponentRef<typeof GestureScrollView>>(null);
   const monthVerticalRef = useRef<ScrollView>(null);
@@ -735,7 +704,6 @@ export function CalendarView({
   const dayColWidth = Math.max(76, maxColThatFits);
   const weekScrollContentWidth = 7 * dayColWidth + 7 * dayColGutter;
   const weekNeedsHorizontalScroll = weekScrollContentWidth > availWeekDaysWidth + 0.5;
-  /** Center-to-center distance between day columns (for drag across dates). */
   useEffect(() => {
     if (scopeMode !== 'week' || weekNeedsHorizontalScroll) setWeekDaysStripMeasuredW(null);
   }, [scopeMode, weekNeedsHorizontalScroll, winW]);
@@ -744,7 +712,6 @@ export function CalendarView({
     weekNeedsHorizontalScroll || weekDaysStripMeasuredW == null
       ? dayColWidth
       : Math.max(56, (weekDaysStripMeasuredW - 7 * dayColGutter) / 7);
-  const weekColumnStrideResolved = dayColWidthResolved + dayColGutter;
 
   const maxAllDayBandHeight = useMemo(() => {
     let m = 0;
@@ -792,9 +759,8 @@ export function CalendarView({
   const timelineParts = useMemo(() => {
     const colLayoutStyle =
       scopeMode === 'day' || !weekNeedsHorizontalScroll
-        ? ({ flex: 1, minWidth: 0 } as const)
+        ? ({ flex: 1, minWidth: 0, flexBasis: 0, flexGrow: 1 } as const)
         : ({ width: dayColWidthResolved } as const);
-    const columnStrideForDrag = scopeMode === 'day' ? 0 : weekColumnStrideResolved;
     const header = (
       <View
         style={[
@@ -805,17 +771,8 @@ export function CalendarView({
         {timelineDays.map((day) => {
           const sel = isSameDay(day, focusDate);
           const today = isToday(day);
-          return (
-            <TouchableOpacity
-              key={dateKey(day)}
-              style={[
-                styles.weekDayHeaderCell,
-                colLayoutStyle,
-                sel && styles.weekDayHeaderCellSelected,
-              ]}
-              onPress={() => setFocusDate(day)}
-              activeOpacity={0.75}
-            >
+          const label = (
+            <>
               <Text style={[styles.weekDayHeaderDow, sel && styles.weekDayHeaderTextSelected]}>
                 {WEEKDAYS[day.getDay()]}
               </Text>
@@ -828,6 +785,37 @@ export function CalendarView({
               >
                 {day.getDate()}
               </Text>
+            </>
+          );
+          if (scopeMode === 'day') {
+            return (
+              <View key={dateKey(day)} style={styles.dayScopeHeaderCellWrap} collapsable={false}>
+                <TouchableOpacity
+                  style={[
+                    styles.weekDayHeaderCell,
+                    styles.weekDayHeaderCellDay,
+                    sel && styles.weekDayHeaderCellSelected,
+                  ]}
+                  onPress={() => setFocusDate(day)}
+                  activeOpacity={0.75}
+                >
+                  {label}
+                </TouchableOpacity>
+              </View>
+            );
+          }
+          return (
+            <TouchableOpacity
+              key={dateKey(day)}
+              style={[
+                styles.weekDayHeaderCell,
+                colLayoutStyle,
+                sel && styles.weekDayHeaderCellSelected,
+              ]}
+              onPress={() => setFocusDate(day)}
+              activeOpacity={0.75}
+            >
+              {label}
             </TouchableOpacity>
           );
         })}
@@ -851,7 +839,7 @@ export function CalendarView({
                 style={[
                   styles.weekDayColumn,
                   colLayoutStyle,
-                  weekDragSourceDayKey === dateKey(day) && styles.weekDayColumnDragLift,
+                  scopeMode === 'day' && styles.dayScopeColumnStretch,
                 ]}
               >
                 <View
@@ -867,16 +855,16 @@ export function CalendarView({
                       (group ? getDefaultGroupThemeFromName(group.name) : '#EC4899');
                     const p = getGroupColor(userColorHex);
                     return (
-                      <TouchableOpacity
+                      <RectButton
                         key={eventOccurrenceKey(ev)}
                         onPress={() => onSelectEvent(ev)}
+                        underlayColor="rgba(0,0,0,0.2)"
                         style={[styles.allDayChip, { backgroundColor: p.label, borderLeftColor: p.dot }]}
-                        activeOpacity={0.8}
                       >
                         <Text style={[styles.allDayChipText, { color: p.text }]} numberOfLines={2}>
                           {ev.title}
                         </Text>
-                      </TouchableOpacity>
+                      </RectButton>
                     );
                   })}
                 </View>
@@ -884,33 +872,12 @@ export function CalendarView({
                   {Array.from({ length: 24 }, (_, h) => (
                     <View
                       key={h}
+                      pointerEvents="none"
                       style={[styles.hourLine, { top: h * HOUR_HEIGHT, height: HOUR_HEIGHT }]}
                     />
                   ))}
                   {showNowLine ? (
                     <View style={[styles.nowLine, { top: nowLineTop }]} pointerEvents="none" />
-                  ) : null}
-                  {onWeekCreateEvent ? (
-                    <>
-                      <WeekDayTimelineGestures
-                        day={day}
-                        timelineHeight={TIMELINE_HEIGHT}
-                        requireLongPressToPaint={scopeMode === 'week' || scopeMode === 'day'}
-                        onDraftChange={(d) =>
-                          setWeekSlotDraft(d ? { dayKey: dateKey(day), ...d } : null)
-                        }
-                        onCommitRange={(start, end) => onWeekCreateEvent(start, end)}
-                      />
-                      {weekSlotDraft?.dayKey === dateKey(day) ? (
-                        <View
-                          pointerEvents="none"
-                          style={[
-                            styles.weekSlotDraft,
-                            { top: weekSlotDraft.top, height: weekSlotDraft.height },
-                          ]}
-                        />
-                      ) : null}
-                    </>
                   ) : null}
                   {placed.map(({ ev, top, height, lane, laneCount }) => {
                     const group = groupsMap[ev.groupId];
@@ -921,39 +888,12 @@ export function CalendarView({
                     const wPct = 100 / laneCount;
                     const leftPct = lane * wPct;
                     const segKey = `wk-${ev.id}-${String(ev.start)}-${dateKey(day)}`;
-                    const creatorCanDragWeek =
-                      !!onWeekEventTimeMove && !!meId && ev.createdBy === meId;
-                    const eventEnded = new Date(ev.end).getTime() < Date.now();
-                    if (creatorCanDragWeek && !eventEnded) {
-                      return (
-                        <WeekTimedEventDraggable
-                          key={segKey}
-                          ev={ev}
-                          columnDay={day}
-                          weekDays={timelineDays}
-                          top={top}
-                          height={height}
-                          leftPct={leftPct}
-                          widthPct={wPct}
-                          columnStride={columnStrideForDrag}
-                          timelineHeight={TIMELINE_HEIGHT}
-                          colors={{ label: p.label, dot: p.dot, text: p.text }}
-                          canDrag
-                          movePending={weekEventMovePendingId === ev.id}
-                          onPress={() => onSelectEvent(ev)}
-                          onMoveCommit={(start, end) => {
-                            void onWeekEventTimeMove!(ev, start, end);
-                          }}
-                          onDragActiveChange={(active) => {
-                            setWeekDragSourceDayKey(active ? dateKey(day) : null);
-                          }}
-                        />
-                      );
-                    }
                     return (
-                      <TouchableOpacity
+                      <RectButton
                         key={segKey}
                         onPress={() => onSelectEvent(ev)}
+                        underlayColor="rgba(0,0,0,0.2)"
+                        hitSlop={height < 24 ? { top: 6, bottom: 6, left: 0, right: 0 } : undefined}
                         style={[
                           styles.timedEventBlock,
                           {
@@ -965,7 +905,6 @@ export function CalendarView({
                             borderLeftColor: p.dot,
                           },
                         ]}
-                        activeOpacity={0.85}
                       >
                         <Text style={[styles.timedEventTitle, { color: p.text }]} numberOfLines={2}>
                           {ev.title}
@@ -984,7 +923,7 @@ export function CalendarView({
                             minute: '2-digit',
                           })}
                         </Text>
-                      </TouchableOpacity>
+                      </RectButton>
                     );
                   })}
                 </View>
@@ -1000,22 +939,13 @@ export function CalendarView({
     scopeMode,
     weekNeedsHorizontalScroll,
     dayColWidthResolved,
-    weekColumnStrideResolved,
     events,
     groupsMap,
     groupColors,
     maxAllDayBandHeight,
-    onWeekCreateEvent,
-    weekSlotDraft,
-    onWeekEventTimeMove,
-    weekEventMovePendingId,
-    meId,
     onSelectEvent,
     setFocusDate,
     nowLineTop,
-    weekColumnStrideResolved,
-    setWeekSlotDraft,
-    weekDragSourceDayKey,
   ]);
 
   const weekHeaderHRef = useRef<ComponentRef<typeof GestureScrollView>>(null);
@@ -1126,6 +1056,7 @@ export function CalendarView({
                   horizontal
                   showsHorizontalScrollIndicator
                   nestedScrollEnabled
+                  keyboardShouldPersistTaps="always"
                   style={styles.weekScrollableDays}
                   contentContainerStyle={{ width: weekScrollContentWidth }}
                   onScroll={onWeekHeaderHScroll}
@@ -1150,6 +1081,7 @@ export function CalendarView({
               style={styles.weekBodyVerticalScroll}
               nestedScrollEnabled
               showsVerticalScrollIndicator
+              keyboardShouldPersistTaps="always"
               onScroll={onWeekDayBodyScroll}
               onScrollEndDrag={flushBodyScrollPersist}
               onMomentumScrollEnd={flushBodyScrollPersist}
@@ -1172,6 +1104,7 @@ export function CalendarView({
                     horizontal
                     showsHorizontalScrollIndicator
                     nestedScrollEnabled
+                    keyboardShouldPersistTaps="always"
                     style={styles.weekScrollableDays}
                     contentContainerStyle={{ width: weekScrollContentWidth }}
                     onScroll={onWeekBodyHScroll}
@@ -1583,6 +1516,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    alignSelf: 'stretch',
+    width: '100%',
+    minWidth: 0,
     paddingHorizontal: 8,
     paddingVertical: 12,
   },
@@ -1593,8 +1529,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   navBtnText: { fontSize: 24, color: Colors.text, fontFamily: Fonts.medium },
-  monthLabel: { alignItems: 'center', flex: 1 },
-  monthLabelText: { fontSize: 17, fontFamily: Fonts.bold, color: Colors.text, textAlign: 'center' },
+  monthLabel: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  monthLabelText: {
+    fontSize: 17,
+    fontFamily: Fonts.bold,
+    color: Colors.text,
+    textAlign: 'center',
+    width: '100%',
+  },
   weekdayRow: {
     flexDirection: 'row',
     paddingVertical: 8,
@@ -1622,6 +1570,8 @@ const styles = StyleSheet.create({
   weekPinnedHeaderRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
+    alignSelf: 'stretch',
+    width: '100%',
   },
   weekHeaderGutterSpacer: {
     flexShrink: 0,
@@ -1658,6 +1608,9 @@ const styles = StyleSheet.create({
   weekScrollableDays: {
     flex: 1,
     minWidth: 0,
+    flexBasis: 0,
+    flexGrow: 1,
+    alignSelf: 'stretch',
   },
   weekDaysInnerStretch: {
     width: '100%',
@@ -1666,6 +1619,9 @@ const styles = StyleSheet.create({
   weekDayHeaderRow: {
     flexDirection: 'row',
     alignItems: 'stretch',
+    alignSelf: 'stretch',
+    width: '100%',
+    minWidth: 0,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
     paddingBottom: 8,
@@ -1676,6 +1632,27 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: Radius.md,
     marginHorizontal: 2,
+  },
+  /** Fills the row next to the time gutter so the inner cell can be width: 100% (GH Touchable sizes to text otherwise). */
+  dayScopeHeaderCellWrap: {
+    width: '100%',
+    minWidth: 0,
+    flex: 1,
+    flexBasis: 0,
+    flexGrow: 1,
+    alignSelf: 'stretch',
+  },
+  weekDayHeaderCellDay: {
+    width: '100%',
+    minWidth: 0,
+    alignSelf: 'stretch',
+    marginHorizontal: 0,
+    paddingHorizontal: 16,
+  },
+  /** Day scope: body column under the day header. */
+  dayScopeColumnStretch: {
+    alignSelf: 'stretch',
+    minWidth: 0,
   },
   weekDayHeaderCellSelected: {
     backgroundColor: Colors.accent,
@@ -1719,10 +1696,6 @@ const styles = StyleSheet.create({
     marginHorizontal: 2,
     overflow: 'visible',
   },
-  weekDayColumnDragLift: {
-    zIndex: 200,
-    ...(Platform.OS === 'android' ? { elevation: 20 } : {}),
-  },
   allDayBand: {
     minHeight: 0,
     gap: 4,
@@ -1764,16 +1737,6 @@ const styles = StyleSheet.create({
     zIndex: 10,
     marginTop: -1,
   },
-  weekSlotDraft: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    borderRadius: Radius.sm,
-    borderWidth: 1,
-    borderColor: Colors.accent,
-    backgroundColor: 'rgba(24, 24, 27, 0.12)',
-    zIndex: 25,
-  },
   timedEventBlock: {
     position: 'absolute',
     paddingHorizontal: 4,
@@ -1781,7 +1744,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.sm,
     borderLeftWidth: 3,
     overflow: 'hidden',
-    zIndex: 2,
+    zIndex: 20,
   },
   timedEventTitle: {
     fontSize: 10,

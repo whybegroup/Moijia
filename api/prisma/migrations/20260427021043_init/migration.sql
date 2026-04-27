@@ -15,6 +15,7 @@ CREATE TABLE "groups" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "name" TEXT NOT NULL,
     "desc" TEXT NOT NULL,
+    "announcement" TEXT,
     "thumbnail" TEXT,
     "avatarSeed" TEXT,
     "inviteCode" TEXT,
@@ -194,6 +195,7 @@ CREATE TABLE "polls" (
     "updatedBy" TEXT NOT NULL,
     "title" TEXT NOT NULL,
     "description" TEXT,
+    "deadline" DATETIME,
     "anonymousVotes" BOOLEAN NOT NULL DEFAULT false,
     "multipleChoice" BOOLEAN NOT NULL DEFAULT false,
     "ranking" BOOLEAN NOT NULL DEFAULT false,
@@ -201,6 +203,18 @@ CREATE TABLE "polls" (
     "updatedAt" DATETIME NOT NULL,
     CONSTRAINT "polls_groupId_fkey" FOREIGN KEY ("groupId") REFERENCES "groups" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "polls_createdBy_fkey" FOREIGN KEY ("createdBy") REFERENCES "users" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "poll_watches" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "pollId" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "watching" BOOLEAN NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "poll_watches_pollId_fkey" FOREIGN KEY ("pollId") REFERENCES "polls" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "poll_watches_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
@@ -223,6 +237,33 @@ CREATE TABLE "poll_options" (
     "textFont" TEXT DEFAULT 'sans',
     "dateTimeValue" DATETIME,
     CONSTRAINT "poll_options_pollId_fkey" FOREIGN KEY ("pollId") REFERENCES "polls" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "poll_option_votes" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "pollId" TEXT NOT NULL,
+    "pollOptionId" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "rank" INTEGER NOT NULL DEFAULT 1,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "poll_option_votes_pollId_fkey" FOREIGN KEY ("pollId") REFERENCES "polls" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "poll_option_votes_pollOptionId_fkey" FOREIGN KEY ("pollOptionId") REFERENCES "poll_options" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "poll_option_votes_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "poll_text_answers" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "pollId" TEXT NOT NULL,
+    "questionKey" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "answer" TEXT NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "poll_text_answers_pollId_fkey" FOREIGN KEY ("pollId") REFERENCES "polls" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "poll_text_answers_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
@@ -268,4 +309,19 @@ CREATE INDEX "comments_replyToCommentId_idx" ON "comments"("replyToCommentId");
 CREATE UNIQUE INDEX "comment_reactions_commentId_userId_emoji_key" ON "comment_reactions"("commentId", "userId", "emoji");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "poll_watches_pollId_userId_key" ON "poll_watches"("pollId", "userId");
+
+-- CreateIndex
 CREATE INDEX "poll_options_pollId_idx" ON "poll_options"("pollId");
+
+-- CreateIndex
+CREATE INDEX "poll_option_votes_pollId_userId_idx" ON "poll_option_votes"("pollId", "userId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "poll_option_votes_pollId_pollOptionId_userId_key" ON "poll_option_votes"("pollId", "pollOptionId", "userId");
+
+-- CreateIndex
+CREATE INDEX "poll_text_answers_pollId_questionKey_idx" ON "poll_text_answers"("pollId", "questionKey");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "poll_text_answers_pollId_questionKey_userId_key" ON "poll_text_answers"("pollId", "questionKey", "userId");

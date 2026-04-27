@@ -11,6 +11,8 @@ export interface Group {
   name: string;
   /** Group description */
   desc: string;
+  /** Group announcement (visible to all members) */
+  announcement?: string | null;
   /** Group thumbnail/avatar URL */
   thumbnail?: string | null;
   /** Cover / banner image URLs (uploaded), ordered */
@@ -46,6 +48,7 @@ export interface GroupScoped {
   id: string;
   name: string;
   desc: string;
+  announcement?: string | null;
   thumbnail?: string | null;
   coverPhotos: string[];
   avatarSeed?: string | null;
@@ -92,6 +95,7 @@ export interface GroupInput {
 export interface GroupUpdate {
   name?: string;
   desc?: string;
+  announcement?: string | null;
   thumbnail?: string | null;
   coverPhotos?: string[];
   avatarSeed?: string | null;

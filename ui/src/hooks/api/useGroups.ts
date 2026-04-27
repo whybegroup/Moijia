@@ -97,7 +97,8 @@ export function useUpdateGroup(id: string, userId: string) {
       if (
         data.thumbnail === undefined &&
         data.avatarSeed === undefined &&
-        data.coverPhotos === undefined
+        data.coverPhotos === undefined &&
+        data.announcement === undefined
       )
         return;
       const detailKey = queryKeys.groups.detail(id, userId);
@@ -110,6 +111,7 @@ export function useUpdateGroup(id: string, userId: string) {
               ...(data.thumbnail !== undefined && { thumbnail: data.thumbnail }),
               ...(data.avatarSeed !== undefined && { avatarSeed: data.avatarSeed }),
               ...(data.coverPhotos !== undefined && { coverPhotos: data.coverPhotos }),
+              ...(data.announcement !== undefined && { announcement: data.announcement }),
             }
           : old
       );

@@ -92,14 +92,7 @@ function RootLayoutNav() {
           contentStyle: { backgroundColor: 'transparent' },
         }}
       />
-      <Stack.Screen
-        name="groups/[id]"
-        options={{
-          presentation: 'transparentModal',
-          animation: 'fade',
-          contentStyle: { backgroundColor: 'transparent' },
-        }}
-      />
+      <Stack.Screen name="groups/[id]" />
     </Stack>
   );
 }
