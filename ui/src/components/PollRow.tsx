@@ -31,6 +31,11 @@ function formatClosesByLine(d: Date): string {
   return `Closes by ${dateStr} ${fmtTime(d)}`;
 }
 
+function formatClosedByLine(d: Date): string {
+  const dateStr = `${d.getMonth() + 1}/${d.getDate()}/${String(d.getFullYear()).slice(-2)}`;
+  return `Closed on ${dateStr} ${fmtTime(d)}`;
+}
+
 export interface PollRowProps {
   poll: Poll;
   group?: GroupScoped;
@@ -52,10 +57,32 @@ export function PollRow({
 }: PollRowProps) {
   const p = getGroupColor(groupColorHex || (group ? getDefaultGroupThemeFromName(group.name) : '#EC4899'));
   const dl = deadlineForPoll(poll);
+  const pollWithCloseState = poll as Poll & {
+    closedAt?: string;
+    closedBy?: string;
+    closedByName?: string;
+    closed?: boolean;
+    isClosed?: boolean;
+    status?: string;
+  };
+  const closedAt = pollWithCloseState.closedAt;
+  const closedAtDate = closedAt ? new Date(closedAt) : null;
+  const closedByFlag =
+    pollWithCloseState.closed === true ||
+    pollWithCloseState.isClosed === true ||
+    String(pollWithCloseState.status || '').toLowerCase() === 'closed';
+  const hasClosedMarker = Boolean(closedAt || pollWithCloseState.closedBy || pollWithCloseState.closedByName || closedByFlag);
+  const isClosedEarly = hasClosedMarker;
   const now = Date.now();
-  const isPast = dl ? dl.getTime() <= now : false;
-
-  const closesLine = dl ? formatClosesByLine(dl) : 'No deadline set';
+  const isPastByDeadline = dl ? dl.getTime() <= now : false;
+  const isPast = isClosedEarly || isPastByDeadline;
+  const closesLine = isClosedEarly
+    ? closedAtDate && Number.isFinite(closedAtDate.getTime())
+      ? formatClosedByLine(closedAtDate)
+      : 'Closed'
+    : dl
+      ? formatClosesByLine(dl)
+      : 'No deadline set';
   const descPreview = poll.description?.trim()
     ? stripHtmlPreview(poll.description).slice(0, 120) + (stripHtmlPreview(poll.description).length > 120 ? '…' : '')
     : '';

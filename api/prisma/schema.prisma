@@ -36,9 +36,11 @@ model User {
   authoredTimeSuggestions EventTimeSuggestion[] @relation("TimeSuggestionAuthor")
   createdActivityOptions  EventActivityOption[] @relation("ActivityOptionAuthor")
   createdPolls            Poll[]               @relation("PollCreator")
+  closedPolls             Poll[]               @relation("PollCloser")
   pollOptionVotes         PollOptionVote[]
   pollTextAnswers         PollTextAnswer[]
   pollWatches             PollWatch[]
+  pollOptionSuggestions   PollOptionSuggestion[]
 
   @@map("users")
 }
@@ -316,16 +318,20 @@ model Poll {
   anonymousVotes   Boolean  @default(false)
   multipleChoice   Boolean  @default(false)
   ranking          Boolean  @default(false)
+  closedAt         DateTime?
+  closedBy         String?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
   group   Group        @relation(fields: [groupId], references: [id], onDelete: Cascade)
   creator User         @relation("PollCreator", fields: [createdBy], references: [id])
+  closer User?        @relation("PollCloser", fields: [closedBy], references: [id])
   photos  PollPhoto[]
   options PollOption[]
   votes   PollOptionVote[]
   textAnswers PollTextAnswer[]
   watches PollWatch[]
+  optionSuggestions PollOptionSuggestion[]
 
   @@map("polls")
 }
@@ -415,6 +421,25 @@ model PollTextAnswer {
   @@map("poll_text_answers")
 }
 
+/// Member-suggested choice labels pending creator review.
+model PollOptionSuggestion {
+  id          String    @id @default(uuid())
+  pollId      String
+  questionKey String
+  label       String
+  suggestedBy String
+  status      String    @default("pending") // pending | accepted | declined
+  createdAt   DateTime  @default(now())
+  decidedAt   DateTime?
+
+  poll      Poll @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  suggester User @relation(fields: [suggestedBy], references: [id], onDelete: Cascade)
+
+  @@index([pollId, questionKey])
+  @@index([pollId, status])
+  @@map("poll_option_suggestions")
+}
+
 // ============================================
 // Notification Model
 // ============================================
@@ -429,8 +454,9 @@ model Notification {
   body       String
   groupId    String?
   eventId    String?
+  pollId     String?
   navigable  Boolean  @default(false)
-  dest       String?  // group, event
+  dest       String?  // group, event, poll
   userId     String?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt

@@ -1,7 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { OpenAPI, PollsService, type Poll, type PollInput, type PollResults, type PollWatchInput } from '@moijia/client';
+import {
+  OpenAPI,
+  PollsService,
+  PollOptionSuggestionDecisionInput,
+  type Poll,
+  type PollInput,
+  type PollResults,
+  type PollWatchInput,
+} from '@moijia/client';
 import { queryKeys } from '../../config/queryClient';
 import '../../config/apiBase';
+import { refetchIntervalUnlessNotFound, retryUnlessNotFound } from '../../utils/apiErrors';
 
 /** Works when Metro serves a stale `@moijia/client` bundle without `deletePoll`. */
 async function deletePollNetwork(pollId: string, uid: string): Promise<void> {
@@ -45,6 +54,11 @@ export function usePoll(id: string, userId: string) {
     queryKey: queryKeys.polls.detail(id, userId),
     queryFn: () => PollsService.getPoll(id, userId),
     enabled: Boolean(id?.trim() && userId?.trim()),
+    staleTime: 0,
+    retry: retryUnlessNotFound,
+    refetchInterval: refetchIntervalUnlessNotFound(3000),
+    refetchOnWindowFocus: true,
+    refetchIntervalInBackground: false,
   });
 }
 
@@ -59,6 +73,21 @@ export function useCreatePoll(userId: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['groups'] });
       queryClient.invalidateQueries({ queryKey: ['polls'] });
+    },
+  });
+}
+
+export function useUpdatePoll(id: string, userId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: PollInput) => {
+      if (!userId) throw new Error('Not signed in');
+      return PollsService.updatePoll(id, userId, data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.polls.list(userId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.polls.detail(id, userId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.polls.results(id, userId) });
     },
   });
 }
@@ -79,11 +108,16 @@ export function useSetPollWatch(id: string, userId: string | undefined) {
   });
 }
 
-export function usePollResults(id: string, userId: string) {
+export function usePollResults(id: string, userId: string, opts?: { enabled?: boolean }) {
   return useQuery<PollResults>({
     queryKey: queryKeys.polls.results(id, userId),
     queryFn: () => PollsService.getPollResults(id, userId),
-    enabled: Boolean(id?.trim() && userId?.trim()),
+    enabled: (opts?.enabled ?? true) && Boolean(id?.trim() && userId?.trim()),
+    staleTime: 0,
+    retry: retryUnlessNotFound,
+    refetchInterval: refetchIntervalUnlessNotFound(3000),
+    refetchOnWindowFocus: true,
+    refetchIntervalInBackground: false,
   });
 }
 
@@ -120,6 +154,68 @@ export function useDeletePoll(userId: string) {
     onSuccess: (_data, pollId) => {
       queryClient.invalidateQueries({ queryKey: ['polls'] });
       queryClient.invalidateQueries({ queryKey: queryKeys.polls.detail(pollId, userId) });
+    },
+  });
+}
+
+export function useClosePoll(userId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (pollId: string) => {
+      if (!userId) throw new Error('Not signed in');
+      return PollsService.closePoll(pollId, { userId });
+    },
+    onSuccess: (_data, pollId) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.polls.list(userId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.polls.detail(pollId, userId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.polls.results(pollId, userId) });
+    },
+  });
+}
+
+export function usePollOptionSuggestions(pollId: string, userId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.polls.optionSuggestions(pollId, userId),
+    queryFn: () => PollsService.listPollOptionSuggestions(pollId, userId),
+    enabled: Boolean(pollId?.trim() && userId?.trim() && enabled),
+    staleTime: 0,
+    retry: retryUnlessNotFound,
+    refetchInterval: refetchIntervalUnlessNotFound(5000),
+    refetchOnWindowFocus: true,
+  });
+}
+
+export function useSuggestPollOption(pollId: string, userId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { questionKey: string; label: string }) => {
+      if (!userId) throw new Error('Not signed in');
+      return PollsService.suggestPollOption(pollId, { userId, questionKey: body.questionKey, label: body.label });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['polls', pollId] });
+    },
+  });
+}
+
+export function useDecidePollOptionSuggestion(pollId: string, userId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { suggestionId: string; decision: 'accept' | 'decline' }) => {
+      if (!userId) throw new Error('Not signed in');
+      return PollsService.decidePollOptionSuggestion(pollId, args.suggestionId, {
+        userId,
+        decision:
+          args.decision === 'accept'
+            ? PollOptionSuggestionDecisionInput.decision.ACCEPT
+            : PollOptionSuggestionDecisionInput.decision.DECLINE,
+      });
+    },
+    onSuccess: (data) => {
+      if (data.poll) {
+        queryClient.setQueryData(queryKeys.polls.detail(pollId, userId), data.poll);
+      }
+      queryClient.invalidateQueries({ queryKey: ['polls', pollId] });
     },
   });
 }

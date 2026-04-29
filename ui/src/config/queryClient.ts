@@ -46,5 +46,6 @@ export const queryKeys = {
     list: (userId: string) => ['polls', 'list', userId] as const,
     detail: (id: string, userId: string) => ['polls', id, userId] as const,
     results: (id: string, userId: string) => ['polls', id, 'results', userId] as const,
+    optionSuggestions: (id: string, userId: string) => ['polls', id, userId, 'optionSuggestions'] as const,
   },
 } as const;

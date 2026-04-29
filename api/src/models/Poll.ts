@@ -49,6 +49,7 @@ export interface Poll {
   id: string;
   groupId: string;
   createdBy: string;
+  createdByName?: string;
   updatedBy: string;
   title: string;
   description?: string;
@@ -57,6 +58,12 @@ export interface Poll {
   ranking: boolean;
   /** UTC instant when voting closes. */
   deadline: string;
+  /** UTC instant when poll was manually closed before deadline. */
+  closedAt?: string;
+  /** User id who manually closed the poll. */
+  closedBy?: string;
+  /** Display name of closer when available. */
+  closedByName?: string;
   coverPhotos: string[];
   options: PollOption[];
   createdAt: string;
@@ -72,6 +79,11 @@ export interface Poll {
 /** Body for PUT /polls/{id}/watch */
 export interface PollWatchInput {
   watching: boolean;
+}
+
+/** Body for POST /polls/{id}/close */
+export interface PollCloseInput {
+  userId: string;
 }
 
 export interface PollVoteInput {
@@ -100,10 +112,14 @@ export interface PollQuestionResult {
     optionId: string;
     label: string;
     votes: number;
+    /** Distinct voters who picked this option (always set; survives anonymous redaction). */
+    responseCount: number;
     pct: number;
     voters?: Array<{
       userId: string;
       userName: string;
+      /** Ranking position when questionType is rating (1 = best). */
+      rank?: number;
     }>;
   }>;
 }
@@ -112,4 +128,38 @@ export interface PollResults {
   pollId: string;
   myOptionIds: string[];
   questions: PollQuestionResult[];
+}
+
+export type PollOptionSuggestionStatus = 'pending' | 'accepted' | 'declined';
+
+export interface PollOptionSuggestion {
+  id: string;
+  pollId: string;
+  questionKey: string;
+  label: string;
+  suggestedBy: string;
+  suggesterName?: string;
+  status: PollOptionSuggestionStatus;
+  createdAt: string;
+  decidedAt?: string;
+}
+
+/** Body for POST /polls/{id}/option-suggestions */
+export interface PollOptionSuggestionInput {
+  userId: string;
+  questionKey: string;
+  label: string;
+}
+
+/** Body for POST /polls/{id}/option-suggestions/{suggestionId}/decide */
+export interface PollOptionSuggestionDecisionInput {
+  userId: string;
+  decision: 'accept' | 'decline';
+}
+
+/** Response when accepting (includes updated poll); decline returns suggestion only via poll optional absent */
+export interface PollOptionSuggestionDecisionResult {
+  suggestion: PollOptionSuggestion;
+  /** Present when decision was accept and poll was updated. */
+  poll?: Poll;
 }

@@ -13,6 +13,7 @@ import {
 import { mergeNotifPrefs, parseNotifPrefsJson } from '../utils/notifPrefsCore';
 import { NotificationService } from './NotificationService';
 import { LocalUploadService } from './LocalUploadService';
+import { UserService } from './UserService';
 
 const prisma = new PrismaClient();
 const notificationService = new NotificationService();
@@ -290,6 +291,43 @@ export class GroupService {
       ...groupData
     } = input;
 
+    if (!superAdminId?.trim() || !createdBy?.trim()) {
+      throw Object.assign(new Error('superAdminId and createdBy are required'), { status: 400 });
+    }
+    const actorIds = Array.from(
+      new Set([superAdminId, createdBy, ...adminIds, ...memberIds].map((x) => x?.trim()).filter(Boolean) as string[]),
+    );
+    const createdByT = createdBy.trim();
+    const superT = superAdminId.trim();
+    let existingUsers = await prisma.user.findMany({
+      where: { id: { in: actorIds } },
+      select: { id: true },
+    });
+    let existingIds = new Set(existingUsers.map((u) => u.id));
+    let missing = actorIds.filter((id) => !existingIds.has(id));
+    if (missing.length > 0) {
+      const userService = new UserService();
+      for (const id of missing) {
+        if (id !== createdByT && id !== superT) {
+          throw Object.assign(new Error(`Unknown user id(s): ${missing.join(', ')}`), { status: 400 });
+        }
+        await userService.upsertFromAuth({
+          id,
+          name: 'User',
+          displayName: 'User',
+        });
+      }
+      existingUsers = await prisma.user.findMany({
+        where: { id: { in: actorIds } },
+        select: { id: true },
+      });
+      existingIds = new Set(existingUsers.map((u) => u.id));
+      missing = actorIds.filter((id) => !existingIds.has(id));
+      if (missing.length > 0) {
+        throw Object.assign(new Error(`Unknown user id(s): ${missing.join(', ')}`), { status: 400 });
+      }
+    }
+
     // Generate unique invite code if not provided
     const finalInviteCode = inviteCode || await this.generateUniqueInviteCode(input.name);
 
@@ -306,14 +344,16 @@ export class GroupService {
         members: {
           create: [
             // Super admin
-            { userId: superAdminId, role: 'superadmin' },
+            { userId: superAdminId.trim(), role: 'superadmin' },
             // Other admins
             ...adminIds
-              .filter((uid) => uid !== superAdminId)
+              .map((uid) => uid?.trim())
+              .filter((uid): uid is string => !!uid && uid !== superAdminId)
               .map((userId) => ({ userId, role: 'admin' as GroupRole })),
             // Regular members
             ...memberIds
-              .filter((uid) => uid !== superAdminId && !adminIds.includes(uid))
+              .map((uid) => uid?.trim())
+              .filter((uid): uid is string => !!uid && uid !== superAdminId && !adminIds.includes(uid))
               .map((userId) => ({ userId, role: 'member' as GroupRole })),
           ],
         },

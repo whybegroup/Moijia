@@ -13,6 +13,7 @@ import {
 } from 'tsoa';
 import { Notification, NotificationInput } from '../models';
 import { NotificationService } from '../services/NotificationService';
+import { httpError } from '../utils/httpError';
 
 @Route('notifications')
 @Tags('Notifications')
@@ -36,8 +37,7 @@ export class NotificationController extends Controller {
   public async getNotification(@Path() id: string): Promise<Notification> {
     const notification = await this.notificationService.getById(id);
     if (!notification) {
-      this.setStatus(404);
-      throw new Error('Notification not found');
+      throw httpError(404, 'Notification not found');
     }
     return notification;
   }

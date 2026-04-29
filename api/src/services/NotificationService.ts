@@ -102,7 +102,8 @@ export class NotificationService {
       icon?: string;
       groupId?: string;
       eventId?: string;
-      dest?: 'group' | 'event';
+      pollId?: string;
+      dest?: 'group' | 'event' | 'poll';
     }
   ): Promise<Notification | null> {
     const ok = await this.shouldDeliverNotification(userId, options?.groupId, options?.type);
@@ -116,8 +117,9 @@ export class NotificationService {
       icon: options?.icon || '🔔',
       groupId: options?.groupId,
       eventId: options?.eventId,
+      pollId: options?.pollId,
       dest: options?.dest,
-      navigable: !!(options?.groupId || options?.eventId),
+      navigable: !!(options?.groupId || options?.eventId || options?.pollId),
     });
   }
 
@@ -133,7 +135,8 @@ export class NotificationService {
       icon?: string;
       groupId?: string;
       eventId?: string;
-      dest?: 'group' | 'event';
+      pollId?: string;
+      dest?: 'group' | 'event' | 'poll';
     }
   ): Promise<Notification[]> {
     const notifications = await Promise.all(
@@ -180,7 +183,7 @@ export class NotificationService {
   private mapNotification(n: any): Notification {
     return {
       ...n,
-      dest: n.dest as 'group' | 'event' | null,
+      dest: n.dest as 'group' | 'event' | 'poll' | null,
     };
   }
 }

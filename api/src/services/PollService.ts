@@ -5,13 +5,18 @@ import type {
   PollInput,
   PollOption,
   PollOptionInput,
+  PollOptionSuggestion,
+  PollOptionSuggestionDecisionResult,
   PollQuestionResult,
   PollResults,
   PollTextFont,
   PollWatchInput,
 } from '../models';
+import { NotificationService } from './NotificationService';
 
 const prisma = new PrismaClient();
+const notificationService = new NotificationService();
+const MAX_OPTIONS_PER_QUESTION = 50;
 
 function sanitizePollHtml(html: string): string {
   let s = html.replace(/<\/(?:script|iframe|object|embed)[^>]*>/gi, '');
@@ -92,6 +97,22 @@ function parseQuestionMetaFromOptionText(text: string): ParsedQuestionMeta | nul
     optionLabel: optionLabel || 'Option',
     anonymousVotes,
   };
+}
+
+function plainOptionLine(html: string | null): string {
+  return html?.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() ?? '';
+}
+
+function parseQuestionHeaderFromOptionText(textHtml: string | null): {
+  qNum: number;
+  title: string;
+  bracket: string;
+} | null {
+  const plain = plainOptionLine(textHtml);
+  const re = /^Q(\d+):\s*(.*?)\s*\[(.*?)\]\s*-\s*(.*)$/i;
+  const m = plain.match(re);
+  if (!m) return null;
+  return { qNum: Number(m[1]), title: m[2].trim(), bracket: m[3].trim() };
 }
 
 export class PollService {
@@ -176,8 +197,7 @@ export class PollService {
       where: { groupId_userId: { groupId: poll.groupId, userId } },
       select: { status: true },
     });
-    // "Joined" visibility includes pending + active membership states.
-    return m?.status === 'active' || m?.status === 'pending';
+    return m?.status === 'active';
   }
 
   private mapOption(row: {
@@ -211,6 +231,10 @@ export class PollService {
     anonymousVotes: boolean;
     multipleChoice: boolean;
     ranking: boolean;
+    closedAt: Date | null;
+    closedBy: string | null;
+    closer?: { id: string; displayName: string; name: string } | null;
+    creator?: { id: string; displayName: string; name: string } | null;
     createdAt: Date;
     updatedAt: Date;
     photos: { photoUrl: string }[];
@@ -229,6 +253,7 @@ export class PollService {
       id: row.id,
       groupId: row.groupId,
       createdBy: row.createdBy,
+      createdByName: row.creator ? (row.creator.displayName || row.creator.name) : undefined,
       updatedBy: row.updatedBy,
       title: row.title,
       description: row.description ?? undefined,
@@ -236,6 +261,9 @@ export class PollService {
       multipleChoice: row.multipleChoice,
       ranking: row.ranking,
       deadline: (row.deadline ?? row.createdAt).toISOString(),
+      closedAt: row.closedAt ? row.closedAt.toISOString() : undefined,
+      closedBy: row.closedBy ?? undefined,
+      closedByName: row.closer ? (row.closer.displayName || row.closer.name) : undefined,
       coverPhotos: row.photos.map((p) => p.photoUrl),
       options: opts,
       createdAt: row.createdAt.toISOString(),
@@ -300,6 +328,24 @@ export class PollService {
         });
       }
     }
+
+    const questionOptionCounts = new Map<string, number>();
+    for (const o of out) {
+      const meta = parseQuestionMetaFromOptionText(plainOptionLine(o.textHtml));
+      const questionKey = meta?.questionKey ?? 'q-1';
+      const questionType = meta?.questionType ?? 'single';
+      if (questionType === 'text') continue;
+      questionOptionCounts.set(questionKey, (questionOptionCounts.get(questionKey) ?? 0) + 1);
+    }
+    for (const [, count] of questionOptionCounts) {
+      if (count > MAX_OPTIONS_PER_QUESTION) {
+        throw Object.assign(
+          new Error(`Each question can have at most ${MAX_OPTIONS_PER_QUESTION} options`),
+          { status: 400 },
+        );
+      }
+    }
+
     return out;
   }
 
@@ -361,7 +407,321 @@ export class PollService {
       include: {
         photos: { orderBy: { id: 'asc' } },
         options: true,
+        creator: { select: { id: true, displayName: true, name: true } },
+        closer: { select: { id: true, displayName: true, name: true } },
       },
+    });
+
+    return this.mapPoll(row);
+  }
+
+  public async update(id: string, actorUserId: string, input: PollInput): Promise<Poll> {
+    const existing = await prisma.poll.findUnique({
+      where: { id },
+      include: {
+        options: {
+          select: {
+            id: true,
+            sortOrder: true,
+            inputKind: true,
+            textHtml: true,
+            textFont: true,
+            dateTimeValue: true,
+          },
+        },
+      },
+    });
+    if (!existing) throw Object.assign(new Error('Poll not found'), { status: 404 });
+    if (existing.createdBy !== actorUserId) {
+      throw Object.assign(new Error('Only the poll creator can edit this poll'), { status: 403 });
+    }
+
+    const t = input.title?.trim();
+    if (!t) throw Object.assign(new Error('Poll title is required'), { status: 400 });
+    const optionRows = this.validateOptions(input.options ?? []);
+    const deadlineDt = new Date(String(input.deadline ?? ''));
+    if (!Number.isFinite(deadlineDt.getTime())) {
+      throw Object.assign(new Error('Poll deadline is required and must be a valid datetime'), { status: 400 });
+    }
+    const photoRows = (input.coverPhotos ?? []).map((photoUrl) => ({ photoUrl }));
+    const oldSignature = existing.options
+      .slice()
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .map((o) => ({
+        sortOrder: o.sortOrder,
+        inputKind: o.inputKind,
+        textHtml: o.textHtml ?? null,
+        textFont: o.textFont ?? null,
+        dateTimeValue: o.dateTimeValue ? o.dateTimeValue.getTime() : null,
+      }));
+    const newSignature = optionRows
+      .slice()
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .map((o) => ({
+        sortOrder: o.sortOrder,
+        inputKind: o.inputKind,
+        textHtml: o.textHtml ?? null,
+        textFont: o.textFont ?? null,
+        dateTimeValue: o.dateTimeValue ? o.dateTimeValue.getTime() : null,
+      }));
+    const structureChanged = JSON.stringify(oldSignature) !== JSON.stringify(newSignature);
+
+    const row = await prisma.$transaction(async (tx) => {
+      await tx.pollPhoto.deleteMany({ where: { pollId: id } });
+
+      let migratedVotesToCreate: Array<{ userId: string; pollOptionId: string; rank: number }> = [];
+      let migratedTextAnswersToCreate: Array<{ userId: string; questionKey: string; answer: string }> = [];
+
+      if (structureChanged) {
+        type QuestionInfo = {
+          key: string;
+          title: string;
+          type: 'single' | 'multiple' | 'rating' | 'text';
+          index: number;
+        };
+        type OptionInfo = {
+          id: string;
+          questionKey: string;
+          questionType: 'single' | 'multiple' | 'rating' | 'text';
+          questionTitle: string;
+          questionIndex: number;
+          sortOrder: number;
+          inputKind: 'text' | 'datetime';
+          normalizedLabel: string;
+          dateMs: number | null;
+        };
+        const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
+        const toQuestions = (options: OptionInfo[]): QuestionInfo[] => {
+          const map = new Map<string, QuestionInfo>();
+          for (const o of options) {
+            if (!map.has(o.questionKey)) {
+              map.set(o.questionKey, {
+                key: o.questionKey,
+                title: o.questionTitle,
+                type: o.questionType,
+                index: o.questionIndex,
+              });
+            }
+          }
+          return Array.from(map.values()).sort((a, b) => a.index - b.index);
+        };
+
+        const oldOptionInfos: OptionInfo[] = existing.options.map((o) => {
+          const plain = plainOptionLine(o.textHtml);
+          const meta = parseQuestionMetaFromOptionText(plain);
+          return {
+            id: o.id,
+            questionKey: meta?.questionKey ?? 'q-1',
+            questionType: meta?.questionType ?? 'single',
+            questionTitle: meta?.questionTitle ?? existing.title,
+            questionIndex: meta?.questionIndex ?? 1,
+            sortOrder: o.sortOrder,
+            inputKind: o.inputKind === 'datetime' ? 'datetime' : 'text',
+            normalizedLabel: norm(meta?.optionLabel ?? plain),
+            dateMs: o.dateTimeValue ? o.dateTimeValue.getTime() : null,
+          };
+        });
+        const newOptionInfos: OptionInfo[] = optionRows.map((o) => {
+          const plain = plainOptionLine(o.textHtml);
+          const meta = parseQuestionMetaFromOptionText(plain);
+          return {
+            id: o.id,
+            questionKey: meta?.questionKey ?? 'q-1',
+            questionType: meta?.questionType ?? 'single',
+            questionTitle: meta?.questionTitle ?? t,
+            questionIndex: meta?.questionIndex ?? 1,
+            sortOrder: o.sortOrder,
+            inputKind: o.inputKind === 'datetime' ? 'datetime' : 'text',
+            normalizedLabel: norm(meta?.optionLabel ?? plain),
+            dateMs: o.dateTimeValue ? o.dateTimeValue.getTime() : null,
+          };
+        });
+        const oldQuestions = toQuestions(oldOptionInfos);
+        const newQuestions = toQuestions(newOptionInfos);
+
+        const questionMapOldToNew = new Map<string, string>();
+        const newByKey = new Map(newQuestions.map((q) => [q.key, q]));
+        const newByTitleType = new Map<string, string[]>();
+        for (const q of newQuestions) {
+          const k = `${q.type}::${norm(q.title)}`;
+          const arr = newByTitleType.get(k) ?? [];
+          arr.push(q.key);
+          newByTitleType.set(k, arr);
+        }
+        const usedNew = new Set<string>();
+        for (const q of oldQuestions) {
+          const sameKey = newByKey.get(q.key);
+          if (sameKey && sameKey.type === q.type) {
+            questionMapOldToNew.set(q.key, q.key);
+            usedNew.add(q.key);
+            continue;
+          }
+          const byTitleType = newByTitleType.get(`${q.type}::${norm(q.title)}`) ?? [];
+          const target = byTitleType.find((candidate) => !usedNew.has(candidate));
+          if (target) {
+            questionMapOldToNew.set(q.key, target);
+            usedNew.add(target);
+          }
+        }
+
+        const newOptionsByQuestion = new Map<string, OptionInfo[]>();
+        for (const o of newOptionInfos) {
+          const arr = newOptionsByQuestion.get(o.questionKey) ?? [];
+          arr.push(o);
+          newOptionsByQuestion.set(o.questionKey, arr);
+        }
+        for (const arr of newOptionsByQuestion.values()) arr.sort((a, b) => a.sortOrder - b.sortOrder);
+
+        const optionMapOldToNew = new Map<string, string>();
+        for (const oldQ of oldQuestions) {
+          const newQ = questionMapOldToNew.get(oldQ.key);
+          if (!newQ) continue;
+          const oldOpts = oldOptionInfos
+            .filter((o) => o.questionKey === oldQ.key)
+            .sort((a, b) => a.sortOrder - b.sortOrder);
+          const candidatePool = [...(newOptionsByQuestion.get(newQ) ?? [])];
+          for (const oldOpt of oldOpts) {
+            const idx = candidatePool.findIndex((cand) => {
+              if (oldOpt.inputKind !== cand.inputKind) return false;
+              if (oldOpt.inputKind === 'datetime') return oldOpt.dateMs === cand.dateMs;
+              return oldOpt.normalizedLabel === cand.normalizedLabel;
+            });
+            if (idx >= 0) {
+              const [match] = candidatePool.splice(idx, 1);
+              if (match) optionMapOldToNew.set(oldOpt.id, match.id);
+            }
+          }
+        }
+
+        const oldVotes = await tx.pollOptionVote.findMany({
+          where: { pollId: id },
+          select: { userId: true, pollOptionId: true, rank: true },
+        });
+        const oldTextAnswers = await tx.pollTextAnswer.findMany({
+          where: { pollId: id },
+          select: { userId: true, questionKey: true, answer: true, updatedAt: true },
+          orderBy: { updatedAt: 'desc' },
+        });
+
+        await tx.pollOptionVote.deleteMany({ where: { pollId: id } });
+        await tx.pollTextAnswer.deleteMany({ where: { pollId: id } });
+        await tx.pollOption.deleteMany({ where: { pollId: id } });
+
+        const newOptionById = new Map(newOptionInfos.map((o) => [o.id, o]));
+        const migratedVotes = oldVotes
+          .map((v) => {
+            const mappedOptionId = optionMapOldToNew.get(v.pollOptionId);
+            if (!mappedOptionId) return null;
+            const mappedInfo = newOptionById.get(mappedOptionId);
+            if (!mappedInfo || mappedInfo.questionType === 'text') return null;
+            return {
+              userId: v.userId,
+              pollOptionId: mappedOptionId,
+              questionKey: mappedInfo.questionKey,
+              questionType: mappedInfo.questionType,
+              rank: v.rank ?? 1,
+            };
+          })
+          .filter((v): v is NonNullable<typeof v> => !!v);
+        const rankingGroups = new Map<string, typeof migratedVotes>();
+        for (const vote of migratedVotes) {
+          if (vote.questionType !== 'rating') continue;
+          const key = `${vote.userId}::${vote.questionKey}`;
+          const arr = rankingGroups.get(key) ?? [];
+          arr.push(vote);
+          rankingGroups.set(key, arr);
+        }
+        for (const arr of rankingGroups.values()) {
+          arr.sort((a, b) => a.rank - b.rank);
+          arr.forEach((vote, idx) => {
+            vote.rank = idx + 1;
+          });
+        }
+        migratedVotesToCreate = migratedVotes.map((v) => ({
+          userId: v.userId,
+          pollOptionId: v.pollOptionId,
+          rank: v.questionType === 'rating' ? v.rank : 1,
+        }));
+
+        const seenText = new Set<string>();
+        migratedTextAnswersToCreate = oldTextAnswers
+          .map((ans) => {
+            const mappedQuestionKey = questionMapOldToNew.get(ans.questionKey);
+            if (!mappedQuestionKey) return null;
+            const newQ = newByKey.get(mappedQuestionKey);
+            if (!newQ || newQ.type !== 'text') return null;
+            const dedupeKey = `${ans.userId}::${mappedQuestionKey}`;
+            if (seenText.has(dedupeKey)) return null;
+            seenText.add(dedupeKey);
+            return {
+              userId: ans.userId,
+              questionKey: mappedQuestionKey,
+              answer: ans.answer,
+            };
+          })
+          .filter((v): v is NonNullable<typeof v> => !!v);
+      }
+
+      const updated = await tx.poll.update({
+        where: { id },
+        data: {
+          groupId: existing.groupId,
+          updatedBy: actorUserId,
+          title: t,
+          description: input.description?.trim() ? input.description.trim() : null,
+          deadline: deadlineDt,
+          anonymousVotes: !!input.anonymousVotes,
+          multipleChoice: !!input.multipleChoice,
+          ranking: !!input.ranking,
+          photos: { create: photoRows },
+          ...(structureChanged
+            ? {
+                options: {
+                  create: optionRows.map((o) => ({
+                    id: o.id,
+                    sortOrder: o.sortOrder,
+                    inputKind: o.inputKind,
+                    textHtml: o.textHtml,
+                    textFont: o.textFont,
+                    dateTimeValue: o.dateTimeValue,
+                  })),
+                },
+              }
+            : {}),
+        },
+        include: {
+          photos: { orderBy: { id: 'asc' } },
+          options: true,
+          creator: { select: { id: true, displayName: true, name: true } },
+          closer: { select: { id: true, displayName: true, name: true } },
+        },
+      });
+
+      if (structureChanged) {
+        if (migratedVotesToCreate.length > 0) {
+          await tx.pollOptionVote.createMany({
+            data: migratedVotesToCreate.map((v) => ({
+              id: randomUUID(),
+              pollId: id,
+              pollOptionId: v.pollOptionId,
+              userId: v.userId,
+              rank: v.rank,
+            })),
+          });
+        }
+        if (migratedTextAnswersToCreate.length > 0) {
+          await tx.pollTextAnswer.createMany({
+            data: migratedTextAnswersToCreate.map((a) => ({
+              id: randomUUID(),
+              pollId: id,
+              questionKey: a.questionKey,
+              userId: a.userId,
+              answer: a.answer,
+            })),
+          });
+        }
+      }
+      return updated;
     });
 
     return this.mapPoll(row);
@@ -373,6 +733,8 @@ export class PollService {
       include: {
         photos: { orderBy: { id: 'asc' } },
         options: true,
+        creator: { select: { id: true, displayName: true, name: true } },
+        closer: { select: { id: true, displayName: true, name: true } },
       },
     });
     if (!row) return null;
@@ -384,7 +746,7 @@ export class PollService {
 
   public async listForUser(userId: string): Promise<Poll[]> {
     const memberships = await prisma.groupMember.findMany({
-      where: { userId, status: { in: ['active', 'pending'] } },
+      where: { userId, status: 'active' },
       select: { groupId: true },
     });
     const groupIds = memberships.map((m) => m.groupId);
@@ -395,6 +757,7 @@ export class PollService {
       include: {
         photos: { orderBy: { id: 'asc' } },
         options: true,
+        creator: { select: { id: true, displayName: true, name: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -413,11 +776,14 @@ export class PollService {
   ): Promise<{ watching: boolean; defaultWatching: boolean }> {
     const poll = await prisma.poll.findUnique({
       where: { id: pollId },
-      select: { id: true, groupId: true, createdBy: true },
+      select: { id: true, groupId: true, createdBy: true, closedAt: true },
     });
     if (!poll) throw Object.assign(new Error('Poll not found'), { status: 404 });
     if (!(await this.userCanAccessPoll(poll, userId))) {
       throw Object.assign(new Error('Forbidden'), { status: 403 });
+    }
+    if (poll.closedAt) {
+      throw Object.assign(new Error('Poll is closed'), { status: 400 });
     }
     const defaultWatch = this.defaultWatching(poll, userId);
     const want = !!input.watching;
@@ -584,17 +950,22 @@ export class PollService {
         });
       }
       const optionVotes = poll.votes.filter((v) => v.pollOptionId === o.id);
+      const responseCount = optionVotes.length;
       const votes = grouped.get(key)?.questionType === 'rating'
-        ? optionVotes.reduce((sum, v) => sum + (v.rank ?? 1), 0)
+        ? (responseCount > 0
+            ? optionVotes.reduce((sum, v) => sum + (v.rank ?? 1), 0) / responseCount
+            : 0)
         : optionVotes.length;
       grouped.get(key)!.options.push({
         optionId: o.id,
         label: meta?.optionLabel ?? (text || 'Option'),
         votes,
+        responseCount,
         pct: 0,
         voters: optionVotes.map((v) => ({
           userId: v.userId,
           userName: v.user.displayName || v.user.name,
+          rank: grouped.get(key)?.questionType === 'rating' ? (v.rank ?? 1) : undefined,
         })),
       });
     }
@@ -614,7 +985,7 @@ export class PollService {
         q.totalVotes = responses.length;
         q.options = [];
       } else if (q.questionType === 'rating') {
-        // Lower rank sum is better (e.g. 1+2+1 beats 2+2+2).
+        // Lower average rank is better (e.g. avg 1.33 beats avg 2.0).
         const best = Math.min(...q.options.map((o) => o.votes));
         q.totalVotes = q.options.reduce((n, o) => n + o.votes, 0);
         q.options = q.options.map((o) => ({
@@ -631,7 +1002,15 @@ export class PollService {
       }
       if (poll.anonymousVotes || q.anonymousVotes) {
         q.options = q.options.map((o) => ({ ...o, voters: [] }));
-        q.textResponses = [];
+        if (q.textResponses && q.textResponses.length > 0) {
+          // Keep text answers visible while anonymizing responder identity.
+          q.textResponses = q.textResponses.map((r) => ({
+            // Keep real userId so the submitter can re-hydrate their own saved answer on reopen.
+            userId: r.userId,
+            userName: 'Anonymous',
+            answer: r.answer,
+          }));
+        }
       }
     }
 
@@ -651,5 +1030,292 @@ export class PollService {
       throw Object.assign(new Error('Forbidden'), { status: 403 });
     }
     await prisma.poll.delete({ where: { id } });
+  }
+
+  public async close(id: string, actorUserId: string): Promise<Poll> {
+    const poll = await prisma.poll.findUnique({
+      where: { id },
+      select: { id: true, groupId: true, createdBy: true, closedAt: true },
+    });
+    if (!poll) throw Object.assign(new Error('Poll not found'), { status: 404 });
+    const role = await this.getActiveMemberRole(poll.groupId, actorUserId);
+    const isAdmin = role === 'admin' || role === 'superadmin';
+    if (poll.createdBy !== actorUserId && !isAdmin) {
+      throw Object.assign(new Error('Forbidden'), { status: 403 });
+    }
+    if (poll.closedAt) {
+      const row = await prisma.poll.findUnique({
+        where: { id },
+        include: {
+          photos: { orderBy: { id: 'asc' } },
+          options: true,
+          creator: { select: { id: true, displayName: true, name: true } },
+          closer: { select: { id: true, displayName: true, name: true } },
+        },
+      });
+      if (!row) throw Object.assign(new Error('Poll not found'), { status: 404 });
+      return this.mapPoll(row);
+    }
+    const row = await prisma.poll.update({
+      where: { id },
+      data: {
+        closedAt: new Date(),
+        closedBy: actorUserId,
+        updatedBy: actorUserId,
+      },
+      include: {
+        photos: { orderBy: { id: 'asc' } },
+        options: true,
+        creator: { select: { id: true, displayName: true, name: true } },
+        closer: { select: { id: true, displayName: true, name: true } },
+      },
+    });
+    return this.mapPoll(row);
+  }
+
+  private mapPollOptionSuggestion(row: {
+    id: string;
+    pollId: string;
+    questionKey: string;
+    label: string;
+    suggestedBy: string;
+    status: string;
+    createdAt: Date;
+    decidedAt: Date | null;
+    suggester?: { displayName: string; name: string } | null;
+  }): PollOptionSuggestion {
+    return {
+      id: row.id,
+      pollId: row.pollId,
+      questionKey: row.questionKey,
+      label: row.label,
+      suggestedBy: row.suggestedBy,
+      suggesterName: row.suggester ? row.suggester.displayName || row.suggester.name : undefined,
+      status: row.status as PollOptionSuggestion['status'],
+      createdAt: row.createdAt.toISOString(),
+      decidedAt: row.decidedAt ? row.decidedAt.toISOString() : undefined,
+    };
+  }
+
+  public async suggestPollOption(pollId: string, userId: string, questionKey: string, label: string): Promise<PollOptionSuggestion> {
+    const qk = questionKey.trim();
+    const t = label.trim();
+    if (!qk) {
+      throw Object.assign(new Error('questionKey is required'), { status: 400 });
+    }
+    if (!t || t.length > 200) {
+      throw Object.assign(new Error('Suggestion must be between 1 and 200 characters'), { status: 400 });
+    }
+
+    const poll = await prisma.poll.findUnique({
+      where: { id: pollId },
+      include: {
+        options: true,
+      },
+    });
+    if (!poll) throw Object.assign(new Error('Poll not found'), { status: 404 });
+    if (!(await this.userCanAccessPoll(poll, userId))) {
+      throw Object.assign(new Error('Forbidden'), { status: 403 });
+    }
+    if (poll.closedAt) {
+      throw Object.assign(new Error('Poll is closed'), { status: 400 });
+    }
+    const now = Date.now();
+    const deadlineMs = poll.deadline?.getTime() ?? Number.NaN;
+    if (Number.isFinite(deadlineMs) && now > deadlineMs) {
+      throw Object.assign(new Error('Poll deadline has passed'), { status: 400 });
+    }
+
+    let sawQuestion = false;
+    let existingOptionCount = 0;
+    for (const o of poll.options) {
+      const meta = parseQuestionMetaFromOptionText(plainOptionLine(o.textHtml));
+      if (!meta || meta.questionKey !== qk) continue;
+      sawQuestion = true;
+      if (meta.questionType === 'text') {
+        throw Object.assign(new Error('Suggestions are only allowed for choice questions'), { status: 400 });
+      }
+      existingOptionCount += 1;
+    }
+    if (!sawQuestion) {
+      throw Object.assign(new Error('Unknown question'), { status: 400 });
+    }
+    if (existingOptionCount >= MAX_OPTIONS_PER_QUESTION) {
+      throw Object.assign(
+        new Error(`This question already has ${MAX_OPTIONS_PER_QUESTION} options`),
+        { status: 400 },
+      );
+    }
+
+    const tl = t.toLowerCase();
+    for (const o of poll.options) {
+      const meta = parseQuestionMetaFromOptionText(plainOptionLine(o.textHtml));
+      if (!meta || meta.questionKey !== qk) continue;
+      if ((meta.optionLabel || '').trim().toLowerCase() === tl) {
+        throw Object.assign(new Error('That option already exists on this question'), { status: 400 });
+      }
+    }
+
+    const pending = await prisma.pollOptionSuggestion.findMany({
+      where: { pollId, questionKey: qk, status: 'pending' },
+    });
+    for (const p of pending) {
+      if (p.label.trim().toLowerCase() === tl) {
+        throw Object.assign(new Error('A pending suggestion already uses this label'), { status: 400 });
+      }
+    }
+
+    const row = await prisma.pollOptionSuggestion.create({
+      data: {
+        id: randomUUID(),
+        pollId,
+        questionKey: qk,
+        label: t,
+        suggestedBy: userId,
+        status: 'pending',
+      },
+      include: { suggester: { select: { displayName: true, name: true } } },
+    });
+
+    const who = row.suggester ? row.suggester.displayName || row.suggester.name : 'Someone';
+    const creatorId = poll.createdBy;
+    if (creatorId && creatorId !== userId) {
+      void notificationService
+        .createForUser(creatorId, 'Poll option suggested', `${who} suggested “${t}” on “${poll.title.trim()}”.`, {
+          type: 'poll_option_suggestion',
+          icon: '➕',
+          groupId: poll.groupId,
+          pollId,
+          dest: 'poll',
+        })
+        .catch(() => undefined);
+    }
+
+    return this.mapPollOptionSuggestion(row);
+  }
+
+  public async listPollOptionSuggestions(pollId: string, userId: string): Promise<PollOptionSuggestion[]> {
+    const poll = await prisma.poll.findUnique({
+      where: { id: pollId },
+      select: { id: true, createdBy: true, groupId: true },
+    });
+    if (!poll) throw Object.assign(new Error('Poll not found'), { status: 404 });
+    if (!(await this.userCanAccessPoll(poll, userId))) {
+      throw Object.assign(new Error('Forbidden'), { status: 403 });
+    }
+    const isCreator = poll.createdBy === userId;
+
+    const rows = await prisma.pollOptionSuggestion.findMany({
+      where: isCreator ? { pollId } : { pollId, status: 'accepted' },
+      orderBy: { createdAt: 'desc' },
+      include: { suggester: { select: { displayName: true, name: true } } },
+    });
+    return rows.map((r) => this.mapPollOptionSuggestion(r));
+  }
+
+  public async decidePollOptionSuggestion(
+    pollId: string,
+    suggestionId: string,
+    userId: string,
+    decision: 'accept' | 'decline',
+  ): Promise<PollOptionSuggestionDecisionResult> {
+    const poll = await prisma.poll.findUnique({
+      where: { id: pollId },
+      include: { options: true },
+    });
+    if (!poll) throw Object.assign(new Error('Poll not found'), { status: 404 });
+    if (poll.createdBy !== userId) {
+      throw Object.assign(new Error('Only the poll creator can decide suggestions'), { status: 403 });
+    }
+    if (poll.closedAt) {
+      throw Object.assign(new Error('Poll is closed'), { status: 400 });
+    }
+
+    const sugg = await prisma.pollOptionSuggestion.findFirst({
+      where: { id: suggestionId, pollId },
+      include: { suggester: { select: { displayName: true, name: true } } },
+    });
+    if (!sugg) throw Object.assign(new Error('Suggestion not found'), { status: 404 });
+    if (sugg.status !== 'pending') {
+      throw Object.assign(new Error('This suggestion was already decided'), { status: 400 });
+    }
+
+    if (decision === 'decline') {
+      const updated = await prisma.pollOptionSuggestion.update({
+        where: { id: suggestionId },
+        data: { status: 'declined', decidedAt: new Date() },
+        include: { suggester: { select: { displayName: true, name: true } } },
+      });
+      return { suggestion: this.mapPollOptionSuggestion(updated) };
+    }
+
+    const siblings = poll.options.filter((o) => {
+      const meta = parseQuestionMetaFromOptionText(plainOptionLine(o.textHtml));
+      return meta?.questionKey === sugg.questionKey && meta.questionType !== 'text';
+    });
+    if (siblings.length === 0) {
+      throw Object.assign(new Error('Could not resolve question for this suggestion'), { status: 400 });
+    }
+    const template = siblings[0]!;
+    const hdr = parseQuestionHeaderFromOptionText(template.textHtml);
+    if (!hdr) {
+      throw Object.assign(new Error('Invalid poll option format'), { status: 500 });
+    }
+    if (siblings.length >= MAX_OPTIONS_PER_QUESTION) {
+      throw Object.assign(
+        new Error(`This question already has ${MAX_OPTIONS_PER_QUESTION} options`),
+        { status: 400 },
+      );
+    }
+    const font = parseFont(template.textFont ?? undefined);
+    const fullLine = `Q${hdr.qNum}: ${hdr.title} [${hdr.bracket}] - ${sugg.label.trim()}`;
+    const html = normalizeTextHtml(fullLine, font);
+    if (stripTagsForLength(html).length === 0) {
+      throw Object.assign(new Error('Invalid suggestion text'), { status: 400 });
+    }
+    const maxSort = Math.max(...siblings.map((o) => o.sortOrder), 0);
+    const textHtml = sanitizePollHtml(html);
+
+    await prisma.$transaction(async (tx) => {
+      await tx.pollOptionSuggestion.update({
+        where: { id: suggestionId },
+        data: { status: 'accepted', decidedAt: new Date() },
+      });
+      await tx.pollOption.create({
+        data: {
+          id: randomUUID(),
+          pollId,
+          sortOrder: maxSort + 1,
+          inputKind: 'text',
+          textHtml,
+          textFont: font,
+          dateTimeValue: null,
+        },
+      });
+      await tx.poll.update({
+        where: { id: pollId },
+        data: { updatedBy: userId },
+      });
+    });
+
+    const updated = await prisma.pollOptionSuggestion.findUniqueOrThrow({
+      where: { id: suggestionId },
+      include: { suggester: { select: { displayName: true, name: true } } },
+    });
+
+    const row = await prisma.poll.findUnique({
+      where: { id: pollId },
+      include: {
+        photos: { orderBy: { id: 'asc' } },
+        options: true,
+        creator: { select: { id: true, displayName: true, name: true } },
+        closer: { select: { id: true, displayName: true, name: true } },
+      },
+    });
+    if (!row) throw Object.assign(new Error('Poll not found'), { status: 404 });
+    const counts = await this.respondentCountsByPollIds([pollId]);
+    const mapped = this.mapPoll(row);
+    const enriched = await this.enrichWithViewerWatch({ ...mapped, respondentCount: counts[pollId] ?? 0 }, userId);
+    return { suggestion: this.mapPollOptionSuggestion(updated), poll: enriched };
   }
 }

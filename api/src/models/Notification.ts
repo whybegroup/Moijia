@@ -20,10 +20,12 @@ export interface Notification {
   groupId?: string | null;
   /** Related event ID (if applicable) */
   eventId?: string | null;
+  /** Related poll ID (in-app; when dest is poll) */
+  pollId?: string | null;
   /** Whether this notification is navigable/clickable */
   navigable: boolean;
   /** Navigation destination */
-  dest?: 'group' | 'event' | null;
+  dest?: 'group' | 'event' | 'poll' | null;
   /** User ID this notification is for */
   userId?: string | null;
   /** Timestamp when created */
@@ -45,7 +47,8 @@ export interface NotificationInput {
   body: string;
   groupId?: string;
   eventId?: string;
+  pollId?: string;
   navigable?: boolean;
-  dest?: 'group' | 'event';
+  dest?: 'group' | 'event' | 'poll';
   userId?: string;
 }

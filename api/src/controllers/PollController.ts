@@ -1,6 +1,18 @@
 import { Body, Controller, Delete, Get, Path, Post, Put, Query, Route, SuccessResponse, Tags } from 'tsoa';
-import { Poll, PollInput, PollResults, PollVoteInput, PollWatchInput } from '../models';
+import {
+  Poll,
+  PollCloseInput,
+  PollInput,
+  PollOptionSuggestion,
+  PollOptionSuggestionDecisionInput,
+  PollOptionSuggestionDecisionResult,
+  PollOptionSuggestionInput,
+  PollResults,
+  PollVoteInput,
+  PollWatchInput,
+} from '../models';
 import { PollService } from '../services/PollService';
+import { httpError } from '../utils/httpError';
 
 @Route('polls')
 @Tags('Polls')
@@ -26,6 +38,18 @@ export class PollController extends Controller {
   }
 
   /**
+   * Edit an existing poll (creator only).
+   */
+  @Put('{id}')
+  public async updatePoll(@Path() id: string, @Query() userId: string, @Body() body: PollInput): Promise<Poll> {
+    if (!userId) {
+      this.setStatus(400);
+      throw new Error('userId is required');
+    }
+    return this.pollService.update(id, userId, body);
+  }
+
+  /**
    * Get a poll if the user is an active member of its group.
    */
   @Get('{id}')
@@ -36,8 +60,7 @@ export class PollController extends Controller {
     }
     const poll = await this.pollService.getById(id, userId);
     if (!poll) {
-      this.setStatus(404);
-      throw new Error('Poll not found');
+      throw httpError(404, 'Poll not found');
     }
     return poll;
   }
@@ -86,6 +109,18 @@ export class PollController extends Controller {
   }
 
   /**
+   * Close poll early (creator/admin/superadmin).
+   */
+  @Post('{id}/close')
+  public async closePoll(@Path() id: string, @Body() body: PollCloseInput): Promise<Poll> {
+    if (!body?.userId) {
+      this.setStatus(400);
+      throw new Error('userId is required');
+    }
+    return this.pollService.close(id, body.userId);
+  }
+
+  /**
    * Read aggregated poll results + caller's current selections.
    */
   @Get('{id}/results')
@@ -95,6 +130,51 @@ export class PollController extends Controller {
       throw new Error('userId is required');
     }
     return this.pollService.getResults(id, userId);
+  }
+
+  /**
+   * Suggest a new choice option (active group members; not for text questions).
+   */
+  @Post('{id}/option-suggestions')
+  @SuccessResponse('201', 'Created')
+  public async suggestPollOption(
+    @Path() id: string,
+    @Body() body: PollOptionSuggestionInput,
+  ): Promise<PollOptionSuggestion> {
+    if (!body?.userId) {
+      this.setStatus(400);
+      throw new Error('userId is required');
+    }
+    this.setStatus(201);
+    return this.pollService.suggestPollOption(id, body.userId, body.questionKey, body.label);
+  }
+
+  /**
+   * List option suggestions (poll creator only).
+   */
+  @Get('{id}/option-suggestions')
+  public async listPollOptionSuggestions(@Path() id: string, @Query() userId: string): Promise<PollOptionSuggestion[]> {
+    if (!userId) {
+      this.setStatus(400);
+      throw new Error('userId is required');
+    }
+    return this.pollService.listPollOptionSuggestions(id, userId);
+  }
+
+  /**
+   * Accept or decline a suggested option (poll creator only).
+   */
+  @Post('{id}/option-suggestions/{suggestionId}/decide')
+  public async decidePollOptionSuggestion(
+    @Path() id: string,
+    @Path() suggestionId: string,
+    @Body() body: PollOptionSuggestionDecisionInput,
+  ): Promise<PollOptionSuggestionDecisionResult> {
+    if (!body?.userId) {
+      this.setStatus(400);
+      throw new Error('userId is required');
+    }
+    return this.pollService.decidePollOptionSuggestion(id, suggestionId, body.userId, body.decision);
   }
 
   /**

@@ -32,6 +32,7 @@ import {
   RecurrenceTruncateResult,
 } from '../models';
 import { EventService } from '../services/EventService';
+import { httpError } from '../utils/httpError';
 
 @Route('events')
 @Tags('Events')
@@ -94,8 +95,7 @@ export class EventController extends Controller {
     }
     const event = await this.eventService.getById(id, userId);
     if (!event) {
-      this.setStatus(404);
-      throw new Error('Event not found');
+      throw httpError(404, 'Event not found');
     }
     return event;
   }

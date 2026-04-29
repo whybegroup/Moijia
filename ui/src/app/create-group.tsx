@@ -20,6 +20,7 @@ import { NavBar, formSectionTitleStyle, Avatar, Toggle } from '../components/ui'
 import { EventFormPopoverChrome } from '../components/EventFormPopoverChrome';
 import { useCreateGroup } from '../hooks/api/useGroups';
 import { useAuth } from '../contexts/AuthContext';
+import { useCurrentUserContext } from '../contexts/CurrentUserContext';
 import { GroupAvatar } from '../components/GroupAvatar';
 import { AvatarPickerModal } from '../components/AvatarPickerModal';
 import type { PendingAvatarFile } from '../services/pickAndUploadImage';
@@ -27,6 +28,7 @@ import { uploadPendingAvatarFile } from '../services/pickAndUploadImage';
 import { ResolvableImage } from '../components/ResolvableImage';
 import { pickAndUploadCoverPhoto } from '../services/pickAndUploadImage';
 import { firstSearchParam, parseReturnToParam } from '../utils/navigationReturn';
+import { ApiError } from '@moijia/client';
 
 const DEFAULT_AVATAR_SEED = 'auto';
 const AVATAR_SIZE = 56;
@@ -37,6 +39,7 @@ export default function CreateGroupScreen() {
   const { returnTo: returnToRaw } = useLocalSearchParams<{ returnTo?: string | string[] }>();
   const groupReturnTo = parseReturnToParam(firstSearchParam(returnToRaw));
   const { user } = useAuth();
+  const { userId: currentUserId } = useCurrentUserContext();
   const createGroup = useCreateGroup();
   const [groupId] = useState(() => Crypto.randomUUID());
 
@@ -140,6 +143,11 @@ export default function CreateGroupScreen() {
 
   const handleCreate = async () => {
     if (!valid || !user) return;
+    const actorId = (currentUserId ?? user.uid ?? '').trim();
+    if (!actorId) {
+      Alert.alert('Error', 'Missing user id. Please sign in again and retry.');
+      return;
+    }
 
     try {
       let thumbnail = draftThumbnail;
@@ -157,17 +165,24 @@ export default function CreateGroupScreen() {
         desc: draftDesc.trim(),
         thumbnail,
         coverPhotos: draftCoverPhotos,
-        superAdminId: user.uid,
+        superAdminId: actorId,
         avatarSeed: draftSeed || draftName.trim() || undefined,
-        createdBy: user.uid,
-        adminIds: [user.uid],
-        memberIds: [user.uid],
+        createdBy: actorId,
+        adminIds: [actorId],
+        memberIds: [actorId],
         requireApprovalToJoin,
       });
 
       handleBack();
-    } catch {
-      Alert.alert('Error', 'Failed to create group. Please try again.');
+    } catch (e) {
+      let message = 'Failed to create group. Please try again.';
+      if (e instanceof ApiError) {
+        const body = e.body as { error?: string; message?: string } | undefined;
+        message = (body?.error || body?.message || e.message || message).trim() || message;
+      } else if (e instanceof Error && e.message) {
+        message = e.message;
+      }
+      Alert.alert('Error', message);
     }
   };
 

@@ -22,13 +22,13 @@ import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter, useLocalSearchParams, type Href } from 'expo-router';
 import Toast from 'react-native-toast-message';
-import { PollOptionInputKind, type PollInput } from '@moijia/client';
+import { PollOptionInputKind, type Poll, type PollInput } from '@moijia/client';
 import { Colors, Fonts, Radius } from '../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName, formatLocalDateInput } from '../utils/helpers';
 import { localWallDateTimeToUtcIso } from '../utils/datetimeUtc';
 import { NavBar, Field, Toggle, formSectionTitleStyle } from '../components/ui';
 import { EventFormPopoverChrome } from '../components/EventFormPopoverChrome';
-import { useGroups, useCreatePoll, useAllGroupMemberColors } from '../hooks/api';
+import { useGroups, useCreatePoll, useAllGroupMemberColors, usePoll, useUpdatePoll } from '../hooks/api';
 import { uid } from '../utils/api-helpers';
 import { useCurrentUserContext } from '../contexts/CurrentUserContext';
 import { ResolvableImage } from '../components/ResolvableImage';
@@ -41,6 +41,8 @@ import {
   type CoverPhotoDraft,
 } from '../services/pickAndUploadImage';
 import { firstSearchParam, parseReturnToParam } from '../utils/navigationReturn';
+
+const MAX_OPTIONS_PER_QUESTION = 50;
 
 function webPollDatetimeInputStyle(): Record<string, string | number> {
   return {
@@ -68,6 +70,7 @@ type QuestionDraft = {
   enableRating: boolean;
   type: QuestionType;
   anonymousVotes: boolean;
+  required: boolean;
 };
 
 function newQuestionDraft(): QuestionDraft {
@@ -79,12 +82,57 @@ function newQuestionDraft(): QuestionDraft {
     enableRating: false,
     type: 'choice',
     anonymousVotes: false,
+    required: false,
   };
 }
 
 function stripForLength(s: string): number {
   const t = s.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
   return t.length;
+}
+
+function parseQuestionDraftsFromPoll(poll: Poll): QuestionDraft[] {
+  const sorted = poll.options.slice().sort((a, b) => a.sortOrder - b.sortOrder);
+  const map = new Map<string, QuestionDraft>();
+  const re = /^Q(\d+):\s*(.*?)\s*\[(.*?)\]\s*-\s*(.*)$/i;
+  for (const o of sorted) {
+    const text = (o.textHtml ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    const m = text.match(re);
+    if (!m) continue;
+    const idx = Number(m[1]);
+    const key = `q-${idx}`;
+    const title = m[2].trim();
+    const rawType = m[3].trim().toLowerCase();
+    const optionLabel = m[4].trim();
+    const tokens = rawType.split('|').map((t) => t.trim());
+    const baseType = tokens[0] ?? rawType;
+    const isText = baseType.includes('text');
+    const isRating = baseType.includes('rating');
+    const isMultiple = baseType.includes('multiple');
+    const isAnonymous = tokens.includes('anon') || tokens.includes('anonymous');
+    const isRequired = tokens.includes('req') || tokens.includes('required');
+    if (!map.has(key)) {
+      map.set(key, {
+        id: uid(),
+        title,
+        options: isText ? [] : [],
+        multipleChoice: isRating || isMultiple,
+        enableRating: isRating,
+        type: isText ? 'text' : 'choice',
+        anonymousVotes: isAnonymous,
+        required: isRequired,
+      });
+    }
+    const q = map.get(key)!;
+    if (q.type === 'choice' && optionLabel && optionLabel !== '__TEXT_RESPONSE__') q.options.push(optionLabel);
+  }
+  const out = Array.from(map.entries())
+    .sort((a, b) => Number(a[0].slice(2)) - Number(b[0].slice(2)))
+    .map(([, q]) => ({
+      ...q,
+      options: q.type === 'choice' ? (q.options.length >= 2 ? q.options : [...q.options, '', ''].slice(0, 2)) : ['', ''],
+    }));
+  return out.length > 0 ? out : [newQuestionDraft()];
 }
 
 function serializeCreatePollDraft(args: {
@@ -119,13 +167,16 @@ function serializeCreatePollDraft(args: {
       type: q.type,
       enableRating: q.enableRating,
       anonymousVotes: q.anonymousVotes,
+      required: q.required,
     })),
   });
 }
 
 export default function CreatePollScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ returnTo?: string | string[] }>();
+  const params = useLocalSearchParams<{ returnTo?: string | string[]; editId?: string | string[] }>();
+  const editId = firstSearchParam(params.editId);
+  const isEditing = !!editId;
   const createReturnTo = useMemo(
     () => parseReturnToParam(firstSearchParam(params.returnTo)),
     [params.returnTo],
@@ -134,6 +185,8 @@ export default function CreatePollScreen() {
   const { data: groups = [], isFetched: groupsIsFetched } = useGroups(currentUserId ?? '');
   const { data: groupColors = {} } = useAllGroupMemberColors(currentUserId || '');
   const createPollMutation = useCreatePoll(currentUserId ?? '');
+  const updatePollMutation = useUpdatePoll(editId ?? '', currentUserId ?? '');
+  const { data: editingPoll } = usePoll(editId ?? '', currentUserId ?? '');
 
   const [form, setForm] = useState({
     title: '',
@@ -150,6 +203,8 @@ export default function CreatePollScreen() {
   const [showDeadlineDatePicker, setShowDeadlineDatePicker] = useState(false);
   const [showDeadlineTimePicker, setShowDeadlineTimePicker] = useState(false);
   const [createPollBaselineSerialized, setCreatePollBaselineSerialized] = useState<string | null>(null);
+  const initialGroupIdRef = useRef<string | null>(null);
+  const hydratedEditRef = useRef(false);
 
   const joinedGroups = groups.filter(
     (g) =>
@@ -172,6 +227,36 @@ export default function CreatePollScreen() {
       setForm((p) => ({ ...p, groupId: (firstEligible ?? joinedGroups[0])!.id }));
     }
   }, [joinedGroups, form.groupId]);
+
+  useEffect(() => {
+    if (!initialGroupIdRef.current && form.groupId) {
+      initialGroupIdRef.current = form.groupId;
+    }
+  }, [form.groupId]);
+
+  useEffect(() => {
+    if (!isEditing || !editingPoll || hydratedEditRef.current) return;
+    const d = new Date(editingPoll.deadline);
+    const localDate = Number.isFinite(d.getTime()) ? formatLocalDateInput(d) : formatLocalDateInput(new Date());
+    const localTime = Number.isFinite(d.getTime())
+      ? `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+      : '23:59';
+    const coverPhotoDrafts = (editingPoll.coverPhotos ?? []).map((url) => ({ kind: 'remote' as const, url }));
+    setForm({
+      title: editingPoll.title ?? '',
+      description: editingPoll.description ?? '',
+      groupId: editingPoll.groupId,
+      coverPhotoDrafts,
+      multipleChoice: !!editingPoll.multipleChoice,
+      ranking: !!editingPoll.ranking,
+    });
+    setQuestionDrafts(parseQuestionDraftsFromPoll(editingPoll));
+    setDeadlineDate(localDate);
+    setDeadlineTime(localTime);
+    initialGroupIdRef.current = editingPoll.groupId;
+    hydratedEditRef.current = true;
+    setCreatePollBaselineSerialized(null);
+  }, [editingPoll, isEditing]);
 
   const set = (k: string, v: unknown) => setForm((p) => ({ ...p, [k]: v }));
 
@@ -234,7 +319,14 @@ export default function CreatePollScreen() {
   };
   const addQuestionOption = (id: string) => {
     setQuestionDrafts((rows) =>
-      rows.map((q) => (q.id === id ? { ...q, options: [...q.options, ''] } : q))
+      rows.map((q) => {
+        if (q.id !== id) return q;
+        if (q.options.length >= MAX_OPTIONS_PER_QUESTION) {
+          Alert.alert('Option limit reached', `Each question can have up to ${MAX_OPTIONS_PER_QUESTION} options.`);
+          return q;
+        }
+        return { ...q, options: [...q.options, ''] };
+      })
     );
   };
   const updateQuestionOption = (id: string, idx: number, value: string) => {
@@ -289,6 +381,23 @@ export default function CreatePollScreen() {
     );
   }, [createPollBaselineSerialized, form, questionDrafts, deadlineDate, deadlineTime]);
 
+  const hasMeaningfulChanges = useMemo(() => {
+    if (form.title.trim().length > 0) return true;
+    if (form.description.trim().length > 0) return true;
+    if (form.coverPhotoDrafts.length > 0) return true;
+    if (questionDrafts.length > 1) return true;
+    if (deadlineDate !== formatLocalDateInput(new Date())) return true;
+    if (deadlineTime !== '23:59') return true;
+    if (initialGroupIdRef.current && form.groupId && form.groupId !== initialGroupIdRef.current) return true;
+    for (const q of questionDrafts) {
+      if (q.title.trim().length > 0) return true;
+      if (q.type !== 'choice') return true;
+      if (q.multipleChoice || q.enableRating || q.anonymousVotes || q.required) return true;
+      if (q.options.some((o) => o.trim().length > 0)) return true;
+    }
+    return false;
+  }, [form, questionDrafts, deadlineDate, deadlineTime]);
+
   const dismiss = useCallback(() => {
     if (router.canGoBack()) {
       router.back();
@@ -325,7 +434,8 @@ export default function CreatePollScreen() {
   ]);
 
   const requestClose = useCallback(() => {
-    if (!createPollDirty) {
+    const shouldPromptDiscard = isEditing ? createPollDirty : hasMeaningfulChanges || createPollDirty;
+    if (!shouldPromptDiscard) {
       dismiss();
       return;
     }
@@ -338,7 +448,7 @@ export default function CreatePollScreen() {
       { text: 'Keep editing', style: 'cancel' },
       { text: 'Discard', style: 'destructive', onPress: dismiss },
     ]);
-  }, [createPollDirty, dismiss]);
+  }, [isEditing, hasMeaningfulChanges, createPollDirty, dismiss]);
 
   const submit = async () => {
     if (!ok || !currentUserId) return;
@@ -369,7 +479,10 @@ export default function CreatePollScreen() {
             : q.multipleChoice
               ? 'Multiple choice'
               : 'Single choice';
-      const metaLabel = q.anonymousVotes ? `${typeLabel}|anon` : typeLabel;
+      const metaFlags: string[] = [];
+      if (q.anonymousVotes) metaFlags.push('anon');
+      if (q.required) metaFlags.push('req');
+      const metaLabel = metaFlags.length > 0 ? `${typeLabel}|${metaFlags.join('|')}` : typeLabel;
       if (q.type === 'text') {
         return [
           {
@@ -390,7 +503,7 @@ export default function CreatePollScreen() {
     });
 
     const body: PollInput = {
-      id: uid(),
+      id: editId ?? uid(),
       groupId: form.groupId,
       createdBy: currentUserId,
       title: form.title.trim(),
@@ -403,16 +516,37 @@ export default function CreatePollScreen() {
       ranking: questionDrafts.some((q) => q.enableRating),
     };
 
+    if (isEditing && editId && createPollDirty) {
+      const warn = 'Editing this poll could affect existing responses';
+      if (Platform.OS === 'web') {
+        if (!window.confirm(warn)) return;
+      } else {
+        const okToProceed = await new Promise<boolean>((resolve) => {
+          Alert.alert('Update poll?', warn, [
+            { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Continue', style: 'destructive', onPress: () => resolve(true) },
+          ]);
+        });
+        if (!okToProceed) return;
+      }
+    }
+
     try {
-      await createPollMutation.mutateAsync(body);
-      Toast.show({ type: 'success', text1: 'Poll created' });
-      router.replace('/(tabs)/polls');
+      if (isEditing && editId) {
+        await updatePollMutation.mutateAsync(body);
+        Toast.show({ type: 'success', text1: 'Poll updated' });
+        dismiss();
+      } else {
+        await createPollMutation.mutateAsync(body);
+        Toast.show({ type: 'success', text1: 'Poll created' });
+        router.replace('/(tabs)/polls');
+      }
     } catch (e: unknown) {
       const msg =
         e && typeof e === 'object' && 'body' in e
           ? String((e as { body?: { error?: string } }).body?.error ?? '')
           : '';
-      Alert.alert('Error', msg || 'Failed to create poll');
+      Alert.alert('Error', msg || (isEditing ? 'Failed to update poll' : 'Failed to create poll'));
     }
   };
 
@@ -420,19 +554,19 @@ export default function CreatePollScreen() {
     <EventFormPopoverChrome onClose={requestClose}>
       <View style={styles.inner}>
         <NavBar
-          title="New Poll"
+          title={isEditing ? 'Edit Poll' : 'New Poll'}
           onClose={requestClose}
           right={
             <TouchableOpacity
               onPress={() => void submit()}
-              disabled={!ok || createPollMutation.isPending}
-              style={[styles.headerBtn, (!ok || createPollMutation.isPending) && styles.headerBtnDis]}
+              disabled={!ok || createPollMutation.isPending || updatePollMutation.isPending}
+              style={[styles.headerBtn, (!ok || createPollMutation.isPending || updatePollMutation.isPending) && styles.headerBtnDis]}
             >
-              {createPollMutation.isPending ? (
+              {createPollMutation.isPending || updatePollMutation.isPending ? (
                 <ActivityIndicator size="small" color={Colors.accentFg} />
               ) : (
                 <Text style={[styles.headerBtnText, !ok && { color: Colors.textMuted }]} numberOfLines={1}>
-                  Create
+                  {isEditing ? 'Save' : 'Create'}
                 </Text>
               )}
             </TouchableOpacity>
@@ -682,15 +816,22 @@ export default function CreatePollScreen() {
                   onChangeText={(v) => updateQuestionTitle(q.id, v)}
                   placeholder="Untitled question"
                   placeholderTextColor={Colors.textMuted}
-                  style={styles.input}
+                  style={[styles.input, styles.questionTitleInput]}
                 />
                 {q.type === 'choice' ? (
                   <>
                     <View style={{ marginTop: 10 }}>
                       <Toggle
+                        value={q.required}
+                        onChange={(v) => updateQuestion(q.id, { required: v })}
+                        label="Required"
+                      />
+                    </View>
+                    <View style={{ marginTop: 10 }}>
+                      <Toggle
                         value={q.anonymousVotes}
                         onChange={(v) => updateQuestion(q.id, { anonymousVotes: v })}
-                        label="Enable anonymous vote"
+                        label="Anonymous vote"
                       />
                     </View>
                     <View style={{ marginTop: 10 }}>
@@ -702,7 +843,7 @@ export default function CreatePollScreen() {
                             enableRating: v ? q.enableRating : false,
                           })
                         }
-                        label="Enable multiple choice"
+                        label="Multiple choice"
                       />
                     </View>
                     {q.multipleChoice ? (
@@ -740,11 +881,18 @@ export default function CreatePollScreen() {
                   </>
                 ) : (
                   <>
+                    <View style={{ marginBottom: 8 }}>
+                      <Toggle
+                        value={q.required}
+                        onChange={(v) => updateQuestion(q.id, { required: v })}
+                        label="Required"
+                      />
+                    </View>
                     <View style={{ marginTop: 10, marginBottom: 8 }}>
                       <Toggle
                         value={q.anonymousVotes}
                         onChange={(v) => updateQuestion(q.id, { anonymousVotes: v })}
-                        label="Enable anonymous vote"
+                        label="Anonymous input"
                       />
                     </View>
                     <Text style={styles.optionsHint}>Responders will submit free-form text for this question.</Text>
@@ -760,14 +908,14 @@ export default function CreatePollScreen() {
 
           <TouchableOpacity
             onPress={() => void submit()}
-            style={[styles.submitBtn, (!ok || createPollMutation.isPending) && { backgroundColor: Colors.border }]}
-            disabled={!ok || createPollMutation.isPending}
+            style={[styles.submitBtn, (!ok || createPollMutation.isPending || updatePollMutation.isPending) && { backgroundColor: Colors.border }]}
+            disabled={!ok || createPollMutation.isPending || updatePollMutation.isPending}
           >
-            {createPollMutation.isPending ? (
+            {createPollMutation.isPending || updatePollMutation.isPending ? (
               <ActivityIndicator color={Colors.accentFg} />
             ) : (
               <Text style={[styles.submitBtnText, !ok && { color: Colors.textMuted }]} numberOfLines={1}>
-                Create poll
+                {isEditing ? 'Save poll' : 'Create poll'}
               </Text>
             )}
           </TouchableOpacity>
@@ -809,16 +957,20 @@ const styles = StyleSheet.create({
     borderRadius: Radius.lg,
     borderWidth: 1.5,
     borderColor: Colors.border,
-    backgroundColor: Colors.bg,
+    backgroundColor: Colors.surface,
     fontSize: 14,
     color: Colors.text,
     fontFamily: Fonts.regular,
+  },
+  questionTitleInput: {
+    height: 42,
+    paddingVertical: 0,
   },
   descBox: {
     borderRadius: Radius.lg,
     borderWidth: 1.5,
     borderColor: Colors.border,
-    backgroundColor: Colors.bg,
+    backgroundColor: Colors.surface,
     padding: 12,
   },
   descInput: {

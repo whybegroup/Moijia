@@ -22,6 +22,7 @@ import {
   NotifPrefsPartial,
 } from '../models';
 import { GroupService } from '../services/GroupService';
+import { httpError } from '../utils/httpError';
 
 @Route('groups')
 @Tags('Groups')
@@ -60,8 +61,7 @@ export class GroupController extends Controller {
     }
     const group = await this.groupService.getByIdForUser(id, userId);
     if (!group) {
-      this.setStatus(404);
-      throw new Error('Group not found');
+      throw httpError(404, 'Group not found');
     }
     return group;
   }
@@ -81,8 +81,7 @@ export class GroupController extends Controller {
     }
     const group = await this.groupService.getByIdForUser(id, userId);
     if (!group) {
-      this.setStatus(404);
-      throw new Error('Group not found');
+      throw httpError(404, 'Group not found');
     }
     if (group.membershipStatus !== 'member' && group.membershipStatus !== 'admin') {
       this.setStatus(403);
@@ -118,8 +117,7 @@ export class GroupController extends Controller {
     }
     const scoped = await this.groupService.getByIdForUser(id, userId);
     if (!scoped) {
-      this.setStatus(404);
-      throw new Error('Group not found');
+      throw httpError(404, 'Group not found');
     }
     if (scoped.membershipStatus !== 'admin') {
       this.setStatus(403);
@@ -146,8 +144,7 @@ export class GroupController extends Controller {
     }
     const scoped = await this.groupService.getByIdForUser(id, userId);
     if (!scoped) {
-      this.setStatus(404);
-      throw new Error('Group not found');
+      throw httpError(404, 'Group not found');
     }
     if (scoped.membershipStatus !== 'admin') {
       this.setStatus(403);
@@ -177,8 +174,7 @@ export class GroupController extends Controller {
       this.setStatus(204);
     } catch (e: any) {
       if (e?.status === 404) {
-        this.setStatus(404);
-        throw new Error('Group not found');
+        throw httpError(404, 'Group not found');
       }
       if (e?.message?.includes('superadmin')) {
         this.setStatus(403);
@@ -314,8 +310,7 @@ export class GroupController extends Controller {
     }
     const group = await this.groupService.getByIdForUser(id, userId);
     if (!group) {
-      this.setStatus(404);
-      throw new Error('Group not found');
+      throw httpError(404, 'Group not found');
     }
     if (group.membershipStatus !== 'admin') {
       this.setStatus(403);
@@ -341,8 +336,7 @@ export class GroupController extends Controller {
     }
     const group = await this.groupService.getByIdForUser(id, body.performedBy);
     if (!group) {
-      this.setStatus(404);
-      throw new Error('Group not found');
+      throw httpError(404, 'Group not found');
     }
     if (group.membershipStatus !== 'admin') {
       this.setStatus(403);
@@ -358,8 +352,7 @@ export class GroupController extends Controller {
         throw new Error('Cannot remove superadmin from group');
       }
       if (e?.message?.includes('Member not found')) {
-        this.setStatus(404);
-        throw e;
+        throw httpError(404, String(e.message));
       }
       throw e;
     }
@@ -382,8 +375,7 @@ export class GroupController extends Controller {
     }
     const group = await this.groupService.getByIdForUser(id, body.performedBy);
     if (!group) {
-      this.setStatus(404);
-      throw new Error('Group not found');
+      throw httpError(404, 'Group not found');
     }
     if (group.membershipStatus !== 'admin') {
       this.setStatus(403);
@@ -399,8 +391,7 @@ export class GroupController extends Controller {
         throw new Error('Cannot change superadmin role');
       }
       if (e?.message?.includes('Member not found')) {
-        this.setStatus(404);
-        throw e;
+        throw httpError(404, String(e.message));
       }
       throw e;
     }
@@ -422,8 +413,7 @@ export class GroupController extends Controller {
     }
     const group = await this.groupService.getByIdForUser(id, body.performedBy);
     if (!group) {
-      this.setStatus(404);
-      throw new Error('Group not found');
+      throw httpError(404, 'Group not found');
     }
     if (group.superAdminId !== body.performedBy) {
       this.setStatus(403);
@@ -439,8 +429,7 @@ export class GroupController extends Controller {
         throw e;
       }
       if (e?.message?.includes('Member not found')) {
-        this.setStatus(404);
-        throw e;
+        throw httpError(404, String(e.message));
       }
       throw e;
     }
@@ -462,8 +451,7 @@ export class GroupController extends Controller {
     }
     const group = await this.groupService.getByIdForUser(id, userId);
     if (!group) {
-      this.setStatus(404);
-      throw new Error('Group not found');
+      throw httpError(404, 'Group not found');
     }
     if (group.membershipStatus !== 'admin') {
       this.setStatus(403);
@@ -493,8 +481,7 @@ export class GroupController extends Controller {
   ): Promise<void> {
     const group = await this.groupService.getById(id);
     if (!group) {
-      this.setStatus(404);
-      throw new Error('Group not found');
+      throw httpError(404, 'Group not found');
     }
     await this.groupService.updateMemberColor(id, userId, body.colorHex);
     this.setStatus(200);
@@ -511,8 +498,7 @@ export class GroupController extends Controller {
   ): Promise<{ colorHex: string | null }> {
     const group = await this.groupService.getById(id);
     if (!group) {
-      this.setStatus(404);
-      throw new Error('Group not found');
+      throw httpError(404, 'Group not found');
     }
     const colorHex = await this.groupService.getMemberColor(id, userId);
     return { colorHex };
@@ -530,8 +516,7 @@ export class GroupController extends Controller {
   ): Promise<void> {
     const group = await this.groupService.getById(id);
     if (!group) {
-      this.setStatus(404);
-      throw new Error('Group not found');
+      throw httpError(404, 'Group not found');
     }
     await this.groupService.updateMemberNotifPrefs(id, userId, body);
     this.setStatus(200);
@@ -547,8 +532,7 @@ export class GroupController extends Controller {
   ): Promise<NotifPrefs> {
     const group = await this.groupService.getById(id);
     if (!group) {
-      this.setStatus(404);
-      throw new Error('Group not found');
+      throw httpError(404, 'Group not found');
     }
     return this.groupService.getMemberNotifPrefs(id, userId);
   }
