@@ -226,7 +226,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.lg,
     borderWidth: 1,
     borderColor: Colors.border,
-    backgroundColor: Colors.bg,
+    backgroundColor: Colors.surface,
     fontSize: 15,
     color: Colors.text,
   },

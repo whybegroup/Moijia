@@ -166,7 +166,7 @@ export function PollOptionTextEditor({ value, onChange, textFont, onTextFontChan
           padding: 12,
           borderRadius: Radius.lg,
           border: `1px solid ${Colors.border}`,
-          backgroundColor: Colors.bg,
+          backgroundColor: Colors.surface,
           fontSize: 15,
           color: Colors.text,
           fontFamily: fontFamilyCss(textFont),

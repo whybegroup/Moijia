@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -14,6 +14,7 @@ import {
 } from '../../hooks/api';
 import { dayShort, fmtDateShort, getDefaultGroupThemeFromName, getGroupColor, isToday } from '../../utils/helpers';
 import { withReturnTo } from '../../utils/navigationReturn';
+import { loadPollsScreenPrefs, savePollsScreenPrefs } from '../../utils/pollsScreenPrefs';
 import { CreateOrJoinButton } from '../../components/CreateOrJoinButton';
 import { Pill } from '../../components/ui';
 import { NotificationsPanelModal } from '../../components/NotificationsPanelModal';
@@ -42,6 +43,22 @@ function deadlineForPoll(poll: Poll): Date | null {
     if (Number.isFinite(ts) && ts < minTs) minTs = ts;
   }
   return Number.isFinite(minTs) ? new Date(minTs) : null;
+}
+
+function effectiveSortDateForPoll(poll: Poll): Date | null {
+  const closedAt = (poll as Poll & { closedAt?: string | null }).closedAt;
+  if (closedAt) {
+    const closedAtDate = new Date(closedAt);
+    if (Number.isFinite(closedAtDate.getTime())) return closedAtDate;
+  }
+
+  const deadline = deadlineForPoll(poll);
+  if (deadline) return deadline;
+
+  const createdAtDate = new Date(poll.createdAt);
+  if (Number.isFinite(createdAtDate.getTime())) return createdAtDate;
+
+  return null;
 }
 
 function startDateKeyLocal(d: Date): string {
@@ -104,6 +121,35 @@ export default function PollsScreen() {
   const [startMode, setStartMode] = useState<'specific' | 'now' | 'allTime'>('now');
   const [endMode, setEndMode] = useState<'specific' | 'now' | 'allTime'>('allTime');
 
+  useEffect(() => {
+    let mounted = true;
+    void (async () => {
+      const prefs = await loadPollsScreenPrefs();
+      if (!mounted || !prefs) return;
+      if (prefs.selectedGroupIds) setSelectedGroupIds(prefs.selectedGroupIds);
+      if (prefs.showAdvancedFilters !== undefined) setShowAdvancedFilters(prefs.showAdvancedFilters);
+      if (prefs.startDateText) setStartDateText(prefs.startDateText);
+      if (prefs.endDateText) setEndDateText(prefs.endDateText);
+      if (prefs.startMode) setStartMode(prefs.startMode);
+      if (prefs.endMode) setEndMode(prefs.endMode);
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    void savePollsScreenPrefs({
+      v: 1,
+      selectedGroupIds,
+      showAdvancedFilters,
+      startDateText,
+      endDateText,
+      startMode,
+      endMode,
+    });
+  }, [selectedGroupIds, showAdvancedFilters, startDateText, endDateText, startMode, endMode]);
+
   const parseDateTime = (txt: string): Date | null => {
     const t = txt.trim();
     if (!t) return null;
@@ -157,7 +203,7 @@ export default function PollsScreen() {
       if (!groups.some((g) => g.id === poll.groupId)) return false;
       if (selectedGroupIds.length > 0 && !selectedGroupIds.includes(poll.groupId)) return false;
       const deadline = deadlineForPoll(poll);
-      if (!deadline) return true; // legacy polls without deadline stay visible and sort first.
+      if (!deadline) return true;
       if (startBound && deadline.getTime() <= startBound.getTime()) return false;
       if (endFilterCutoff && deadline.getTime() > endFilterCutoff.getTime()) return false;
       return true;
@@ -173,10 +219,21 @@ export default function PollsScreen() {
   ]);
   const sortedPolls = useMemo(() => {
     return [...filteredPolls].sort((a, b) => {
-      const ad = deadlineForPoll(a)?.getTime() ?? Number.POSITIVE_INFINITY;
-      const bd = deadlineForPoll(b)?.getTime() ?? Number.POSITIVE_INFINITY;
-      if (ad !== bd) return ad - bd;
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      const aDeadline = deadlineForPoll(a)?.getTime() ?? Number.POSITIVE_INFINITY;
+      const bDeadline = deadlineForPoll(b)?.getTime() ?? Number.POSITIVE_INFINITY;
+      if (aDeadline !== bDeadline) return aDeadline - bDeadline;
+
+      const aClosedAt = new Date((a as Poll & { closedAt?: string | null }).closedAt ?? '').getTime();
+      const bClosedAt = new Date((b as Poll & { closedAt?: string | null }).closedAt ?? '').getTime();
+      const aClosedSort = Number.isFinite(aClosedAt) ? aClosedAt : Number.POSITIVE_INFINITY;
+      const bClosedSort = Number.isFinite(bClosedAt) ? bClosedAt : Number.POSITIVE_INFINITY;
+      if (aClosedSort !== bClosedSort) return aClosedSort - bClosedSort;
+
+      const aCreatedAt = new Date(a.createdAt).getTime();
+      const bCreatedAt = new Date(b.createdAt).getTime();
+      const aCreatedSort = Number.isFinite(aCreatedAt) ? aCreatedAt : Number.POSITIVE_INFINITY;
+      const bCreatedSort = Number.isFinite(bCreatedAt) ? bCreatedAt : Number.POSITIVE_INFINITY;
+      return aCreatedSort - bCreatedSort;
     });
   }, [filteredPolls]);
 
@@ -188,7 +245,7 @@ export default function PollsScreen() {
     if (sortedPolls.length === 0) return [];
     const buckets = new Map<string, Poll[]>();
     for (const poll of sortedPolls) {
-      const dl = deadlineForPoll(poll);
+      const dl = effectiveSortDateForPoll(poll);
       const key = dl ? startDateKeyLocal(dl) : '__none__';
       if (!buckets.has(key)) buckets.set(key, []);
       buckets.get(key)!.push(poll);
