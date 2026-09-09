@@ -5,12 +5,9 @@ import {
   StyleSheet,
   TextInput,
   TouchableOpacity,
-  Modal,
-  Pressable,
   Platform,
   Animated,
   ActivityIndicator,
-  Dimensions,
   type ScrollView,
   type StyleProp,
   type ViewStyle,
@@ -18,9 +15,11 @@ import {
 import * as Clipboard from 'expo-clipboard';
 import Toast from 'react-native-toast-message';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors, Fonts, Radius, Shadows } from '../constants/theme';
-import { edgeToEdgeModalProps } from './edgeToEdgeModalProps';
+import { Colors, Fonts, Radius } from '../constants/theme';
+import { confirmDestructive } from '../utils/confirmDestructive';
 import { isContentEdited } from '../utils/helpers';
+import { AnchoredOverflowMenu } from './AnchoredOverflowMenu';
+import { ReactionQuickPicker } from './ReactionQuickPicker';
 import {
   createScrollAboveKeyboardOnFocus,
   scrollNodeToTopOfViewport,
@@ -114,6 +113,8 @@ export type ThreadedCommentsSectionProps = {
   scrollOffsetYRef: React.MutableRefObject<number>;
 
   currentUserId: string | null | undefined;
+  /** When true, owners/admins may delete comments they did not write. Edit stays author-only. */
+  canModerateComments?: boolean;
   getUserDisplayName: (userId: string) => string;
   formatCommentTime: (createdAt: ThreadComment['createdAt']) => string;
 
@@ -149,7 +150,7 @@ export type ThreadedCommentsSectionProps = {
 
   onToggleReaction: (commentId: string, emoji: string) => void;
   onReactionChipLongPress?: (payload: { emoji: string; userIds: string[] }) => void;
-  onOpenReactionQuickPicker: (commentId: string) => void;
+  onOpenFullReactionPicker: (commentId: string) => void;
 
   onBeginEdit: (commentId: string) => void;
   confirmDeleteComment: (commentId: string) => void;
@@ -173,9 +174,6 @@ export type ThreadedCommentsSectionProps = {
     comment: ThreadComment;
     childNodes: ReactNode;
   }) => ReactNode | null;
-
-  /** Parent-owned map for reaction quick-picker anchor (`comment:${id}` keys). */
-  reactionButtonRefs: React.MutableRefObject<Record<string, View | null>>;
 };
 
 export function ThreadedCommentsSection({
@@ -185,6 +183,7 @@ export function ThreadedCommentsSection({
   scrollViewportYRef,
   scrollOffsetYRef,
   currentUserId,
+  canModerateComments = false,
   getUserDisplayName,
   formatCommentTime,
   draftText,
@@ -214,7 +213,7 @@ export function ThreadedCommentsSection({
   supportsEditReplyParent = true,
   onToggleReaction,
   onReactionChipLongPress,
-  onOpenReactionQuickPicker,
+  onOpenFullReactionPicker,
   onBeginEdit,
   confirmDeleteComment,
   containerStyle,
@@ -224,7 +223,6 @@ export function ThreadedCommentsSection({
   mentionMembers,
   focusCommentId,
   renderEditingComment,
-  reactionButtonRefs,
 }: ThreadedCommentsSectionProps) {
   const consumedFocusCommentRef = useRef<string | null>(null);
   const commentRowRefs = useRef<Record<string, View | null>>({});
@@ -232,23 +230,8 @@ export function ThreadedCommentsSection({
   const composerInputRef = useRef<TextInput | null>(null);
   const commentEditMountRef = useRef<View | null>(null);
   const commentRowTopByIdRef = useRef<Record<string, number>>({});
-  const commentMenuButtonRefs = useRef<Record<string, View | null>>({});
   const highlightOpacityByIdRef = useRef<Record<string, Animated.Value>>({});
   const [highlightedCommentIds, setHighlightedCommentIds] = useState<Record<string, true>>({});
-  const [commentOptionsTarget, setCommentOptionsTarget] = useState<{
-    commentId: string;
-    anchor: { x: number; y: number; width: number; height: number };
-  } | null>(null);
-
-  const commentOptionsPopoverLayout = useMemo(() => {
-    if (!commentOptionsTarget) return null;
-    const aw = Dimensions.get('window').width;
-    const { anchor } = commentOptionsTarget;
-    let left = anchor.x + anchor.width - COMMENT_THREAD_OPTIONS_MENU_WIDTH;
-    left = Math.max(8, Math.min(left, aw - COMMENT_THREAD_OPTIONS_MENU_WIDTH - 8));
-    const top = anchor.y + anchor.height + 4;
-    return { left, top };
-  }, [commentOptionsTarget]);
 
   const getHighlightOpacity = useCallback((commentId: string) => {
     if (!highlightOpacityByIdRef.current[commentId]) {
@@ -308,20 +291,6 @@ export function ThreadedCommentsSection({
       cancelAnimationFrame(inner);
     };
   }, [focusCommentId, comments, jumpToComment]);
-
-  const openCommentMenu = useCallback((commentId: string) => {
-    const node = commentMenuButtonRefs.current[commentId] as
-      | (View & {
-          measureInWindow?: (cb: (x: number, y: number, w: number, h: number) => void) => void;
-        })
-      | null;
-    node?.measureInWindow?.((x, y, width, height) => {
-      setCommentOptionsTarget({
-        commentId,
-        anchor: { x, y, width, height },
-      });
-    });
-  }, []);
 
   const commentsById = useMemo(() => new Map(comments.map((c) => [c.id, c])), [comments]);
 
@@ -548,17 +517,66 @@ export function ThreadedCommentsSection({
                 </View>
               </View>
               {isMine || (comment.body ?? '').trim().length > 0 ? (
-                <TouchableOpacity
-                  ref={(node) => {
-                    commentMenuButtonRefs.current[comment.id] = node;
-                  }}
-                  onPress={() => openCommentMenu(comment.id)}
-                  style={styles.commentMenuBtn}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  accessibilityLabel="Comment options"
+                <AnchoredOverflowMenu
+                  width={COMMENT_THREAD_OPTIONS_MENU_WIDTH}
+                  menu={(close) => (
+                    <>
+                      {(comment.body ?? '').trim().length > 0 ? (
+                        <TouchableOpacity
+                          style={[
+                            styles.commentOptionsRow,
+                            !isMine && !canModerateComments ? styles.commentOptionsRowLast : undefined,
+                          ]}
+                          onPress={async () => {
+                            await Clipboard.setStringAsync((comment.body ?? '').trim());
+                            close();
+                            Toast.show({ type: 'success', text1: 'Copied' });
+                          }}
+                        >
+                          <Ionicons name="copy-outline" size={20} color={Colors.text} />
+                          <Text style={styles.commentOptionsLabel}>Copy</Text>
+                        </TouchableOpacity>
+                      ) : null}
+                      {isMine ? (
+                        <TouchableOpacity
+                          style={[
+                            styles.commentOptionsRow,
+                            !(isMine || canModerateComments) ? styles.commentOptionsRowLast : undefined,
+                          ]}
+                          onPress={() => {
+                            close();
+                            onBeginEdit(comment.id);
+                          }}
+                        >
+                          <Ionicons name="create-outline" size={20} color={Colors.text} />
+                          <Text style={styles.commentOptionsLabel}>Edit</Text>
+                        </TouchableOpacity>
+                      ) : null}
+                      {isMine || canModerateComments ? (
+                        <TouchableOpacity
+                          style={[styles.commentOptionsRow, styles.commentOptionsRowLast]}
+                          onPress={() => {
+                            close();
+                            confirmDeleteComment(comment.id);
+                          }}
+                        >
+                          <Ionicons name="trash-outline" size={20} color={Colors.notGoing} />
+                          <Text style={[styles.commentOptionsLabel, styles.commentOptionsLabelDanger]}>
+                            Delete
+                          </Text>
+                        </TouchableOpacity>
+                      ) : null}
+                    </>
+                  )}
                 >
-                  <Ionicons name="ellipsis-vertical" size={18} color={Colors.textSub} />
-                </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.commentMenuBtn}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    accessibilityLabel="Comment options"
+                  >
+                    <Ionicons name="ellipsis-vertical" size={18} color={Colors.textSub} />
+                  </TouchableOpacity>
+                </AnchoredOverflowMenu>
               ) : null}
             </View>
             {repliedTo ? (
@@ -601,18 +619,19 @@ export function ThreadedCommentsSection({
               </View>
             ) : null}
             <View style={styles.reactionRow}>
-              <TouchableOpacity
-                ref={(node) => {
-                  reactionButtonRefs.current[`comment:${comment.id}`] = node;
-                }}
-                style={styles.iconActionBtn}
-                onPress={() => onOpenReactionQuickPicker(comment.id)}
-                onLongPress={() => onOpenReactionQuickPicker(comment.id)}
-                accessibilityLabel="Add reaction"
-                activeOpacity={0.75}
+              <ReactionQuickPicker
+                onReact={(emoji) => onToggleReaction(comment.id, emoji)}
+                onViewAll={() => onOpenFullReactionPicker(comment.id)}
+                disabled={!currentUserId}
               >
-                <Ionicons name="happy-outline" size={15} color={Colors.textSub} />
-              </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.iconActionBtn}
+                  accessibilityLabel="Add reaction"
+                  activeOpacity={0.75}
+                >
+                  <Ionicons name="happy-outline" size={15} color={Colors.textSub} />
+                </TouchableOpacity>
+              </ReactionQuickPicker>
               <TouchableOpacity
                 style={styles.iconActionBtn}
                 onPress={() => {
@@ -665,12 +684,14 @@ export function ThreadedCommentsSection({
       onCancelEdit,
       onCommentEditParentIdChange,
       onCommentEditTextChange,
-      onOpenReactionQuickPicker,
+      onOpenFullReactionPicker,
       onReactionChipLongPress,
       onReplyTargetChange,
       onSaveEdit,
       onToggleReaction,
-      openCommentMenu,
+      canModerateComments,
+      confirmDeleteComment,
+      onBeginEdit,
       renderAvatar,
       renderCommentBody,
       renderEditingComment,
@@ -681,15 +702,6 @@ export function ThreadedCommentsSection({
 
   const replyTargetComment = replyTargetId ? commentsById.get(replyTargetId) : undefined;
 
-  const menuComment = commentOptionsTarget
-    ? commentsById.get(commentOptionsTarget.commentId)
-    : undefined;
-  const copyText = (menuComment?.body ?? '').trim();
-  const canEditDelete =
-    !!currentUserId && menuComment && menuComment.userId === currentUserId;
-  const showCopy = copyText.length > 0;
-  const showEdit = canEditDelete;
-  const showDelete = canEditDelete;
   const canSubmitDraft =
     draftText.trim().length > 0 || draftPhotoUrls.length > 0 || draftPendingFiles.length > 0;
 
@@ -809,8 +821,8 @@ export function ThreadedCommentsSection({
                     iconOnly
                     label="Add photo"
                     triggerIconName="camera-outline"
-                    optionsModalTitle="Add photo"
-                    linkModalTitle="Photo URL"
+                    optionsModalTitle="Add photo or video"
+                    linkModalTitle="Media URL"
                     disabled={draftPhotoBusy}
                     busy={draftPhotoBusy}
                     onTakePhoto={onTakeDraftPhoto ? () => void onTakeDraftPhoto() : undefined}
@@ -854,11 +866,17 @@ export function ThreadedCommentsSection({
                       </TouchableOpacity>
                       <TouchableOpacity
                         onPress={() => {
-                          if (onRemoveDraftPhotoAtIndex) {
-                            onRemoveDraftPhotoAtIndex(i);
-                          } else if (onDraftPhotoUrlsChange) {
-                            onDraftPhotoUrlsChange(draftPhotoUrls.filter((_, idx) => idx !== i));
-                          }
+                          confirmDestructive(
+                            'Delete photo?',
+                            'This photo will be permanently deleted.',
+                            () => {
+                              if (onRemoveDraftPhotoAtIndex) {
+                                onRemoveDraftPhotoAtIndex(i);
+                              } else if (onDraftPhotoUrlsChange) {
+                                onDraftPhotoUrlsChange(draftPhotoUrls.filter((_, idx) => idx !== i));
+                              }
+                            }
+                          );
                         }}
                         style={styles.commentComposerPhotoRemoveBtn}
                         accessibilityLabel="Remove photo"
@@ -878,7 +896,13 @@ export function ThreadedCommentsSection({
                         {f.name}
                       </Text>
                       <TouchableOpacity
-                        onPress={() => onRemoveDraftPendingFile(f.id)}
+                        onPress={() =>
+                          confirmDestructive(
+                            'Delete file?',
+                            'This file will be permanently deleted.',
+                            () => onRemoveDraftPendingFile(f.id)
+                          )
+                        }
                         hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
                         accessibilityLabel="Remove file"
                       >
@@ -899,109 +923,11 @@ export function ThreadedCommentsSection({
           )}
         </>
       </CommentsSection>
-
-      {commentOptionsTarget && commentOptionsPopoverLayout ? (
-        <Modal {...edgeToEdgeModalProps}
-          visible
-          transparent
-          animationType="fade"
-          onRequestClose={() => setCommentOptionsTarget(null)}
-        >
-          <View style={styles.commentOptionsModalRoot} pointerEvents="box-none">
-            <Pressable
-              style={styles.commentOptionsDismiss}
-              onPress={() => setCommentOptionsTarget(null)}
-              accessibilityRole="button"
-              accessibilityLabel="Dismiss menu"
-            />
-            <View
-              style={[
-                styles.commentOptionsPopoverWrap,
-                {
-                  left: commentOptionsPopoverLayout.left,
-                  top: commentOptionsPopoverLayout.top,
-                  width: COMMENT_THREAD_OPTIONS_MENU_WIDTH,
-                },
-              ]}
-              pointerEvents="box-none"
-            >
-              <View style={styles.commentOptionsCard}>
-                {showCopy ? (
-                  <TouchableOpacity
-                    style={[
-                      styles.commentOptionsRow,
-                      !showEdit && !showDelete ? styles.commentOptionsRowLast : undefined,
-                    ]}
-                    onPress={async () => {
-                      await Clipboard.setStringAsync(copyText);
-                      setCommentOptionsTarget(null);
-                      Toast.show({ type: 'success', text1: 'Copied' });
-                    }}
-                  >
-                    <Ionicons name="copy-outline" size={20} color={Colors.text} />
-                    <Text style={styles.commentOptionsLabel}>Copy</Text>
-                  </TouchableOpacity>
-                ) : null}
-                {showEdit ? (
-                  <TouchableOpacity
-                    style={[
-                      styles.commentOptionsRow,
-                      !showDelete ? styles.commentOptionsRowLast : undefined,
-                    ]}
-                    onPress={() => {
-                      if (menuComment) {
-                        setCommentOptionsTarget(null);
-                        onBeginEdit(menuComment.id);
-                      }
-                    }}
-                  >
-                    <Ionicons name="create-outline" size={20} color={Colors.text} />
-                    <Text style={styles.commentOptionsLabel}>Edit</Text>
-                  </TouchableOpacity>
-                ) : null}
-                {showDelete ? (
-                  <TouchableOpacity
-                    style={[styles.commentOptionsRow, styles.commentOptionsRowLast]}
-                    onPress={() => {
-                      setCommentOptionsTarget(null);
-                      if (commentOptionsTarget) confirmDeleteComment(commentOptionsTarget.commentId);
-                    }}
-                  >
-                    <Ionicons name="trash-outline" size={20} color={Colors.notGoing} />
-                    <Text style={[styles.commentOptionsLabel, styles.commentOptionsLabelDanger]}>
-                      Delete
-                    </Text>
-                  </TouchableOpacity>
-                ) : null}
-              </View>
-            </View>
-          </View>
-        </Modal>
-      ) : null}
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  commentOptionsModalRoot: {
-    flex: 1,
-  },
-  commentOptionsDismiss: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'transparent',
-  },
-  commentOptionsPopoverWrap: {
-    position: 'absolute',
-    zIndex: 20,
-    elevation: 20,
-  },
-  commentOptionsCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: 16,
-    overflow: 'hidden',
-    width: '100%',
-    ...Shadows.lg,
-  },
   commentOptionsRow: {
     flexDirection: 'row',
     alignItems: 'center',

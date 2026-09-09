@@ -6,6 +6,8 @@ import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { GroupsService, StorageService } from '@moijia/client';
 import * as FileSystem from 'expo-file-system/legacy';
 import { apiErrorMessage } from '../utils/apiErrors';
+import { isVideoFileUrl } from '../utils/fileKind';
+import { toPublicFacingMediaUrl } from '../utils/mediaShareUrl';
 import {
   GROUP_STORAGE_CHECK_FAILED_MESSAGE,
   GROUP_STORAGE_FULL_MESSAGE,
@@ -99,6 +101,9 @@ export type PickedFileAsset = {
 };
 
 const GIF_TYPE = /^image\/gif$/i;
+const VIDEO_TYPE = /^video\//i;
+const VIDEO_NAME = /\.(mp4|mov|webm|m4v|avi|mkv|gifv)$/i;
+const MEDIA_NAME = /\.(jpe?g|png|gif|webp|heic|heif|avif|mp4|mov|webm|m4v|avi|mkv|gifv)$/i;
 const COMPRESSED_MAX_EDGE = 1920;
 const COMPRESSED_JPEG_QUALITY = 0.72;
 const LIBRARY_SELECTION_LIMIT = 20;
@@ -111,12 +116,24 @@ function inferContentType(
 ): string {
   if (mimeType && mimeType !== 'application/octet-stream') return mimeType;
   const hint = `${fileName || ''} ${uri || ''}`.toLowerCase();
+  if (hint.includes('.mp4')) return 'video/mp4';
+  if (hint.includes('.mov')) return 'video/quicktime';
+  if (hint.includes('.webm')) return 'video/webm';
+  if (hint.includes('.m4v')) return 'video/x-m4v';
+  if (hint.includes('.avi')) return 'video/x-msvideo';
+  if (hint.includes('.mkv')) return 'video/x-matroska';
+  if (hint.includes('.gifv')) return 'video/mp4';
   if (hint.includes('.png')) return 'image/png';
   if (hint.includes('.gif')) return 'image/gif';
   if (hint.includes('.webp')) return 'image/webp';
   if (hint.includes('.heic') || hint.includes('.heif')) return 'image/heic';
   if (hint.includes('.avif')) return 'image/avif';
   return 'image/jpeg';
+}
+
+function isVideoMedia(contentType: string, fileName?: string | null, uri?: string): boolean {
+  if (VIDEO_TYPE.test(contentType)) return true;
+  return VIDEO_NAME.test(`${fileName || ''} ${uri || ''}`);
 }
 
 function replaceExt(fileName: string | undefined, ext: string): string {
@@ -157,7 +174,7 @@ function resizeActions(
 
 export async function convertPickedImage(asset: PickedImageAsset): Promise<PickedImageAsset> {
   const contentType = inferContentType(asset.contentType, asset.fileName, asset.uri);
-  if (!needsReencode(contentType)) {
+  if (isVideoMedia(contentType, asset.fileName, asset.uri) || !needsReencode(contentType)) {
     return { ...asset, contentType };
   }
   const size = await getImageSize(asset.uri, asset.width, asset.height);
@@ -180,7 +197,7 @@ export async function convertPickedImage(asset: PickedImageAsset): Promise<Picke
 
 export async function convertWebImageFile(file: File): Promise<File> {
   const contentType = inferContentType(file.type, file.name);
-  if (!needsReencode(contentType)) return file;
+  if (isVideoMedia(contentType, file.name) || !needsReencode(contentType)) return file;
   const objectUrl = URL.createObjectURL(file);
   try {
     const converted = await convertPickedImage({
@@ -197,17 +214,17 @@ export async function convertWebImageFile(file: File): Promise<File> {
   }
 }
 
-/** Converts each image to a compressed JPEG. Throws `cancelled` if none are images. */
+/** Converts each image to a compressed JPEG. Videos are kept as-is. Throws `cancelled` if none are media. */
 export async function prepareWebImageFiles(files: Iterable<File>): Promise<File[]> {
-  const images = [...files].filter(
-    (f) => f.type.startsWith('image/') || /\.(jpe?g|png|gif|webp|heic|heif|avif)$/i.test(f.name)
+  const media = [...files].filter(
+    (f) => f.type.startsWith('image/') || f.type.startsWith('video/') || MEDIA_NAME.test(f.name)
   );
-  if (!images.length) {
-    Alert.alert('Upload', 'Please choose an image file.');
+  if (!media.length) {
+    Alert.alert('Upload', 'Please choose an image or video file.');
     throw new Error('cancelled');
   }
   const out: File[] = [];
-  for (const file of images) {
+  for (const file of media) {
     out.push(await convertWebImageFile(file));
   }
   return out;
@@ -249,15 +266,16 @@ export async function pickImagesFromLibrary(opts?: {
   const multiple = opts?.multiple ?? true;
   const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
   if (perm.status !== 'granted') {
-    throw new Error('Photo library access is required to upload images.');
+    throw new Error('Photo library access is required to upload photos and videos.');
   }
 
   const result = await ImagePicker.launchImageLibraryAsync({
-    mediaTypes: ['images'],
+    mediaTypes: ['images', 'videos'],
     quality: 1,
     allowsMultipleSelection: multiple,
     selectionLimit: multiple ? LIBRARY_SELECTION_LIMIT : 1,
     preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+    videoMaxDuration: 120,
   });
 
   if (result.canceled || !result.assets?.length) {
@@ -271,15 +289,28 @@ export async function pickImagesFromLibrary(opts?: {
   return assets;
 }
 
+async function androidCameraMediaType(): Promise<'images' | 'videos'> {
+  return new Promise((resolve, reject) => {
+    Alert.alert('Camera', 'Take a photo or record a video?', [
+      { text: 'Cancel', style: 'cancel', onPress: () => reject(new Error('cancelled')) },
+      { text: 'Photo', onPress: () => resolve('images') },
+      { text: 'Video', onPress: () => resolve('videos') },
+    ]);
+  });
+}
+
 /** Opens the camera; throws `cancelled` if the user backs out. */
 export async function pickImageFromCamera(): Promise<PickedImageAsset> {
   const perm = await ImagePicker.requestCameraPermissionsAsync();
   if (perm.status !== 'granted') {
-    throw new Error('Camera access is required to take photos.');
+    throw new Error('Camera access is required to take photos and videos.');
   }
+  const mediaTypes: Array<'images' | 'videos'> =
+    Platform.OS === 'android' ? [await androidCameraMediaType()] : ['images', 'videos'];
   const result = await ImagePicker.launchCameraAsync({
-    mediaTypes: ['images'],
+    mediaTypes,
     quality: 1,
+    videoMaxDuration: 120,
     preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
   });
   if (result.canceled || !result.assets?.length) {
@@ -632,9 +663,9 @@ export async function pickAndUploadFileFromDevice(
   });
 }
 
-/** File attachments use the public S3 URL. */
+/** File attachments use a moijia.com share URL instead of the raw S3 URL. */
 export function uploadUrlToDownloadUrl(sourceUrl: string): string {
-  return sourceUrl?.trim() || sourceUrl;
+  return toPublicFacingMediaUrl(sourceUrl);
 }
 
 /** Picks from library then presigns + PUT. Throws `cancelled` if the user backs out of the picker. */
@@ -852,10 +883,20 @@ export function coverPhotoDraftDisplayUri(d: CoverPhotoDraft): string {
   return d.kind === 'remote' ? d.url : d.previewUri;
 }
 
+export function coverPhotoDraftIsVideo(d: CoverPhotoDraft): boolean {
+  if (d.kind === 'pending') {
+    if (d.pending.kind === 'web') {
+      return isVideoMedia(d.pending.file.type, d.pending.file.name);
+    }
+    return isVideoMedia(d.pending.asset.contentType, d.pending.asset.fileName, d.pending.asset.uri);
+  }
+  return isVideoFileUrl(d.url);
+}
+
 export async function uploadWebImageFile(userId: string, file: File, opts?: UploadOpts): Promise<string> {
   if (!userId) throw new Error('You must be signed in to upload photos.');
-  const ready = await convertWebImageFile(file);
-  const contentType = ready.type?.startsWith('image/') ? ready.type : 'image/jpeg';
+  const ready = isVideoMedia(file.type, file.name) ? file : await convertWebImageFile(file);
+  const contentType = inferContentType(ready.type, ready.name);
   return presignAndPut({
     userId,
     contentType,

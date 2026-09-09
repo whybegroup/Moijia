@@ -18,7 +18,8 @@ import { Ionicons } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
 import { Colors, Fonts, Radius } from '../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName, groupAvatarBorderRadius } from '../utils/helpers';
-import { NavBar, Field, formSectionTitleStyle, Avatar, Toggle } from '../components/ui';
+import { NavBar, Field, formSectionTitleStyle, Toggle } from '../components/ui';
+import { UserAvatar } from '../components/UserAvatar';
 import { EventFormPopoverChrome } from '../components/EventFormPopoverChrome';
 import { KeyboardSafeScrollView } from '../components/KeyboardSafeScrollView';
 import { useCreateGroup, useGroup, useUpdateGroup } from '../hooks/api/useGroups';
@@ -36,6 +37,7 @@ import { ResolvableImage } from '../components/ResolvableImage';
 import { firstSearchParam, parseReturnToParam } from '../utils/navigationReturn';
 import { ApiError } from '@moijia/client';
 import { deleteManagedUploadFireAndForget } from '../services/managedUploadDelete';
+import { confirmDestructive } from '../utils/confirmDestructive';
 
 const DEFAULT_AVATAR_SEED = 'auto';
 const AVATAR_SIZE = 56;
@@ -67,7 +69,7 @@ export default function CreateGroupScreen() {
   const isEditing = !!editId;
   const groupReturnTo = parseReturnToParam(firstSearchParam(params.returnTo));
   const { user } = useAuth();
-  const { userId: currentUserId } = useCurrentUserContext();
+  const { userId: currentUserId, user: currentUser } = useCurrentUserContext();
   const createGroup = useCreateGroup();
   const updateGroup = useUpdateGroup(editId ?? '', currentUserId ?? '');
   const { data: editingGroup } = useGroup(editId ?? '', currentUserId ?? '', { enabled: isEditing });
@@ -285,7 +287,6 @@ export default function CreateGroupScreen() {
   const coverPhotosForDisplay = draftCoverPhotos;
   const themeName = draftName.trim() || 'Group';
   const avatarTheme = getGroupColor(getDefaultGroupThemeFromName(themeName));
-  const displayNameForChrome = draftName.trim() || 'New group';
   const navTitle = isEditing ? 'Edit Group' : 'New Group';
 
   return (
@@ -420,7 +421,13 @@ export default function CreateGroupScreen() {
                             />
                           </TouchableOpacity>
                           <TouchableOpacity
-                            onPress={() => removeDraftCoverPhoto(uri)}
+                            onPress={() =>
+                              confirmDestructive(
+                                'Delete photo?',
+                                'This photo will be permanently deleted.',
+                                () => removeDraftCoverPhoto(uri)
+                              )
+                            }
                             style={styles.removeThumb}
                           >
                             <Ionicons name="close" size={11} color="#fff" />
@@ -480,8 +487,17 @@ export default function CreateGroupScreen() {
         }
         onClose={() => setGroupPhotoLightbox(null)}
         onDelete={removeDraftCoverPhoto}
-        headerAvatar={<Avatar name={displayNameForChrome} size={28} />}
-        title={displayNameForChrome}
+        headerAvatar={
+          currentUser ? (
+            <UserAvatar
+              seed={currentUser.displayName || currentUser.name}
+              backgroundColor={[currentUser.avatarSeed ?? '']}
+              thumbnail={currentUser.thumbnail ?? null}
+              size={28}
+            />
+          ) : undefined
+        }
+        title={(currentUser?.displayName || currentUser?.name || '').trim() || undefined}
         subtitle={
           groupPhotoLightbox
             ? groupPhotoLightbox.urls.length > 1

@@ -8,7 +8,6 @@ import {
   TextInput,
   Platform,
   Pressable,
-  useWindowDimensions,
   type ScrollView,
   type TextStyle,
 } from 'react-native';
@@ -53,7 +52,6 @@ export function CreateOrJoinButton({
 }: Props) {
   const router = useRouter();
   const pathname = usePathname();
-  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const joinByCode = useJoinByInviteCode();
   const [menuOpen, setMenuOpen] = useState(false);
   const [noGroupFor, setNoGroupFor] = useState<'event' | 'poll' | null>(null);
@@ -149,18 +147,7 @@ export function CreateOrJoinButton({
 
       {mode === 'group' ? (
         <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={closeMenu} {...edgeToEdgeModalProps}>
-          <KeyboardFormRoot
-            style={[
-              styles.menuRoot,
-              Platform.OS === 'web' && {
-                position: 'fixed' as const,
-                top: 0,
-                left: 0,
-                width: windowWidth,
-                height: windowHeight,
-              },
-            ]}
-          >
+          <KeyboardFormRoot style={styles.menuRoot}>
             <Pressable style={styles.menuBackdropFill} onPress={closeMenu} />
             <View style={styles.menuCardOuter}>
               <View style={styles.menuCard}>

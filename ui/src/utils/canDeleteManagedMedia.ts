@@ -1,15 +1,11 @@
-/** Owner id from app-managed `.../storage/{userId}/...` URLs. */
+import { storageKeyFromMediaUrl } from './mediaShareUrl';
+
+/** Owner id from app-managed `storage/{userId}/...` or `moijia.com/f/{userId}/...` URLs. */
 export function managedUploadOwnerUserId(url: string): string | null {
-  const raw = (url || '').trim();
-  if (!raw) return null;
-  let path = raw;
-  try {
-    path = decodeURIComponent(new URL(raw).pathname);
-  } catch {
-    path = raw.split(/[?#]/)[0];
-  }
-  const m = path.match(/(?:^|\/)storage\/([^/]+)\//i);
-  return m?.[1] ?? null;
+  const key = storageKeyFromMediaUrl(url || '');
+  if (!key) return null;
+  const parts = key.split('/');
+  return parts[1] || null;
 }
 
 export function isManagedUploadOwnedByUser(

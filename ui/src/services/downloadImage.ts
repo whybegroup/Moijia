@@ -2,6 +2,8 @@ import { Linking, Platform, Share } from 'react-native';
 import { File as ExpoFile, Paths } from 'expo-file-system';
 import { ensureCachedImageFileUri, peekCachedImageFileUri } from './imageDiskCache';
 import { isDirectRenderableImageUrl, resolveImageViewUrls, toRenderableImageUrl } from './resolveImageViewUrls';
+import { shareUrl } from '../utils/shareContent';
+import { toPublicFacingMediaUrl } from '../utils/mediaShareUrl';
 
 function extensionFromUrl(url: string): string {
   try {
@@ -96,13 +98,74 @@ async function shareOnWeb(uri: string): Promise<void> {
   await Share.share({ message: uri, url: uri, title: 'Photo' });
 }
 
+function mappedViewUrl(
+  storedUrl: string,
+  urlMap?: Map<string, string> | Record<string, string>
+): string | null {
+  if (urlMap instanceof Map) {
+    const mapped = urlMap.get(storedUrl)?.trim();
+    return mapped || null;
+  }
+  if (urlMap && typeof urlMap === 'object') {
+    const mapped = urlMap[storedUrl]?.trim();
+    return mapped || null;
+  }
+  return null;
+}
+
+function asHttpUrl(url: string): string | null {
+  const t = toRenderableImageUrl(url.trim());
+  return /^https?:\/\//i.test(t) ? t : null;
+}
+
+function asShareableHttpUrl(url: string): string | null {
+  const http = asHttpUrl(url);
+  return http ? toPublicFacingMediaUrl(http) : null;
+}
+
+/** Public HTTP(S) URL for sharing (S3 / stored link), never a local cache path. */
+export async function resolveShareableHttpUrl(
+  storedUrl: string,
+  urlMap?: Map<string, string> | Record<string, string>
+): Promise<string | null> {
+  const trimmed = storedUrl?.trim();
+  if (!trimmed) return null;
+  const direct = asShareableHttpUrl(trimmed);
+  if (direct) return direct;
+  const mapped = mappedViewUrl(trimmed, urlMap);
+  if (mapped) {
+    const http = asShareableHttpUrl(mapped);
+    if (http) return http;
+  }
+  try {
+    const resolved = await resolveImageViewUrls([trimmed]);
+    const view = resolved.get(trimmed)?.trim();
+    if (view) return asShareableHttpUrl(view);
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
 /**
- * Present the OS share sheet for an image (file on native, Web Share API on web).
+ * Present the OS share sheet with a shareable HTTP link (S3 / stored URL).
+ * Local drafts with no public URL still share the file.
  */
 export async function shareImage(
   storedUrl: string,
   urlMap?: Map<string, string> | Record<string, string>
 ): Promise<void> {
+  const link = await resolveShareableHttpUrl(storedUrl, urlMap);
+  if (link) {
+    await shareUrl({
+      title: 'Share',
+      message: link,
+      url: link,
+      copiedToast: 'Link copied',
+    });
+    return;
+  }
+
   const uri = await resolveDownloadUri(storedUrl, urlMap);
   if (!uri) throw new Error('No image to share');
 

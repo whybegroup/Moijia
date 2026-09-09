@@ -24,10 +24,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { Colors, Fonts, Radius, Shadows } from '../constants/theme';
 import { edgeToEdgeModalProps } from './edgeToEdgeModalProps';
 import { KeyboardSafeScrollView } from './KeyboardSafeScrollView';
+import { AnchoredOverflowMenu } from './AnchoredOverflowMenu';
 import { COMMENT_REACTION_EMOJIS } from '../constants/commentReactionEmojis';
-import { DEFAULT_COMMENT_QUICK_REACTIONS_LIST } from '../utils/commentQuickReactionsPrefs';
 import { ReactionEmojiGlyph } from './ReactionEmojiGlyph';
-import { useCommentQuickReactions } from '../hooks/useCommentQuickReactions';
 import { useCurrentUserContext } from '../contexts/CurrentUserContext';
 import { usePullToRefresh } from '../hooks/usePullToRefresh';
 import {
@@ -48,18 +47,19 @@ import {
   useUpdateGroupPostComment,
   useDeleteGroupPostComment,
 } from '../hooks/api';
-import { EmojiBar } from './EmojiBar';
 import { UserAvatar } from './UserAvatar';
 import {
   COMMENT_THREAD_OPTIONS_MENU_WIDTH,
   ThreadedCommentsSection,
   type ThreadComment,
 } from './ThreadedCommentsSection';
+import { ReactionQuickPicker } from './ReactionQuickPicker';
 import { ResolvableImage } from './ResolvableImage';
 import { ImageLightboxModal } from './ImageLightboxModal';
 import { FileExtensionIcon } from './FileExtensionPreview';
 import { PostAttachmentFileRow, PostMediaImage } from './DeletedPostMedia';
 import { isDeletedMediaUrl } from '../utils/deletedMedia';
+import { looksLikeMediaUrl } from '../utils/fileKind';
 import { AddImageButton } from './AddImageButton';
 import { ForumPostMarkdownBody, dropLightboxItem, type ForumPostImageLightboxState } from './ForumPostMarkdownBody';
 import { type GroupPost, type GroupPostComment, type GroupScoped } from '@moijia/client';
@@ -104,7 +104,8 @@ import {
   trackManagedUploadUrl,
   trackManagedUploadUrls,
 } from '../services/managedUploadDelete';
-import { canDeleteManagedMedia } from '../utils/canDeleteManagedMedia';
+import { canDeleteManagedMedia, isGroupAdminOrOwner } from '../utils/canDeleteManagedMedia';
+import { confirmDestructive } from '../utils/confirmDestructive';
 
 export type GroupForumViewProps = {
   groupId: string;
@@ -139,7 +140,7 @@ function parseImageLine(trimmedLine: string): { alt: string; url: string } | nul
   }
   const plainUrlLike = /^[^\s]+$/.test(trimmedLine);
   if (!plainUrlLike) return null;
-  const looksLikeImageUrl = /\.(png|jpe?g|gif|webp|bmp|svg)(\?.*)?$/i.test(trimmedLine);
+  const looksLikeImageUrl = looksLikeMediaUrl(trimmedLine);
   if (looksLikeImageUrl) {
     return { alt: 'Image', url: trimmedLine };
   }
@@ -151,7 +152,7 @@ function wrapBareUrlsWithMarkdown(text: string): string {
     const url = rawUrl.trim();
     const isAlreadyMarkdown = /\]\([^)]+\)$/.test(prefix + url);
     if (isAlreadyMarkdown) return `${prefix}${url}`;
-    const isImageUrl = /\.(png|jpe?g|gif|webp|bmp|svg)(\?.*)?$/i.test(url);
+    const isImageUrl = looksLikeMediaUrl(url);
     if (isImageUrl) return `${prefix}![Image](${url})`;
     return `${prefix}[${url}](${url})`;
   });
@@ -334,11 +335,6 @@ export function GroupForumView({ groupId, focusPostId, focusCommentId }: GroupFo
   const [editingPostId, setEditingPostId] = useState<string | null>(null);
   /** Top “new post” composer — independent of inline edit state. */
   const [newPostBody, setNewPostBody] = useState('');
-  const [postMenuTarget, setPostMenuTarget] = useState<{
-    postId: string;
-    anchor: { x: number; y: number; width: number; height: number };
-  } | null>(null);
-  const postMenuButtonRefs = useRef<Record<string, View | null>>({});
   const [isUploadingAttachment, setIsUploadingAttachment] = useState(false);
   const [composerPhotoUrls, setComposerPhotoUrls] = useState<string[]>([]);
   const [newPostPhotoUrls, setNewPostPhotoUrls] = useState<string[]>([]);
@@ -379,15 +375,6 @@ export function GroupForumView({ groupId, focusPostId, focusCommentId }: GroupFo
   const [uploadingCommentPhotoPostId, setUploadingCommentPhotoPostId] = useState<string | null>(null);
   const [replyTargetByPost, setReplyTargetByPost] = useState<Record<string, string | null>>({});
   const [expandedCommentsByPost, setExpandedCommentsByPost] = useState<Record<string, boolean>>({});
-  const [reactionQuickPickerTarget, setReactionQuickPickerTarget] = useState<
-    { kind: 'post' | 'comment'; id: string } | null
-  >(null);
-  const [reactionQuickPickerAnchor, setReactionQuickPickerAnchor] = useState<{
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  } | null>(null);
   const [reactionPickerTarget, setReactionPickerTarget] = useState<
     { kind: 'post' | 'comment'; id: string } | null
   >(null);
@@ -396,7 +383,6 @@ export function GroupForumView({ groupId, focusPostId, focusCommentId }: GroupFo
     userIds: string[];
   } | null>(null);
   const [imageLightbox, setImageLightbox] = useState<ForumPostImageLightboxState>(null);
-  const reactionButtonRefs = useRef<Record<string, View | null>>({});
   const [commentEdit, setCommentEdit] = useState<{ postId: string; commentId: string } | null>(null);
   const [commentEditText, setCommentEditText] = useState('');
   /** Draft reply parent while editing; `null` = top-level comment. */
@@ -422,8 +408,6 @@ export function GroupForumView({ groupId, focusPostId, focusCommentId }: GroupFo
   const toggleCommentReactionMutation = useToggleGroupPostCommentReaction(groupId, currentUserId ?? '');
   const updateCommentMutation = useUpdateGroupPostComment(groupId, currentUserId ?? '');
   const deleteCommentMutation = useDeleteGroupPostComment(groupId, currentUserId ?? '');
-  const { data: commentQuickReactions = [...DEFAULT_COMMENT_QUICK_REACTIONS_LIST] } =
-    useCommentQuickReactions(currentUserId);
 
   useMissingGroupRedirect(
     isError,
@@ -724,15 +708,7 @@ export function GroupForumView({ groupId, focusPostId, focusCommentId }: GroupFo
           Alert.alert('Error', 'Could not delete file');
         }
       };
-      const go = () => void run();
-      if (Platform.OS === 'web') {
-        if (window.confirm('Delete this file from the post?')) go();
-        return;
-      }
-      Alert.alert('Delete file?', 'This file will be removed from the post and deleted.', [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: go },
-      ]);
+      void run();
     },
     [currentUserId, removeLightboxUrl, updatePostMutation]
   );
@@ -758,22 +734,17 @@ export function GroupForumView({ groupId, focusPostId, focusCommentId }: GroupFo
           Alert.alert('Error', 'Could not delete file');
         }
       };
-      const go = () => void run();
-      if (Platform.OS === 'web') {
-        if (window.confirm('Delete this file from the comment?')) go();
-        return;
-      }
-      Alert.alert('Delete file?', 'This file will be removed from the comment and deleted.', [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: go },
-      ]);
+      void run();
     },
     [currentUserId, removeLightboxUrl, updateCommentMutation]
   );
 
   const removeComposerPhotoAtFor = useCallback((channel: ForumComposerChannel, index: number) => {
     const url = channel === 'new' ? newPostPhotoUrls[index] : composerPhotoUrls[index];
-    if (url) removeDraftMedia(channel, url);
+    if (!url) return;
+    confirmDestructive('Delete photo?', 'This photo will be permanently deleted.', () =>
+      removeDraftMedia(channel, url)
+    );
   }, [composerPhotoUrls, newPostPhotoUrls, removeDraftMedia]);
 
   const uploadComposerPhoto = useCallback(
@@ -821,7 +792,10 @@ export function GroupForumView({ groupId, focusPostId, focusCommentId }: GroupFo
 
   const removeComposerFileAtFor = useCallback((channel: ForumComposerChannel, index: number) => {
     const url = channel === 'new' ? newPostFileAttachments[index]?.url : composerFileAttachments[index]?.url;
-    if (url) removeDraftMedia(channel, url);
+    if (!url) return;
+    confirmDestructive('Delete file?', 'This file will be permanently deleted.', () =>
+      removeDraftMedia(channel, url)
+    );
   }, [composerFileAttachments, newPostFileAttachments, removeDraftMedia]);
 
   const takePhotoAndAddComposerPhoto = useCallback(
@@ -1095,22 +1069,6 @@ export function GroupForumView({ groupId, focusPostId, focusCommentId }: GroupFo
     [usersById]
   );
 
-  const postMenuTargetPost = useMemo(
-    () => (postMenuTarget ? posts.find((p) => p.id === postMenuTarget.postId) ?? null : null),
-    [postMenuTarget, posts]
-  );
-  const canEditMenuPost = !!(postMenuTargetPost && postMenuTargetPost.userId === currentUserId);
-
-  const postMenuPopoverLayout = useMemo(() => {
-    if (!postMenuTarget) return null;
-    const aw = Dimensions.get('window').width;
-    const { anchor } = postMenuTarget;
-    let left = anchor.x + anchor.width - COMMENT_THREAD_OPTIONS_MENU_WIDTH;
-    left = Math.max(8, Math.min(left, aw - COMMENT_THREAD_OPTIONS_MENU_WIDTH - 8));
-    const top = anchor.y + anchor.height + 4;
-    return { left, top };
-  }, [postMenuTarget]);
-
   const cancelEditPost = useCallback(() => {
     discardTrackedUploads(currentUserId, editPostTrackedUploadsRef.current);
     const id = editingPostId;
@@ -1181,22 +1139,10 @@ export function GroupForumView({ groupId, focusPostId, focusCommentId }: GroupFo
         setComposerFileAttachments(split.attachmentFiles.map((f) => ({ name: f.name, url: f.url })));
       }
       setComposerSelection({ start: 0, end: 0 });
-      setPostMenuTarget(null);
       pendingScrollToEditPostIdRef.current = post.id;
     },
     [currentUserId]
   );
-
-  const openPostMenu = useCallback((post: GroupPost) => {
-    const node = postMenuButtonRefs.current[post.id] as
-      | (View & {
-          measureInWindow?: (cb: (x: number, y: number, w: number, h: number) => void) => void;
-        })
-      | null;
-    node?.measureInWindow?.((x, y, width, height) => {
-      setPostMenuTarget({ postId: post.id, anchor: { x, y, width, height } });
-    });
-  }, []);
 
   const submitNewPost = useCallback(async () => {
     const body = mergeComposerBodyForApi(newPostBody, newPostPhotoUrls, newPostFileAttachments).trim();
@@ -1641,45 +1587,15 @@ export function GroupForumView({ groupId, focusPostId, focusCommentId }: GroupFo
   );
 
   const applyReactionAndDismiss = (emoji: string) => {
-    const target = reactionQuickPickerTarget ?? reactionPickerTarget;
+    const target = reactionPickerTarget;
     if (!target) return;
     if (target.kind === 'post') {
       togglePostReactionMutation.mutate({ postId: target.id, emoji });
     } else {
       toggleCommentReactionMutation.mutate({ commentId: target.id, emoji });
     }
-    setReactionQuickPickerTarget(null);
-    setReactionQuickPickerAnchor(null);
     setReactionPickerTarget(null);
   };
-
-  const openReactionQuickPicker = useCallback((target: { kind: 'post' | 'comment'; id: string }) => {
-    const key = `${target.kind}:${target.id}`;
-    const node = reactionButtonRefs.current[key] as
-      | (View & { measureInWindow: (cb: (x: number, y: number, w: number, h: number) => void) => void })
-      | null;
-    if (!node?.measureInWindow) {
-      setReactionQuickPickerAnchor(null);
-      setReactionQuickPickerTarget(target);
-      return;
-    }
-    node.measureInWindow((x, y, width, height) => {
-      setReactionQuickPickerAnchor({ x, y, width, height });
-      setReactionQuickPickerTarget(target);
-    });
-  }, []);
-
-  const quickPickerStyle = useMemo(() => {
-    const screenWidth = Dimensions.get('window').width;
-    const cardWidth = 316;
-    const cardHeight = 62;
-    const margin = 10;
-    if (!reactionQuickPickerAnchor) return { top: 120, left: (screenWidth - cardWidth) / 2 };
-    const centeredLeft = reactionQuickPickerAnchor.x + reactionQuickPickerAnchor.width / 2 - cardWidth / 2;
-    const left = Math.max(margin, Math.min(screenWidth - cardWidth - margin, centeredLeft));
-    const top = Math.max(12, reactionQuickPickerAnchor.y - cardHeight - 8);
-    return { top, left };
-  }, [reactionQuickPickerAnchor]);
 
   const openReactionDetailModal = useCallback((payload: { emoji: string; userIds: string[] }) => {
     setReactionDetailModal(payload);
@@ -1841,8 +1757,8 @@ export function GroupForumView({ groupId, focusPostId, focusCommentId }: GroupFo
               iconOnly
               label="Add photo"
               triggerIconName="camera-outline"
-              optionsModalTitle="Add photo"
-              linkModalTitle="Photo URL"
+              optionsModalTitle="Add photo or video"
+              linkModalTitle="Media URL"
               disabled={isUploadingAttachment}
               busy={isUploadingAttachment}
               onTakePhoto={() => void takePhotoAndAddComposerPhoto(channel)}
@@ -1978,17 +1894,84 @@ export function GroupForumView({ groupId, focusPostId, focusCommentId }: GroupFo
                       </TouchableOpacity>
                     ) : null}
                   </View>
-                  <TouchableOpacity
-                    ref={(node) => {
-                      postMenuButtonRefs.current[post.id] = node;
-                    }}
-                    onPress={() => openPostMenu(post)}
-                    style={styles.postMenuBtn}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    accessibilityLabel="Post options"
+                  <AnchoredOverflowMenu
+                    width={COMMENT_THREAD_OPTIONS_MENU_WIDTH}
+                    menu={(close) => (
+                      <>
+                        <TouchableOpacity
+                          style={styles.postOptionsRow}
+                          onPress={() => {
+                            const name = group?.name;
+                            shareFromModal(close, () =>
+                              sharePost(groupId, post.id, {
+                                title: post.title,
+                                body: post.body,
+                                authorName: getUserDisplayName(post.userId),
+                                groupName: name,
+                              }),
+                            );
+                          }}
+                        >
+                          <Ionicons name="share-outline" size={20} color={Colors.text} />
+                          <Text style={styles.postOptionsLabel}>Share</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[
+                            styles.postOptionsRow,
+                            post.userId !== currentUserId &&
+                              !isGroupAdminOrOwner(group, currentUserId) &&
+                              styles.postOptionsRowLast,
+                          ]}
+                          onPress={async () => {
+                            const text = forumPostCopyText(post.body);
+                            await Clipboard.setStringAsync(text);
+                            close();
+                            Toast.show({ type: 'success', text1: 'Copied' });
+                          }}
+                        >
+                          <Ionicons name="copy-outline" size={20} color={Colors.text} />
+                          <Text style={styles.postOptionsLabel}>Copy</Text>
+                        </TouchableOpacity>
+                        {post.userId === currentUserId ? (
+                          <TouchableOpacity
+                            style={[
+                              styles.postOptionsRow,
+                              !(
+                                post.userId === currentUserId || isGroupAdminOrOwner(group, currentUserId)
+                              ) && styles.postOptionsRowLast,
+                            ]}
+                            onPress={() => {
+                              close();
+                              beginEditPost(post);
+                            }}
+                          >
+                            <Ionicons name="create-outline" size={20} color={Colors.text} />
+                            <Text style={styles.postOptionsLabel}>Edit</Text>
+                          </TouchableOpacity>
+                        ) : null}
+                        {post.userId === currentUserId || isGroupAdminOrOwner(group, currentUserId) ? (
+                          <TouchableOpacity
+                            style={[styles.postOptionsRow, styles.postOptionsRowLast]}
+                            onPress={() => {
+                              close();
+                              confirmDeletePost(post.id);
+                            }}
+                          >
+                            <Ionicons name="trash-outline" size={20} color={Colors.notGoing} />
+                            <Text style={[styles.postOptionsLabel, styles.postOptionsLabelDanger]}>Delete</Text>
+                          </TouchableOpacity>
+                        ) : null}
+                      </>
+                    )}
                   >
-                    <Ionicons name="ellipsis-vertical" size={18} color={Colors.textSub} />
-                  </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.postMenuBtn}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      accessibilityLabel="Post options"
+                    >
+                      <Ionicons name="ellipsis-vertical" size={18} color={Colors.textSub} />
+                    </TouchableOpacity>
+                  </AnchoredOverflowMenu>
                 </View>
                 {editingPostId === post.id ? (
                   forumComposerFields('edit')
@@ -2179,18 +2162,19 @@ export function GroupForumView({ groupId, focusPostId, focusCommentId }: GroupFo
                   }}
                 >
                 <View style={styles.reactionRow}>
-                  <TouchableOpacity
-                    ref={(node) => {
-                      reactionButtonRefs.current[`post:${post.id}`] = node;
-                    }}
-                    style={styles.iconActionBtn}
-                    onPress={() => openReactionQuickPicker({ kind: 'post', id: post.id })}
-                    onLongPress={() => openReactionQuickPicker({ kind: 'post', id: post.id })}
-                    accessibilityLabel="Add reaction"
-                    activeOpacity={0.75}
+                  <ReactionQuickPicker
+                    onReact={(emoji) => togglePostReactionMutation.mutate({ postId: post.id, emoji })}
+                    onViewAll={() => setReactionPickerTarget({ kind: 'post', id: post.id })}
+                    disabled={togglePostReactionMutation.isPending || !currentUserId}
                   >
-                    <Ionicons name="happy-outline" size={15} color={Colors.textSub} />
-                  </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.iconActionBtn}
+                      accessibilityLabel="Add reaction"
+                      activeOpacity={0.75}
+                    >
+                      <Ionicons name="happy-outline" size={15} color={Colors.textSub} />
+                    </TouchableOpacity>
+                  </ReactionQuickPicker>
                   <TouchableOpacity
                     style={styles.iconActionBtn}
                     onPress={() =>
@@ -2215,6 +2199,7 @@ export function GroupForumView({ groupId, focusPostId, focusCommentId }: GroupFo
                     scrollViewportYRef={scrollViewportYRef}
                     scrollOffsetYRef={scrollOffsetYRef}
                     currentUserId={currentUserId}
+                    canModerateComments={isGroupAdminOrOwner(group, currentUserId)}
                     getUserDisplayName={getUserDisplayName}
                     formatCommentTime={formatCreatedAtLabel}
                     draftText={draftComments[post.id] ?? ''}
@@ -2282,8 +2267,8 @@ export function GroupForumView({ groupId, focusPostId, focusCommentId }: GroupFo
                       toggleCommentReactionMutation.mutate({ commentId, emoji })
                     }
                     onReactionChipLongPress={openReactionDetailModal}
-                    onOpenReactionQuickPicker={(commentId) =>
-                      openReactionQuickPicker({ kind: 'comment', id: commentId })
+                    onOpenFullReactionPicker={(commentId) =>
+                      setReactionPickerTarget({ kind: 'comment', id: commentId })
                     }
                     onBeginEdit={(commentId) => {
                       const c = post.comments.find((x) => x.id === commentId);
@@ -2293,7 +2278,6 @@ export function GroupForumView({ groupId, focusPostId, focusCommentId }: GroupFo
                       confirmDeleteComment(post.id, commentId)
                     }
                     containerStyle={styles.postCommentsSection}
-                    reactionButtonRefs={reactionButtonRefs}
                     renderAvatar={(userId, displayName) => {
                       const u = usersById.get(userId);
                       return (
@@ -2337,135 +2321,6 @@ export function GroupForumView({ groupId, focusPostId, focusCommentId }: GroupFo
           ))
         )}
       </KeyboardSafeScrollView>
-
-      {postMenuTarget && postMenuPopoverLayout ? (
-        <Modal {...edgeToEdgeModalProps}
-          visible
-          transparent
-          animationType="fade"
-          onRequestClose={() => setPostMenuTarget(null)}
-        >
-          <View style={styles.postOptionsModalRoot} pointerEvents="box-none">
-            <Pressable
-              style={styles.postOptionsDismiss}
-              onPress={() => setPostMenuTarget(null)}
-              accessibilityRole="button"
-              accessibilityLabel="Dismiss menu"
-            />
-            <View
-              style={[
-                styles.postOptionsPopoverWrap,
-                {
-                  left: postMenuPopoverLayout.left,
-                  top: postMenuPopoverLayout.top,
-                  width: COMMENT_THREAD_OPTIONS_MENU_WIDTH,
-                },
-              ]}
-              pointerEvents="box-none"
-            >
-              <View style={styles.postOptionsCard}>
-                <TouchableOpacity
-                  style={styles.postOptionsRow}
-                  onPress={() => {
-                    const id = postMenuTarget.postId;
-                    const name = group?.name;
-                    shareFromModal(
-                      () => setPostMenuTarget(null),
-                      () =>
-                        sharePost(groupId, id, {
-                          title: postMenuTargetPost?.title,
-                          body: postMenuTargetPost?.body,
-                          authorName: postMenuTargetPost
-                            ? getUserDisplayName(postMenuTargetPost.userId)
-                            : undefined,
-                          groupName: name,
-                        }),
-                    );
-                  }}
-                >
-                  <Ionicons name="share-outline" size={20} color={Colors.text} />
-                  <Text style={styles.postOptionsLabel}>Share</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.postOptionsRow, !canEditMenuPost && styles.postOptionsRowLast]}
-                  onPress={async () => {
-                    const text = forumPostCopyText(postMenuTargetPost?.body);
-                    await Clipboard.setStringAsync(text);
-                    setPostMenuTarget(null);
-                    Toast.show({ type: 'success', text1: 'Copied' });
-                  }}
-                >
-                  <Ionicons name="copy-outline" size={20} color={Colors.text} />
-                  <Text style={styles.postOptionsLabel}>Copy</Text>
-                </TouchableOpacity>
-                {canEditMenuPost ? (
-                  <TouchableOpacity
-                    style={styles.postOptionsRow}
-                    onPress={() => {
-                      setPostMenuTarget(null);
-                      if (postMenuTargetPost) beginEditPost(postMenuTargetPost);
-                    }}
-                  >
-                    <Ionicons name="create-outline" size={20} color={Colors.text} />
-                    <Text style={styles.postOptionsLabel}>Edit</Text>
-                  </TouchableOpacity>
-                ) : null}
-                {canEditMenuPost ? (
-                  <TouchableOpacity
-                    style={[styles.postOptionsRow, styles.postOptionsRowLast]}
-                    onPress={() => {
-                      const id = postMenuTarget.postId;
-                      setPostMenuTarget(null);
-                      confirmDeletePost(id);
-                    }}
-                  >
-                    <Ionicons name="trash-outline" size={20} color={Colors.notGoing} />
-                    <Text style={[styles.postOptionsLabel, styles.postOptionsLabelDanger]}>Delete</Text>
-                  </TouchableOpacity>
-                ) : null}
-              </View>
-            </View>
-          </View>
-        </Modal>
-      ) : null}
-
-      {reactionQuickPickerTarget && currentUserId ? (
-        <Modal {...edgeToEdgeModalProps}
-          visible
-          transparent
-          animationType="fade"
-          presentationStyle={Platform.OS === 'ios' ? 'overFullScreen' : undefined}
-          onRequestClose={() => setReactionQuickPickerTarget(null)}
-          statusBarTranslucent
-        >
-          <View style={styles.commentReactionPickerRoot}>
-            <Pressable
-              style={StyleSheet.absoluteFill}
-              onPress={() => {
-                setReactionQuickPickerTarget(null);
-                setReactionQuickPickerAnchor(null);
-              }}
-              accessibilityRole="button"
-              accessibilityLabel="Close quick reactions"
-            />
-            <View style={styles.commentReactionQuickPickerRoot} pointerEvents="box-none">
-              <View style={[styles.commentReactionQuickPickerCard, quickPickerStyle]} pointerEvents="auto">
-                <EmojiBar
-                  quickReactions={commentQuickReactions}
-                  onPressReaction={applyReactionAndDismiss}
-                  onPressViewAll={() => {
-                    setReactionPickerTarget(reactionQuickPickerTarget);
-                    setReactionQuickPickerTarget(null);
-                    setReactionQuickPickerAnchor(null);
-                  }}
-                  disabled={togglePostReactionMutation.isPending || toggleCommentReactionMutation.isPending}
-                  viewAllAccessibilityLabel="View all emojis"
-                />
-              </View>
-            </View>
-          </View>
-        </Modal>
-      ) : null}
 
       {reactionPickerTarget && currentUserId ? (
         <Modal {...edgeToEdgeModalProps}
@@ -2959,23 +2814,6 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.regular,
     lineHeight: 20,
   },
-  postOptionsModalRoot: { flex: 1 },
-  postOptionsDismiss: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'transparent',
-  },
-  postOptionsPopoverWrap: {
-    position: 'absolute',
-    zIndex: 20,
-    elevation: 20,
-  },
-  postOptionsCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: 16,
-    overflow: 'hidden',
-    width: '100%',
-    ...Shadows.lg,
-  },
   postOptionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -3083,20 +2921,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 24,
-  },
-  commentReactionQuickPickerRoot: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  commentReactionQuickPickerCard: {
-    position: 'absolute',
-    width: 316,
-    borderRadius: Radius['2xl'],
-    backgroundColor: Colors.surface,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.border,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    ...Shadows.md,
   },
   commentReactionPickerCard: {
     width: '100%',

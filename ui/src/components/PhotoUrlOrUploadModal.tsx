@@ -213,7 +213,7 @@ export function PhotoUrlOrUploadModal({
             fileInputRef.current = el;
           }}
           type="file"
-          accept="image/*"
+          accept="image/*,video/*,.gif,.gifv,.mp4,.mov,.webm"
           multiple
           style={{ display: 'none' }}
           onChange={onWebFileChange}
@@ -254,7 +254,7 @@ export function PhotoUrlOrUploadModal({
               {busy ? (
                 <ActivityIndicator color={Colors.accentFg} />
               ) : (
-                <Text style={styles.uploadBtnText}>Choose images…</Text>
+                <Text style={styles.uploadBtnText}>Choose images or videos…</Text>
               )}
             </TouchableOpacity>
           ) : null}

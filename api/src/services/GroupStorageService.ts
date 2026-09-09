@@ -19,6 +19,7 @@ import {
   managedUploadByteSize,
   tryExtractUploadObjectKey,
   uploadUrlOwnedByUser,
+  userIdFromUploadUrl,
 } from '../utils/objectStorePaths';
 import { getS3Config } from '../utils/s3Config';
 import { NotificationService } from './NotificationService';
@@ -367,15 +368,36 @@ export class GroupStorageService {
       ),
       this.originalNameMapForGroup(groupId),
     ]);
+    const uploaderIds = [
+      ...new Set(
+        items
+          .map((item) => userIdFromUploadUrl(item.url))
+          .filter((id): id is string => !!id)
+      ),
+    ];
+    const uploaders =
+      uploaderIds.length > 0
+        ? await prisma.user.findMany({
+            where: { id: { in: uploaderIds } },
+            select: { id: true, displayName: true, name: true, avatarSeed: true, thumbnail: true },
+          })
+        : [];
+    const uploaderById = new Map(uploaders.map((u) => [u.id, u]));
     return {
       category,
-      files: items.map((item) => ({
-        url: item.url,
-        byteSize: this.byteSizeForUrl(item.url, sizes),
-        sourceLabel: item.label,
-        fileName: this.resolvedFileName(item, storedNames),
-        canDelete: this.canDeleteStorageFile(item.url, viewer.userId, viewer.role),
-      })),
+      files: items.map((item) => {
+        const uploader = uploaderById.get(userIdFromUploadUrl(item.url) ?? '');
+        return {
+          url: item.url,
+          byteSize: this.byteSizeForUrl(item.url, sizes),
+          sourceLabel: item.label,
+          fileName: this.resolvedFileName(item, storedNames),
+          uploadedByName: uploader ? uploader.displayName || uploader.name : undefined,
+          uploadedByAvatarSeed: uploader?.avatarSeed ?? null,
+          uploadedByThumbnail: uploader?.thumbnail ?? null,
+          canDelete: this.canDeleteStorageFile(item.url, viewer.userId, viewer.role),
+        };
+      }),
     };
   }
 

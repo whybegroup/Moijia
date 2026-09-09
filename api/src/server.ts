@@ -4,6 +4,7 @@ import express, { Application, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { RegisterRoutes } from './generated/routes';
 import { registerSharePreviewRoutes } from './sharePreviewRoutes';
+import { registerMediaShareRoutes } from './mediaShareRoutes';
 import { apiReference } from '@scalar/express-api-reference';
 import * as fs from 'fs';
 import * as yaml from 'js-yaml';
@@ -16,6 +17,7 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 app.use(cors());
 registerSharePreviewRoutes(app);
+registerMediaShareRoutes(app);
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 

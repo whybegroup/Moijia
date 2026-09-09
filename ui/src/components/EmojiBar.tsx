@@ -9,6 +9,7 @@ type EmojiBarProps = {
   onPressReaction: (emoji: string) => void;
   onPressViewAll: () => void;
   disabled?: boolean;
+  compact?: boolean;
   style?: StyleProp<ViewStyle>;
   viewAllAccessibilityLabel?: string;
 };
@@ -19,27 +20,26 @@ export function EmojiBar({
   onPressReaction,
   onPressViewAll,
   disabled = false,
+  compact = false,
   style,
   viewAllAccessibilityLabel = 'More emojis',
 }: EmojiBarProps) {
   return (
-    <View style={[styles.row, style]}>
-      <View style={styles.quickInner}>
-        {quickReactions.map((emoji) => {
-          const active = activeEmojis.includes(emoji);
-          return (
-            <TouchableOpacity
-              key={emoji}
-              onPress={() => onPressReaction(emoji)}
-              disabled={disabled}
-              style={[styles.quickHit, active && styles.quickHitActive]}
-              accessibilityLabel={`React with ${emoji}`}
-            >
-              <ReactionEmojiGlyph emoji={emoji} size={24} />
-            </TouchableOpacity>
-          );
-        })}
-      </View>
+    <View style={[styles.row, compact && styles.rowCompact, style]}>
+      {quickReactions.map((emoji) => {
+        const active = activeEmojis.includes(emoji);
+        return (
+          <TouchableOpacity
+            key={emoji}
+            onPress={() => onPressReaction(emoji)}
+            disabled={disabled}
+            style={[styles.quickHit, active && styles.quickHitActive]}
+            accessibilityLabel={`React with ${emoji}`}
+          >
+            <ReactionEmojiGlyph emoji={emoji} size={24} />
+          </TouchableOpacity>
+        );
+      })}
       <TouchableOpacity
         style={styles.moreBtn}
         onPress={onPressViewAll}
@@ -48,9 +48,9 @@ export function EmojiBar({
         activeOpacity={0.75}
       >
         <View style={styles.moreInner}>
-          <Ionicons name="happy-outline" size={22} color={Colors.textSub} />
+          <Ionicons name="happy-outline" size={22} color={Colors.textSub} allowFontScaling={false} />
           <View style={styles.morePlus} pointerEvents="none">
-            <Ionicons name="add" size={11} color={Colors.textSub} />
+            <Ionicons name="add" size={11} color={Colors.textSub} allowFontScaling={false} />
           </View>
         </View>
       </TouchableOpacity>
@@ -61,33 +61,31 @@ export function EmojiBar({
 const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
-    gap: 8,
-    alignSelf: 'stretch',
+    gap: 4,
   },
-  quickInner: {
-    flex: 1,
-    minWidth: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  rowCompact: {
+    alignSelf: 'flex-start',
   },
   quickHit: {
-    flex: 1,
-    minWidth: 36,
+    minWidth: 40,
+    minHeight: 40,
+    paddingHorizontal: 4,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 2,
     borderRadius: 10,
+    overflow: 'visible',
   },
   quickHitActive: {
     opacity: 0.85,
   },
   moreBtn: {
-    width: 32,
-    height: 32,
+    minWidth: 40,
+    minHeight: 40,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'visible',
   },
   moreInner: {
     position: 'relative',
@@ -95,6 +93,7 @@ const styles = StyleSheet.create({
     height: 34,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'visible',
   },
   morePlus: {
     position: 'absolute',

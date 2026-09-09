@@ -25,13 +25,35 @@ import Animated, {
 import Toast from 'react-native-toast-message';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Fonts, Radius } from '../constants/theme';
+import { useCurrentUserContext } from '../contexts/CurrentUserContext';
+import { useUser, useUsers } from '../hooks/api';
 import { edgeToEdgeModalProps } from './edgeToEdgeModalProps';
 import { FileExtensionPreview } from './FileExtensionPreview';
 import { PostMediaImage } from './DeletedPostMedia';
+import { UserAvatar } from './UserAvatar';
 import { isDeletedFileHref, isDeletedImageSrc } from '../utils/deletedMedia';
 import { shareImage } from '../services/downloadImage';
-import { displayFileName, isImageFileUrl } from '../utils/fileKind';
+import { displayFileName, isImageFileUrl, isVideoFileUrl } from '../utils/fileKind';
+import { confirmDestructive } from '../utils/confirmDestructive';
+import { managedUploadOwnerUserId } from '../utils/canDeleteManagedMedia';
 import { FileViewerBody } from './FileViewerBody';
+
+function isLocalDraftMediaUrl(url: string): boolean {
+  const u = (url || '').trim().toLowerCase();
+  return (
+    u.startsWith('file:') ||
+    u.startsWith('content:') ||
+    u.startsWith('blob:') ||
+    u.startsWith('ph://') ||
+    u.startsWith('assets-library:') ||
+    u.startsWith('data:')
+  );
+}
+
+function userDisplayName(user: { displayName?: string | null; name?: string | null } | null | undefined): string | undefined {
+  const n = (user?.displayName || user?.name || '').trim();
+  return n || undefined;
+}
 
 type ImageLightboxModalProps = {
   visible: boolean;
@@ -59,6 +81,8 @@ const DISMISS = { duration: 180, easing: Easing.in(Easing.cubic) };
 const FADE = { duration: 120, easing: Easing.out(Easing.cubic) };
 const HEADER_ROW = 40;
 const HEADER_PAD_BOTTOM = 12;
+const DISMISS_DISTANCE = 72;
+const DISMISS_VELOCITY = 650;
 
 function clampZoomPan(tx: number, ty: number, s: number, w: number, h: number): { x: number; y: number } {
   'worklet';
@@ -86,23 +110,52 @@ export function ImageLightboxModal({
   deleting = false,
 }: ImageLightboxModalProps) {
   const insets = useSafeAreaInsets();
+  const { user: currentUser } = useCurrentUserContext();
+  const { data: allUsers = [] } = useUsers();
   const { width: winW, height: winH } = useWindowDimensions();
   const headerPadTop = Math.max(insets.top, 12) + 8;
   const headerH = headerPadTop + HEADER_ROW + HEADER_PAD_BOTTOM;
-  const [stageSize, setStageSize] = useState({ w: winW, h: Math.max(280, winH - headerH) });
+  const bottomPad = Math.max(insets.bottom, 12);
+  const [stageSize, setStageSize] = useState({ w: winW, h: Math.max(280, winH) });
   const [sharing, setSharing] = useState(false);
   const gestureClosingRef = useRef(false);
 
   const stageW = stageSize.w > 1 ? stageSize.w : winW;
-  const stageH = stageSize.h > 1 ? stageSize.h : Math.max(280, winH - 160);
+  const stageH = stageSize.h > 1 ? stageSize.h : Math.max(280, winH);
 
   const hasMany = urls.length > 1;
-  const hasHeader = !!title || !!subtitle || !!headerAvatar;
   const safeIndex = Math.max(0, Math.min(index, Math.max(urls.length - 1, 0)));
   const currentUrl = urls[safeIndex] ?? '';
   const currentName = names?.[safeIndex];
   const currentIsImage = isImageFileUrl(currentUrl, currentName);
   const fallbackTitle = currentIsImage ? 'Photo' : displayFileName(currentUrl, currentName);
+  const resolvedOwnerId =
+    managedUploadOwnerUserId(currentUrl) ||
+    (isLocalDraftMediaUrl(currentUrl) ? currentUser?.id ?? null : null);
+  const fromUserList = resolvedOwnerId ? allUsers.find((u) => u.id === resolvedOwnerId) : undefined;
+  const { data: fetchedUser } = useUser(
+    visible && resolvedOwnerId && !fromUserList && resolvedOwnerId !== currentUser?.id
+      ? resolvedOwnerId
+      : ''
+  );
+  const uploader =
+    (resolvedOwnerId && currentUser?.id === resolvedOwnerId ? currentUser : undefined) ||
+    fromUserList ||
+    (fetchedUser?.id === resolvedOwnerId ? fetchedUser : undefined);
+  const uploaderName = userDisplayName(uploader);
+  const resolvedTitle = uploaderName || title;
+  const resolvedAvatar =
+    uploaderName && uploader ? (
+      <UserAvatar
+        seed={uploaderName}
+        backgroundColor={[uploader.avatarSeed ?? '']}
+        thumbnail={uploader.thumbnail ?? null}
+        size={28}
+      />
+    ) : (
+      headerAvatar
+    );
+  const hasHeader = !!resolvedTitle || !!subtitle || !!resolvedAvatar;
   const normalizedUrlMap = useMemo(
     () => (urlMap instanceof Map ? urlMap : urlMap ? new Map(Object.entries(urlMap)) : undefined),
     [urlMap]
@@ -123,6 +176,7 @@ export function ImageLightboxModal({
   const heightSv = useSharedValue(stageH);
   const dragOrigin = useSharedValue(0);
   const isPaging = useSharedValue(0);
+  const closingSv = useSharedValue(0);
   const overlayOpacity = useSharedValue(visible ? 1 : 0);
 
   const goToIndex = useCallback(
@@ -132,6 +186,10 @@ export function ImageLightboxModal({
     [onChangeIndex]
   );
 
+  const beginClosing = useCallback(() => {
+    gestureClosingRef.current = true;
+  }, []);
+
   const closeViewer = useCallback(() => {
     gestureClosingRef.current = true;
     onClose();
@@ -139,10 +197,12 @@ export function ImageLightboxModal({
 
   const requestClose = useCallback(() => {
     if (gestureClosingRef.current) return;
-    overlayOpacity.value = withTiming(0, FADE, (finished) => {
-      if (finished) runOnJS(onClose)();
+    gestureClosingRef.current = true;
+    closingSv.value = 1;
+    overlayOpacity.value = withTiming(0, FADE, () => {
+      runOnJS(onClose)();
     });
-  }, [onClose, overlayOpacity]);
+  }, [onClose, overlayOpacity, closingSv]);
 
   const jumpToIndex = useCallback(
     (nextIndex: number) => {
@@ -182,40 +242,52 @@ export function ImageLightboxModal({
     savedTranslateY.value = 0;
   }, [scale, savedScale, translateX, translateY, savedTranslateX, savedTranslateY]);
 
+  const urlsKey = urls.join('\0');
+
   useEffect(() => {
     pageCountSv.value = Math.max(urls.length, 1);
     widthSv.value = stageW;
     heightSv.value = stageH;
   }, [urls.length, stageW, stageH, pageCountSv, widthSv, heightSv]);
 
-  useLayoutEffect(() => {
-    if (!visible) {
-      if (gestureClosingRef.current) {
-        overlayOpacity.value = 0;
-        gestureClosingRef.current = false;
-      }
+  useEffect(() => {
+    if (!visible) return;
+    if (urls.length === 0) {
+      onClose();
       return;
     }
-    gestureClosingRef.current = false;
+    if (index !== safeIndex) onChangeIndex(safeIndex);
+  }, [visible, urls.length, index, safeIndex, onChangeIndex, onClose]);
+
+  useLayoutEffect(() => {
+    if (!visible) {
+      overlayOpacity.value = 0;
+      closingSv.value = 0;
+      gestureClosingRef.current = false;
+      return;
+    }
+    if (gestureClosingRef.current || closingSv.value) return;
     overlayOpacity.value = 1;
+    pageCountSv.value = Math.max(urls.length, 1);
     pageIndexSv.value = safeIndex;
     pageOffset.value = -safeIndex * stageW;
     dismissY.value = 0;
     panAxis.value = 0;
     isPaging.value = 0;
+    closingSv.value = 0;
     scale.value = 1;
     savedScale.value = 1;
     translateX.value = 0;
     translateY.value = 0;
     savedTranslateX.value = 0;
     savedTranslateY.value = 0;
-  }, [visible, stageW]);
+  }, [visible, stageW, urlsKey]);
 
   const pinch = useMemo(
     () =>
       Gesture.Pinch()
         .onUpdate((e) => {
-          if (isPaging.value) return;
+          if (closingSv.value || isPaging.value) return;
           const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, savedScale.value * e.scale));
           scale.value = next;
           const clamped = clampZoomPan(translateX.value, translateY.value, next, widthSv.value, heightSv.value);
@@ -223,6 +295,7 @@ export function ImageLightboxModal({
           translateY.value = clamped.y;
         })
         .onEnd(() => {
+          if (closingSv.value) return;
           if (isPaging.value) {
             scale.value = 1;
             savedScale.value = 1;
@@ -246,7 +319,7 @@ export function ImageLightboxModal({
           savedTranslateX.value = clamped.x;
           savedTranslateY.value = clamped.y;
         }),
-    [scale, savedScale, translateX, translateY, savedTranslateX, savedTranslateY, isPaging, widthSv, heightSv]
+    [scale, savedScale, translateX, translateY, savedTranslateX, savedTranslateY, isPaging, closingSv, widthSv, heightSv]
   );
 
   const pan = useMemo(
@@ -254,6 +327,7 @@ export function ImageLightboxModal({
       Gesture.Pan()
         .maxPointers(1)
         .onStart(() => {
+          if (closingSv.value) return;
           cancelAnimation(pageOffset);
           cancelAnimation(dismissY);
           dragOrigin.value = pageOffset.value;
@@ -267,6 +341,7 @@ export function ImageLightboxModal({
           }
         })
         .onUpdate((e) => {
+          if (closingSv.value) return;
           const zoomed = scale.value > ZOOM_EPS || savedScale.value > ZOOM_EPS;
           if (zoomed) {
             isPaging.value = 0;
@@ -284,8 +359,8 @@ export function ImageLightboxModal({
           if (panAxis.value === 0) {
             const ax = Math.abs(e.translationX);
             const ay = Math.abs(e.translationY);
-            if (ay > 10 && ay > ax * 1.15) panAxis.value = 2;
-            else if (ax > 6) panAxis.value = 1;
+            if (ay > 8 && ay >= ax) panAxis.value = 2;
+            else if (ax > 8) panAxis.value = 1;
           }
           if (panAxis.value === 2) {
             dismissY.value = Math.max(0, e.translationY);
@@ -301,6 +376,7 @@ export function ImageLightboxModal({
           pageOffset.value = next;
         })
         .onEnd((e) => {
+          if (closingSv.value) return;
           const zoomed = scale.value > ZOOM_EPS || savedScale.value > ZOOM_EPS;
           if (zoomed) {
             const next = clampZoomPan(
@@ -318,24 +394,24 @@ export function ImageLightboxModal({
             panAxis.value = 0;
             return;
           }
+          const wasDismiss = panAxis.value === 2 || dismissY.value > 8;
           panAxis.value = 0;
           isPaging.value = 0;
           const w = widthSv.value;
           const count = pageCountSv.value;
-          const pulledDown = dismissY.value > 12 || e.translationY > 12;
-          if (pulledDown && Math.abs(e.translationY) >= Math.abs(e.translationX)) {
-            if (dismissY.value > 110 || e.velocityY > 900) {
-              dismissY.value = withTiming(winH, DISMISS, (finished) => {
-                if (finished) runOnJS(closeViewer)();
+          if (wasDismiss) {
+            const shouldClose =
+              dismissY.value > DISMISS_DISTANCE || e.velocityY > DISMISS_VELOCITY;
+            if (shouldClose) {
+              closingSv.value = 1;
+              runOnJS(beginClosing)();
+              const fly = Math.max(heightSv.value, winH);
+              dismissY.value = withTiming(fly, DISMISS, () => {
+                runOnJS(closeViewer)();
               });
             } else {
               dismissY.value = withTiming(0, SLIDE);
             }
-            const idx = Math.max(0, Math.min(count - 1, Math.round(-pageOffset.value / Math.max(w, 1))));
-            pageIndexSv.value = idx;
-            pageOffset.value = withTiming(-idx * w, SLIDE, (finished) => {
-              if (finished) runOnJS(goToIndex)(idx);
-            });
             return;
           }
           dismissY.value = withTiming(0, SLIDE);
@@ -352,9 +428,22 @@ export function ImageLightboxModal({
             if (finished) runOnJS(goToIndex)(target);
           });
         })
-        .onFinalize(() => {
+        .onFinalize((e) => {
+          if (closingSv.value) return;
           isPaging.value = 0;
           panAxis.value = 0;
+          if (dismissY.value > DISMISS_DISTANCE || e.velocityY > DISMISS_VELOCITY) {
+            closingSv.value = 1;
+            runOnJS(beginClosing)();
+            const fly = Math.max(heightSv.value, winH);
+            dismissY.value = withTiming(fly, DISMISS, () => {
+              runOnJS(closeViewer)();
+            });
+            return;
+          }
+          if (dismissY.value > 0.5) {
+            dismissY.value = withTiming(0, SLIDE);
+          }
         }),
     [
       scale,
@@ -372,8 +461,10 @@ export function ImageLightboxModal({
       heightSv,
       dragOrigin,
       isPaging,
+      closingSv,
       winH,
       goToIndex,
+      beginClosing,
       closeViewer,
     ]
   );
@@ -384,7 +475,7 @@ export function ImageLightboxModal({
         .numberOfTaps(2)
         .maxDistance(16)
         .onEnd(() => {
-          if (isPaging.value || panAxis.value !== 0) return;
+          if (closingSv.value || isPaging.value || panAxis.value !== 0) return;
           if (savedScale.value > ZOOM_EPS || scale.value > ZOOM_EPS) {
             resetZoom();
           } else {
@@ -392,7 +483,7 @@ export function ImageLightboxModal({
             savedScale.value = DOUBLE_TAP_SCALE;
           }
         }),
-    [resetZoom, scale, savedScale, isPaging, panAxis]
+    [resetZoom, scale, savedScale, isPaging, panAxis, closingSv]
   );
 
   const composed = useMemo(
@@ -434,6 +525,20 @@ export function ImageLightboxModal({
     opacity: overlayOpacity.value,
   }));
 
+  const requestDelete = useCallback(() => {
+    if (!onDelete || !currentUrl.trim() || deleting) return;
+    const kind = isVideoFileUrl(currentUrl, currentName)
+      ? 'video'
+      : currentIsImage
+        ? 'photo'
+        : 'file';
+    confirmDestructive(
+      `Delete ${kind}?`,
+      `This ${kind} will be permanently deleted.`,
+      () => onDelete(currentUrl)
+    );
+  }, [onDelete, currentUrl, currentName, currentIsImage, deleting]);
+
   const onShare = useCallback(async () => {
     if (!currentUrl.trim() || sharing) return;
     setSharing(true);
@@ -465,22 +570,32 @@ export function ImageLightboxModal({
       <GestureHandlerRootView style={styles.gestureRoot}>
         <View style={styles.root}>
           <Animated.View style={[styles.backdrop, backdropStyle]} />
-          <Animated.View style={[styles.header, { paddingTop: headerPadTop }, chromeStyle]}>
+          <Animated.View style={[styles.header, { paddingTop: headerPadTop }, chromeStyle]} pointerEvents="box-none">
             <View style={styles.headerLeft}>
-              {headerAvatar}
+              {resolvedAvatar}
               {hasHeader ? (
                 <View style={styles.headerTextCol}>
-                  {title ? <Text style={styles.headerTitle}>{title}</Text> : null}
-                  {subtitle ? <Text style={styles.headerSub}>{subtitle}</Text> : null}
+                  {resolvedTitle ? (
+                    <Text style={styles.headerTitle} numberOfLines={1}>
+                      {resolvedTitle}
+                    </Text>
+                  ) : null}
+                  {subtitle ? (
+                    <Text style={styles.headerSub} numberOfLines={1}>
+                      {subtitle}
+                    </Text>
+                  ) : null}
                 </View>
               ) : (
-                <Text style={styles.headerTitle}>{fallbackTitle}</Text>
+                <Text style={styles.headerTitle} numberOfLines={1}>
+                  {fallbackTitle}
+                </Text>
               )}
             </View>
             <View style={styles.headerActions}>
               {onDelete ? (
                 <TouchableOpacity
-                  onPress={() => onDelete(currentUrl)}
+                  onPress={requestDelete}
                   style={styles.iconBtn}
                   accessibilityLabel="Delete"
                   disabled={deleting || !currentUrl.trim()}
@@ -533,20 +648,26 @@ export function ImageLightboxModal({
                       ]}
                     >
                       {isDeletedImageSrc(url) || isImageFileUrl(url, names?.[i]) ? (
-                        <PostMediaImage
-                          storedUrl={url}
-                          style={styles.image}
-                          resizeMode="contain"
-                        />
+                        <View style={[styles.imageSlot, { paddingBottom: bottomPad }]}>
+                          <PostMediaImage
+                            storedUrl={url}
+                            style={styles.image}
+                            resizeMode="contain"
+                          />
+                        </View>
                       ) : isDeletedFileHref(url) ? (
-                        <FileExtensionPreview url={url} fileName={names?.[i]} variant="viewer" />
+                        <View style={[styles.filePage, { paddingTop: headerH }]}>
+                          <FileExtensionPreview url={url} fileName={names?.[i]} variant="viewer" />
+                        </View>
                       ) : Math.abs(i - safeIndex) <= 1 ? (
-                        <FileViewerBody
-                          storedUrl={url}
-                          fileName={names?.[i]}
-                          urlMap={normalizedUrlMap}
-                          active={visible && i === safeIndex}
-                        />
+                        <View style={[styles.filePage, { paddingTop: headerH }]}>
+                          <FileViewerBody
+                            storedUrl={url}
+                            fileName={names?.[i]}
+                            urlMap={normalizedUrlMap}
+                            active={visible && i === safeIndex}
+                          />
+                        </View>
                       ) : (
                         <View style={styles.image} />
                       )}
@@ -583,7 +704,7 @@ export function ImageLightboxModal({
 
             {showCounter && hasMany ? (
               <Animated.View
-                style={[styles.counterWrap, { bottom: Math.max(insets.bottom, 12) }, chromeStyle]}
+                style={[styles.counterWrap, { bottom: bottomPad }, chromeStyle]}
               >
                 <Text style={styles.counter}>
                   {safeIndex + 1} / {urls.length}
@@ -607,6 +728,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.93)',
   },
   header: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -670,6 +795,14 @@ const styles = StyleSheet.create({
   image: {
     width: '100%',
     height: '100%',
+  },
+  imageSlot: {
+    flex: 1,
+    width: '100%',
+  },
+  filePage: {
+    flex: 1,
+    width: '100%',
   },
   imagePlaceholder: {
     backgroundColor: 'transparent',

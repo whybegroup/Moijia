@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import * as WebBrowser from 'expo-web-browser';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Fonts, Radius } from '../constants/theme';
 import {
   isDirectRenderableImageUrl,
@@ -263,11 +264,10 @@ function GenericViewer({ uri, fileName }: { uri: string; fileName?: string }) {
   );
 }
 
-export function FileViewerBody({ storedUrl, fileName, urlMap, active }: Props) {
+function FileViewerBodyInner({ storedUrl, fileName, urlMap, active }: Props) {
   const kind = fileViewerKind(storedUrl, fileName);
   const viewUrl = useResolvedViewUrl(storedUrl, urlMap);
 
-  if (!storedUrl?.trim()) return null;
   if (isDeletedImageSrc(storedUrl)) {
     return (
       <View style={styles.center}>
@@ -307,7 +307,25 @@ export function FileViewerBody({ storedUrl, fileName, urlMap, active }: Props) {
   return <GenericViewer uri={viewUrl} fileName={fileName} />;
 }
 
+const PAGE_INDEX_GAP = 40;
+
+export function FileViewerBody({ storedUrl, fileName, urlMap, active }: Props) {
+  const insets = useSafeAreaInsets();
+  if (!storedUrl?.trim()) return null;
+  return (
+    <View style={[styles.body, { paddingBottom: Math.max(insets.bottom, 12) + PAGE_INDEX_GAP }]}>
+      <FileViewerBodyInner
+        storedUrl={storedUrl}
+        fileName={fileName}
+        urlMap={urlMap}
+        active={active}
+      />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  body: { flex: 1, width: '100%' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   deletedImage: { width: 160, height: 160 },
   audioWrap: {

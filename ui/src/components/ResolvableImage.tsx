@@ -10,7 +10,9 @@ import {
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/theme';
+import { isVideoFileUrl } from '../utils/fileKind';
 import { isDirectRenderableImageUrl, resolveImageViewUrls, toRenderableImageUrl } from '../services/resolveImageViewUrls';
 import {
   ensureCachedImageFileUri,
@@ -25,7 +27,21 @@ type Props = {
   urlMap?: Map<string, string>;
   onError?: () => void;
   placeholderStyle?: StyleProp<ViewStyle>;
+  /** Treat as video even when the URL has no file extension (local blob/file previews). */
+  treatAsVideo?: boolean;
 };
+
+export function VideoMediaPlaceholder({
+  style,
+}: {
+  style?: StyleProp<ImageStyle | ViewStyle>;
+}) {
+  return (
+    <View style={[style, styles.videoPh]} accessibilityLabel="Video">
+      <Ionicons name="play" size={22} color="#fff" />
+    </View>
+  );
+}
 
 /** Avoid `source={{ uri }}` identity churn on parent re-renders (e.g. typing in a nearby TextInput), which can reload images. */
 const StableUriImage = memo(function StableUriImage({
@@ -49,7 +65,7 @@ const StableUriImage = memo(function StableUriImage({
     }),
     [uri]
   );
-  return <Image source={source} style={style} resizeMode={resizeMode} onError={onError} />;
+  return <Image source={source} style={style} resizeMode={resizeMode} onError={onError} fadeDuration={0} />;
 });
 
 function useDisplayUri(
@@ -100,7 +116,9 @@ export function ResolvableImage({
   urlMap,
   onError,
   placeholderStyle,
+  treatAsVideo = false,
 }: Props) {
+  const asVideo = treatAsVideo || isVideoFileUrl(storedUrl);
   const mapped = storedUrl?.trim() && urlMap ? urlMap.get(storedUrl) : undefined;
   const [singleRemote, setSingleRemote] = useState<string | null>(() => {
     if (!storedUrl?.trim()) return null;
@@ -143,6 +161,10 @@ export function ResolvableImage({
     return null;
   }
 
+  if (asVideo) {
+    return <VideoMediaPlaceholder style={style} />;
+  }
+
   if (!displayUri?.trim()) {
     return (
       <View style={[style, styles.ph, placeholderStyle]}>
@@ -158,4 +180,10 @@ export function ResolvableImage({
 
 const styles = StyleSheet.create({
   ph: { backgroundColor: Colors.bg, alignItems: 'center', justifyContent: 'center' },
+  videoPh: {
+    backgroundColor: '#171717',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
 });

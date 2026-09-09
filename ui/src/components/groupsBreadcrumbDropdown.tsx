@@ -8,11 +8,11 @@ import {
   Pressable,
   TouchableOpacity,
   ScrollView,
-  Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Fonts, Shadows } from '../constants/theme';
 import { edgeToEdgeModalProps } from './edgeToEdgeModalProps';
+import { clampToWebAppColumn, toWebAppColumnX, webAppColumnWidth } from '../utils/webAppColumnCoords';
 
 export type BreadcrumbDropdownItem = {
   id: string;
@@ -33,11 +33,11 @@ export function breadcrumbDropdownLeft(
   anchorX?: number | null,
   menuWidth: number = BREADCRUMB_DROPDOWN_MENU_WIDTH
 ): number {
-  const windowWidth = Dimensions.get('window').width;
-  return Math.max(
-    12,
-    Math.min((anchorX ?? windowWidth - 12) - menuWidth + 20, windowWidth - menuWidth - 12)
-  );
+  const raw =
+    anchorX == null
+      ? webAppColumnWidth() - menuWidth - 12
+      : toWebAppColumnX(anchorX) - menuWidth + 20;
+  return clampToWebAppColumn(raw, menuWidth, 12);
 }
 
 export const groupsBreadcrumbDropdownStyles = StyleSheet.create({

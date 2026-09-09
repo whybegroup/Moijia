@@ -33,6 +33,7 @@ import {
 import { Colors, Fonts, Radius } from '../constants/theme';
 import { edgeToEdgeModalProps } from './edgeToEdgeModalProps';
 import { getGroupColor, getDefaultGroupThemeFromName } from '../utils/helpers';
+import { clampToWebAppColumn, toWebAppColumnX } from '../utils/webAppColumnCoords';
 import {
   filterCalendarEvents,
   getMyCalendarRsvpVisual,
@@ -432,15 +433,15 @@ export function CalendarView({
     const gap = 4;
     const menuW = Math.max(168, scopeMenuAnchor.width);
     const estMenuH = SCOPE_OPTIONS.length * 48 + 4;
-    let left = scopeMenuAnchor.left;
-    left = Math.min(Math.max(pad, left), winW - menuW - pad);
+    let left = toWebAppColumnX(scopeMenuAnchor.left);
+    left = clampToWebAppColumn(left, menuW, pad);
     let top = scopeMenuAnchor.top + scopeMenuAnchor.height + gap;
     const maxBottom = winH - Math.max(insets.bottom, pad) - pad;
     if (top + estMenuH > maxBottom) {
       top = Math.max(insets.top + pad, scopeMenuAnchor.top - estMenuH - gap);
     }
     return { top, left, width: menuW };
-  }, [scopeMenuAnchor, winH, winW, insets.bottom, insets.top]);
+  }, [scopeMenuAnchor, winH, insets.bottom, insets.top]);
 
   const weekBodyVerticalRef = useRef<ComponentRef<typeof GestureScrollView>>(null);
   const monthVerticalRef = useRef<ScrollView>(null);

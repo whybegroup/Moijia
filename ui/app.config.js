@@ -11,8 +11,25 @@ const iosUrlScheme = iosGoogleUrlScheme();
 const plugins = [
   'expo-router',
   'expo-font',
+  [
+    'expo-splash-screen',
+    {
+      backgroundColor: '#FAFAF9',
+      image: './assets/favicon.png',
+      imageWidth: 200,
+      resizeMode: 'contain',
+      ios: {
+        image: './assets/splash.png',
+        enableFullScreenImage_legacy: true,
+      },
+      android: {
+        image: './assets/favicon.png',
+        imageWidth: 200,
+      },
+    },
+  ],
   'expo-web-browser',
-  ['expo-audio', { microphonePermission: false, recordAudioAndroid: false }],
+  ['expo-audio', { microphonePermission: 'moijia can record video with sound.', recordAudioAndroid: true }],
   'expo-video',
   [
     'expo-build-properties',
@@ -38,8 +55,9 @@ const plugins = [
   [
     'expo-image-picker',
     {
-      photosPermission: 'moijia needs access to your photos to upload images to events.',
-      cameraPermission: 'moijia can use the camera to add photos to events.',
+      photosPermission: 'moijia needs access to your photos and videos to upload them.',
+      cameraPermission: 'moijia can use the camera to add photos and videos.',
+      microphonePermission: 'moijia can record video with sound.',
     },
   ],
   [
@@ -94,6 +112,11 @@ module.exports = {
       googleServicesFile: './google-services.json',
       adaptiveIcon: {
         backgroundColor: '#FAFAF9',
+      },
+      splash: {
+        image: './assets/favicon.png',
+        backgroundColor: '#FAFAF9',
+        resizeMode: 'contain',
       },
       package: 'com.moijia.moijia',
       /** Lets bottom sheets / modals shrink above the keyboard instead of covering inputs */

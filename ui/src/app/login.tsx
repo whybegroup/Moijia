@@ -3,7 +3,6 @@ import {
   View,
   Text,
   Image,
-  ImageBackground,
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
@@ -56,8 +55,9 @@ function nativeGoogleSignInHint(err: unknown): string | undefined {
 
 export default function LoginScreen() {
   const insets = useSafeAreaInsets();
-  const { height: windowHeight } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const sheetHeight = Math.round(windowHeight * 0.92);
+  const wideViewport = windowWidth / Math.max(windowHeight, 1) > 0.68;
   const [emailMode, setEmailMode] = useState<AuthMode | null>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -192,11 +192,14 @@ export default function LoginScreen() {
     (!!googleWebClientId && (Platform.OS !== 'ios' || !!googleIosClientId));
 
   return (
-    <ImageBackground
-      source={require('../../assets/splash.png')}
-      style={styles.container}
-      resizeMode="cover"
-    >
+    <View style={styles.container}>
+      <Image
+        source={require('../../assets/splash.png')}
+        style={[styles.bgImage, wideViewport && styles.bgImageWide]}
+        resizeMode={wideViewport ? 'contain' : 'cover'}
+        accessibilityElementsHidden
+        importantForAccessibility="no"
+      />
       <SafeAreaView style={styles.safe} edges={['left', 'right', 'bottom']}>
         <View style={styles.actions}>
           <TouchableOpacity
@@ -388,7 +391,7 @@ export default function LoginScreen() {
           </View>
         </View>
       </Modal>
-    </ImageBackground>
+    </View>
   );
 }
 
@@ -399,6 +402,14 @@ const styles = StyleSheet.create({
     height: '100%',
     backgroundColor: '#FAFAF9',
   },
+  bgImage: {
+    ...StyleSheet.absoluteFillObject,
+    width: '100%',
+    height: '100%',
+    pointerEvents: 'none',
+    ...(Platform.OS === 'web' ? ({ objectFit: 'cover', objectPosition: 'center center' } as object) : null),
+  },
+  bgImageWide: Platform.OS === 'web' ? ({ objectFit: 'contain' } as object) : {},
   safe: {
     flex: 1,
     justifyContent: 'flex-end',

@@ -5,12 +5,13 @@ type IoniconName = ComponentProps<typeof Ionicons>['name'];
 
 const IMAGE_EXT = /^(png|jpe?g|gif|webp|bmp|heic|heif|svg|avif)$/i;
 const AUDIO_EXT = /^(mp3|wav|m4a|aac|ogg|flac|opus|wma)$/i;
-const VIDEO_EXT = /^(mp4|mov|webm|m4v|avi|mkv)$/i;
+const VIDEO_EXT = /^(mp4|mov|webm|m4v|avi|mkv|gifv)$/i;
+const MEDIA_URL_EXT = /\.(png|jpe?g|gif|gifv|webp|bmp|svg|avif|heic|heif|mp4|mov|webm|m4v|avi|mkv)(\?.*)?$/i;
 const TEXT_EXT = /^(txt|json|csv|md|xml|log|css|js|ts)$/i;
 const HTML_EXT = /^(html|htm)$/i;
 const DOCUMENT_EXT = /^(zip|docx?|xlsx?|pptx?|rtf|odt|ods|odp)$/i;
 const NON_IMAGE_EXT =
-  /^(pdf|docx?|xlsx?|csv|pptx?|zip|json|txt|rtf|html|htm|odt|ods|odp|mp3|wav|m4a|aac|ogg|flac|opus|wma|mp4|mov|webm|m4v|avi|mkv)$/i;
+  /^(pdf|docx?|xlsx?|csv|pptx?|zip|json|txt|rtf|html|htm|odt|ods|odp|mp3|wav|m4a|aac|ogg|flac|opus|wma|mp4|mov|webm|m4v|avi|mkv|gifv)$/i;
 
 export type FileViewerKind = 'image' | 'audio' | 'video' | 'pdf' | 'html' | 'text' | 'document' | 'other';
 
@@ -60,7 +61,42 @@ export function isImageFileUrl(url: string, fileName?: string): boolean {
   if (!u) return false;
   if (/\.(pdf|docx?|xlsx?|csv|pptx?|zip|json|txt)(\?.*)?$/i.test(u)) return false;
   if (/\.(png|jpe?g|gif|webp|bmp|heic|heif|svg|avif)(\?.*)?$/i.test(u)) return true;
-  return /\/storage\//i.test(u);
+  if (isKnownGifHost(u)) return true;
+  return (
+    (/\/storage\//i.test(u) || /\/f\/[^/]+\/[^/]+/i.test(u)) &&
+    !isVideoFileUrl(u, fileName)
+  );
+}
+
+export function isVideoFileUrl(url: string, fileName?: string): boolean {
+  const ext = extensionFromFileNameOrUrl(fileName?.trim() || url);
+  if (ext) return VIDEO_EXT.test(ext);
+  const u = url.trim();
+  if (!u) return false;
+  return /\.(mp4|mov|webm|m4v|avi|mkv|gifv)(\?.*)?$/i.test(u);
+}
+
+/** Direct image, GIF, or video URL (upload picker + insert-link). */
+export function looksLikeMediaUrl(url: string, fileName?: string): boolean {
+  const u = url.trim();
+  if (!u) return false;
+  if (isImageFileUrl(u, fileName) || isVideoFileUrl(u, fileName)) return true;
+  if (MEDIA_URL_EXT.test(u)) return true;
+  return isKnownGifHost(u);
+}
+
+function isKnownGifHost(url: string): boolean {
+  try {
+    const host = new URL(url.trim()).hostname.toLowerCase();
+    return (
+      host === 'giphy.com' ||
+      host.endsWith('.giphy.com') ||
+      host === 'tenor.com' ||
+      host.endsWith('.tenor.com')
+    );
+  } catch {
+    return false;
+  }
 }
 
 export function displayFileName(url: string, fileName?: string): string {
@@ -134,6 +170,7 @@ export function fileKindStyle(url: string, fileName?: string): FileKindStyle {
     case 'm4v':
     case 'avi':
     case 'mkv':
+    case 'gifv':
       return { icon: 'videocam-outline', color: '#7C3AED', label };
     default:
       return { icon: 'document-outline', color: '#71717A', label };

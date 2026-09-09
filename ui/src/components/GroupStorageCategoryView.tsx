@@ -21,9 +21,11 @@ import { useMissingGroupRedirect } from '../hooks/useMissingResourceAlert';
 import { ResolvableImage } from './ResolvableImage';
 import { ImageLightboxModal } from './ImageLightboxModal';
 import { FileExtensionPreview } from './FileExtensionPreview';
+import { UserAvatar } from './UserAvatar';
 import { apiErrorMessage } from '../utils/apiErrors';
+import { confirmDestructive } from '../utils/confirmDestructive';
 import { formatStorageBytes } from '../utils/groupStorage';
-import { displayFileName, isImageFileUrl } from '../utils/fileKind';
+import { displayFileName, isImageFileUrl, isVideoFileUrl } from '../utils/fileKind';
 import {
   isGroupStorageCategory,
   GROUP_STORAGE_CATEGORY_LABELS,
@@ -98,6 +100,8 @@ export function GroupStorageCategoryView({
 
   const files = list?.files ?? [];
   const urls = useMemo(() => files.map((f) => f.url), [files]);
+  const currentFile = lightboxIndex != null ? files[lightboxIndex] : undefined;
+  const uploaderName = currentFile?.uploadedByName?.trim();
   const deletableUrls = useMemo(
     () => files.filter((f) => fileIsDeletable(f, !!isAdmin)).map((f) => f.url),
     [files, isAdmin]
@@ -149,6 +153,29 @@ export function GroupStorageCategoryView({
     });
   }, [deletableUrls]);
 
+  const performDelete = useCallback(
+    async (listToDelete: string[]) => {
+      if (listToDelete.length === 0) return;
+      const many = listToDelete.length > 1;
+      try {
+        await deleteFile.mutateAsync(listToDelete);
+        setSelected(new Set());
+        setSelecting(false);
+        setLightboxIndex((idx) => {
+          if (idx == null) return null;
+          const remaining = urls.filter((u) => !listToDelete.includes(u));
+          if (remaining.length === 0) return null;
+          return Math.min(idx, remaining.length - 1);
+        });
+      } catch (e) {
+        const msg = apiErrorMessage(e, many ? 'Could not delete files' : 'Could not delete file');
+        if (Platform.OS === 'web') window.alert(msg);
+        else Alert.alert('Error', msg);
+      }
+    },
+    [deleteFile, urls]
+  );
+
   const confirmDelete = useCallback(
     (toDelete: string | string[]) => {
       const listToDelete = (Array.isArray(toDelete) ? toDelete : [toDelete]).filter((u) =>
@@ -156,39 +183,13 @@ export function GroupStorageCategoryView({
       );
       if (listToDelete.length === 0) return;
       const many = listToDelete.length > 1;
-      const run = async () => {
-        try {
-          await deleteFile.mutateAsync(listToDelete);
-          setSelected(new Set());
-          setSelecting(false);
-          setLightboxIndex((idx) => {
-            if (idx == null) return null;
-            const remaining = urls.filter((u) => !listToDelete.includes(u));
-            if (remaining.length === 0) return null;
-            return Math.min(idx, remaining.length - 1);
-          });
-        } catch (e) {
-          const msg = apiErrorMessage(e, many ? 'Could not delete files' : 'Could not delete file');
-          if (Platform.OS === 'web') window.alert(msg);
-          else Alert.alert('Error', msg);
-        }
-      };
       const title = many ? `Delete ${listToDelete.length} files` : 'Delete file';
       const message = many
         ? 'These files will be removed from the group and deleted from storage.'
         : 'This file will be removed from the group and deleted from storage.';
-      if (Platform.OS === 'web') {
-        if (window.confirm(many ? `Delete ${listToDelete.length} files from the group?` : 'Delete this file from the group?')) {
-          void run();
-        }
-        return;
-      }
-      Alert.alert(title, message, [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => void run() },
-      ]);
+      confirmDestructive(title, message, () => void performDelete(listToDelete));
     },
-    [deleteFile, urls, deletableSet]
+    [deletableSet, performDelete]
   );
 
   if (!group || !canView || !validCategory) {
@@ -257,7 +258,7 @@ export function GroupStorageCategoryView({
               {files.map((file, i) => {
                 const isSelected = selected.has(file.url);
                 const canDelete = fileIsDeletable(file, !!isAdmin);
-                const isImage = isImageFileUrl(file.url, file.fileName);
+                const isImage = isImageFileUrl(file.url, file.fileName) || isVideoFileUrl(file.url, file.fileName);
                 const shownName = displayFileName(file.url, file.fileName);
                 return (
                   <View key={`${file.url}-${i}`} style={[styles.tileWrap, { width: tile, height: tile }]}>
@@ -354,11 +355,26 @@ export function GroupStorageCategoryView({
         index={lightboxIndex ?? 0}
         onChangeIndex={(i) => setLightboxIndex(i)}
         onClose={() => setLightboxIndex(null)}
-        title={lightboxIndex != null ? files[lightboxIndex]?.sourceLabel || label : label}
+        headerAvatar={
+          uploaderName ? (
+            <UserAvatar
+              seed={uploaderName}
+              backgroundColor={[currentFile?.uploadedByAvatarSeed ?? '']}
+              thumbnail={currentFile?.uploadedByThumbnail ?? null}
+              size={28}
+            />
+          ) : undefined
+        }
+        title={uploaderName || currentFile?.sourceLabel || label}
+        subtitle={
+          uploaderName && currentFile?.sourceLabel && currentFile.sourceLabel !== uploaderName
+            ? currentFile.sourceLabel
+            : undefined
+        }
         showCounter
         onDelete={
           lightboxIndex != null && fileIsDeletable(files[lightboxIndex] ?? {}, !!isAdmin)
-            ? confirmDelete
+            ? (url) => void performDelete([url])
             : undefined
         }
         deleting={deleteFile.isPending}

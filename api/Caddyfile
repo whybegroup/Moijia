@@ -25,6 +25,12 @@ moijia.com {
                 reverse_proxy 127.0.0.1:3000
         }
 
+        handle /f/* {
+                reverse_proxy 127.0.0.1:3000 {
+                        flush_interval -1
+                }
+        }
+
         handle {
                 try_files {path} /index.html
                 file_server

@@ -29,8 +29,8 @@ export function AddImageButton({
   tile = false,
   label = 'Add photo',
   triggerIconName = 'camera-outline',
-  optionsModalTitle = 'Insert image',
-  linkModalTitle = 'Insert image link',
+  optionsModalTitle = 'Add photo or video',
+  linkModalTitle = 'Insert media link',
   onTakePhoto,
   onChooseFromLibrary,
   onInsertLink,
@@ -81,7 +81,7 @@ export function AddImageButton({
                   }}
                 >
                   <Ionicons name="camera-outline" size={16} color={Colors.textSub} />
-                  <Text style={styles.optionText}>Take photo</Text>
+                  <Text style={styles.optionText}>Take photo or video</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.optionBtn}
@@ -119,7 +119,7 @@ export function AddImageButton({
                 <TextInput
                   value={linkUrl}
                   onChangeText={setLinkUrl}
-                  placeholder="https://example.com/image.jpg"
+                  placeholder="https://example.com/image.gif or video.mp4"
                   placeholderTextColor={Colors.textMuted}
                   autoCapitalize="none"
                   autoCorrect={false}

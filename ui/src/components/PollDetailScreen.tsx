@@ -1300,15 +1300,7 @@ export function PollDetailScreen({
         Alert.alert('Could not delete photo', apiErrorMessage(e));
       }
     };
-    const go = () => void run();
-    if (Platform.OS === 'web') {
-      if (window.confirm('Delete this photo from the poll?')) go();
-      return;
-    }
-    Alert.alert('Delete photo?', 'This photo will be removed from the poll and deleted.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: go },
-    ]);
+    void run();
   };
 
   const onClosePoll = useCallback(() => {

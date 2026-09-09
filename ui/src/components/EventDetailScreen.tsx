@@ -44,7 +44,6 @@ import { usePathname, useNavigation, useLocalSearchParams, type Href } from 'exp
 import { useAppRouter as useRouter } from '../hooks/useAppRouter';
 import { Colors, Fonts, Radius, Shadows } from '../constants/theme';
 import { COMMENT_REACTION_EMOJIS } from '../constants/commentReactionEmojis';
-import { DEFAULT_COMMENT_QUICK_REACTIONS_LIST } from '../utils/commentQuickReactionsPrefs';
 import {
   getGroupColor,
   getDefaultGroupThemeFromName,
@@ -85,7 +84,6 @@ import {
   useAcceptTimeSuggestion,
   useRejectTimeSuggestion,
 } from '../hooks/api';
-import { useCommentQuickReactions } from '../hooks/useCommentQuickReactions';
 import { uid, getNoResponseIds } from '../utils/api-helpers';
 import type { CommentInput, EventDetailed, GroupScoped, RSVP, User } from '@moijia/client';
 import { RSVPInput, MembershipStatus, EventUpdate } from '@moijia/client';
@@ -94,9 +92,8 @@ import DateTimePicker from './AppDateTimePicker';
 import { useCurrentUserContext } from '../contexts/CurrentUserContext';
 import { ResolvableImage } from './ResolvableImage';
 import { FileExtensionPreview } from './FileExtensionPreview';
-import { isImageFileUrl } from '../utils/fileKind';
+import { isImageFileUrl, isVideoFileUrl } from '../utils/fileKind';
 import { ReactionEmojiGlyph } from './ReactionEmojiGlyph';
-import { EmojiBar } from './EmojiBar';
 import { ImageLightboxModal } from './ImageLightboxModal';
 import { dropLightboxItem } from './ForumPostMarkdownBody';
 import { AddImageButton } from './AddImageButton';
@@ -108,6 +105,7 @@ import {
 } from '../services/pickAndUploadImage';
 import { deleteManagedUploadFireAndForget } from '../services/managedUploadDelete';
 import { canDeleteManagedMedia } from '../utils/canDeleteManagedMedia';
+import { confirmDestructive } from '../utils/confirmDestructive';
 import { useResolvedImageUrls } from '../hooks/useResolvedImageUrls';
 import { useLocationSuggestions } from '../hooks/useLocationSuggestions';
 import {
@@ -235,7 +233,7 @@ function CommentPhotoGallery({
           onPress={() => onPhotoPress(photo, index)}
           activeOpacity={0.8}
         >
-          {isImageFileUrl(photo) ? (
+          {isImageFileUrl(photo) || isVideoFileUrl(photo) ? (
             <ResolvableImage
               storedUrl={photo}
               urlMap={urlMap}
@@ -460,8 +458,6 @@ export function EventDetailScreen({
   const updateCommentMutation = useUpdateComment(eventId || '', currentUserId);
   const deleteCommentMutation = useDeleteComment(eventId || '', currentUserId);
   const commentReactionMutation = useCommentReaction(eventId || '', currentUserId);
-  const { data: commentQuickReactions = [...DEFAULT_COMMENT_QUICK_REACTIONS_LIST] } =
-    useCommentQuickReactions(currentUserId);
   const deleteEventMutation = useDeleteEvent(currentUserId ?? '');
   const deleteRecurrenceSeriesMutation = useDeleteRecurrenceSeries(currentUserId ?? '');
   const truncateSeriesMutation = useTruncateRecurrenceSeries(currentUserId ?? '');
@@ -559,16 +555,6 @@ export function EventDetailScreen({
   const [commentEdit, setCommentEdit] = useState<{ commentId: string } | null>(null);
   const [commentEditText, setCommentEditText] = useState('');
   const [commentEditParentId, setCommentEditParentId] = useState<string | null>(null);
-  const [reactionQuickPickerTarget, setReactionQuickPickerTarget] = useState<{
-    kind: 'comment';
-    id: string;
-  } | null>(null);
-  const [reactionQuickPickerAnchor, setReactionQuickPickerAnchor] = useState<{
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  } | null>(null);
   const [reactionPickerTarget, setReactionPickerTarget] = useState<{
     kind: 'comment';
     id: string;
@@ -606,53 +592,22 @@ export function EventDetailScreen({
   useEnsureFocusedInputAboveKeyboard(scrollRef, scrollOffsetYRef);
   const androidKbPad = useAndroidKeyboardContentPad();
   const [eventCommentsAncestorTopPx, setEventCommentsAncestorTopPx] = useState(0);
-  const reactionButtonRefs = useRef<Record<string, View | null>>({});
   const insets = useSafeAreaInsets();
 
   const applyReactionAndDismissForum = useCallback(
     (emoji: string) => {
-      const target = reactionQuickPickerTarget ?? reactionPickerTarget;
+      const target = reactionPickerTarget;
       if (!target) return;
       commentReactionMutation.mutate({ commentId: target.id, emoji });
-      setReactionQuickPickerTarget(null);
-      setReactionQuickPickerAnchor(null);
       setReactionPickerTarget(null);
     },
-    [reactionQuickPickerTarget, reactionPickerTarget, commentReactionMutation],
+    [reactionPickerTarget, commentReactionMutation],
   );
-
-  const openReactionQuickPickerForum = useCallback((commentId: string) => {
-    const nextTarget = { kind: 'comment' as const, id: commentId };
-    const node = reactionButtonRefs.current[`comment:${commentId}`] as
-      | (View & { measureInWindow: (cb: (x: number, y: number, w: number, h: number) => void) => void })
-      | null;
-    if (!node?.measureInWindow) {
-      setReactionQuickPickerAnchor(null);
-      setReactionQuickPickerTarget(nextTarget);
-      return;
-    }
-    node.measureInWindow((x, y, width, height) => {
-      setReactionQuickPickerAnchor({ x, y, width, height });
-      setReactionQuickPickerTarget(nextTarget);
-    });
-  }, []);
 
   const openReactionDetailModalForum = useCallback((payload: { emoji: string; userIds: string[] }) => {
     setReactionDetailModalForum(payload);
   }, []);
 
-  const quickPickerStyleForum = useMemo(() => {
-    const screenWidth = Dimensions.get('window').width;
-    const cardWidth = 316;
-    const cardHeight = 62;
-    const margin = 10;
-    if (!reactionQuickPickerAnchor) return { top: 120, left: (screenWidth - cardWidth) / 2 };
-    const centeredLeft =
-      reactionQuickPickerAnchor.x + reactionQuickPickerAnchor.width / 2 - cardWidth / 2;
-    const left = Math.max(margin, Math.min(screenWidth - cardWidth - margin, centeredLeft));
-    const top = Math.max(12, reactionQuickPickerAnchor.y - cardHeight - 8);
-    return { top, left };
-  }, [reactionQuickPickerAnchor]);
   const [draftName, setDraftName] = useState('');
   const [draftDesc, setDraftDesc] = useState('');
   const [draftLocation, setDraftLocation] = useState('');
@@ -1942,24 +1897,9 @@ export function EventDetailScreen({
     }
   };
 
-  const removeCoverPhotoAt = async (index: number) => {
-    if (!currentUserId || !canEditPhotos) return;
-    const prev = localCoverPhotos;
-    const removed = prev[index];
-    const next = prev.filter((_, j) => j !== index);
-    setLocalCoverPhotos(next);
-    try {
-      await persistCoverPhotos(next);
-      if (removed) deleteManagedUploadFireAndForget(currentUserId, removed);
-    } catch {
-      setLocalCoverPhotos(prev);
-      Alert.alert('Error', 'Failed to remove photo');
-    }
-  };
-
   const confirmRemoveEventCoverPhoto = (url: string) => {
     if (!currentUserId || !canEditPhotos) return;
-    const run = async () => {
+    void (async () => {
       const prev = localCoverPhotos;
       const next = prev.filter((u) => u !== url);
       if (next.length === prev.length) return;
@@ -1972,16 +1912,17 @@ export function EventDetailScreen({
         setLocalCoverPhotos(prev);
         Alert.alert('Error', 'Failed to remove photo');
       }
-    };
-    const go = () => void run();
-    if (Platform.OS === 'web') {
-      if (window.confirm('Delete this photo from the event?')) go();
-      return;
-    }
-    Alert.alert('Delete photo?', 'This photo will be removed from the event and deleted.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: go },
-    ]);
+    })();
+  };
+
+  const removeCoverPhotoAt = (index: number) => {
+    const removed = localCoverPhotos[index];
+    if (!removed) return;
+    confirmDestructive(
+      'Delete photo?',
+      'This photo will be removed from the event and deleted.',
+      () => confirmRemoveEventCoverPhoto(removed)
+    );
   };
 
   const confirmDeleteEventCommentPhoto = (
@@ -2021,15 +1962,7 @@ export function EventDetailScreen({
         Alert.alert('Error', 'Could not delete photo');
       }
     };
-    const go = () => void run();
-    if (Platform.OS === 'web') {
-      if (window.confirm('Delete this photo from the comment?')) go();
-      return;
-    }
-    Alert.alert('Delete photo?', 'This photo will be removed from the comment and deleted.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: go },
-    ]);
+    void run();
   };
 
   const addCoverPhotoFromPicker = async () => {
@@ -3147,6 +3080,7 @@ export function EventDetailScreen({
             scrollViewportYRef={scrollViewportYRef}
             scrollOffsetYRef={scrollOffsetYRef}
             currentUserId={currentUserId}
+            canModerateComments={isGroupAdminOrOwner}
             getUserDisplayName={(uid) => getUserSafe(uid).displayName}
             formatCommentTime={formatForumCommentTime}
             draftText={commentDraft}
@@ -3187,13 +3121,14 @@ export function EventDetailScreen({
               commentReactionMutation.mutate({ commentId, emoji })
             }
             onReactionChipLongPress={openReactionDetailModalForum}
-            onOpenReactionQuickPicker={openReactionQuickPickerForum}
+            onOpenFullReactionPicker={(commentId) =>
+              setReactionPickerTarget({ kind: 'comment', id: commentId })
+            }
             onBeginEdit={beginEditEventComment}
             confirmDeleteComment={confirmDeleteEventComment}
             mentionMembers={mentionMembersForInput}
             focusCommentId={focusCommentId}
             containerStyle={styles.forumPostCommentsSection}
-            reactionButtonRefs={reactionButtonRefs}
             renderAvatar={(userId, displayName) => (
               <UserAvatar
                 seed={displayName}
@@ -3247,48 +3182,6 @@ export function EventDetailScreen({
 
         <View style={{ height: 100 }} />
       </GestureScrollView>
-
-      {reactionQuickPickerTarget && currentUserId ? (
-        <Modal
-          {...edgeToEdgeModalProps}
-          visible
-          transparent
-          animationType="fade"
-          presentationStyle={Platform.OS === 'ios' ? 'overFullScreen' : undefined}
-          onRequestClose={() => {
-            setReactionQuickPickerTarget(null);
-            setReactionQuickPickerAnchor(null);
-          }}
-          statusBarTranslucent
-        >
-          <View style={styles.commentReactionPickerRoot}>
-            <Pressable
-              style={StyleSheet.absoluteFill}
-              onPress={() => {
-                setReactionQuickPickerTarget(null);
-                setReactionQuickPickerAnchor(null);
-              }}
-              accessibilityRole="button"
-              accessibilityLabel="Close quick reactions"
-            />
-            <View style={styles.commentReactionQuickPickerRoot} pointerEvents="box-none">
-              <View style={[styles.commentReactionQuickPickerCard, quickPickerStyleForum]} pointerEvents="auto">
-                <EmojiBar
-                  quickReactions={commentQuickReactions}
-                  onPressReaction={applyReactionAndDismissForum}
-                  onPressViewAll={() => {
-                    setReactionPickerTarget(reactionQuickPickerTarget);
-                    setReactionQuickPickerTarget(null);
-                    setReactionQuickPickerAnchor(null);
-                  }}
-                  disabled={commentReactionMutation.isPending}
-                  viewAllAccessibilityLabel="View all emojis"
-                />
-              </View>
-            </View>
-          </View>
-        </Modal>
-      ) : null}
 
       {reactionPickerTarget && currentUserId ? (
         <Modal
@@ -3430,7 +3323,7 @@ export function EventDetailScreen({
         onChangeIndex={(nextIndex) => setLightbox((prev) => (prev ? { ...prev, index: nextIndex } : prev))}
         onClose={() => setLightbox(null)}
         onDelete={lightbox?.onDelete}
-        headerAvatar={lightbox ? <Avatar name={lightbox.name} size={28} /> : undefined}
+        headerAvatar={lightbox ? <UserAvatar seed={lightbox.name} size={28} /> : undefined}
         title={lightbox?.name}
         subtitle={
           lightbox
@@ -4971,20 +4864,6 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: Colors.borderStrong,
     overflow: 'hidden',
-  },
-  commentReactionQuickPickerRoot: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  commentReactionQuickPickerCard: {
-    position: 'absolute',
-    width: 316,
-    borderRadius: Radius['2xl'],
-    backgroundColor: Colors.surface,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.border,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    ...Shadows.md,
   },
   forumReactionDetailCard: {
     width: '100%',

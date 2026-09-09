@@ -228,6 +228,10 @@ export interface GroupStorageFileItem {
   sourceLabel?: string;
   /** Original or derived file name (used for non-image tiles). */
   fileName?: string;
+  /** Display name of the member who uploaded this file. */
+  uploadedByName?: string;
+  uploadedByAvatarSeed?: string | null;
+  uploadedByThumbnail?: string | null;
   /** Viewer may delete this file (owner/admin, or the member who uploaded it). */
   canDelete: boolean;
 }

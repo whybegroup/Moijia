@@ -20,10 +20,13 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { store } from '../store';
 import { queryClient } from '../config/queryClient';
 import { refreshAppOnResume } from '../utils/refreshAppOnResume';
+import { prefetchTwemojiAssets } from '../services/twemojiCache';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import { CurrentUserProvider } from '../contexts/CurrentUserContext';
 import { PushNotificationsRegistrar } from '../components/PushNotificationsRegistrar';
 import { ForegroundNotificationBanner } from '../components/ForegroundNotificationBanner';
+import { WebAppFrame } from '../components/WebAppFrame';
+import { OverflowMenuHostProvider } from '../components/OverflowMenuHost';
 import { NavigationGuardReset } from '../components/NavigationGuardReset';
 import { firstSearchParam, parseReturnToParam, withReturnTo } from '../utils/navigationReturn';
 
@@ -127,6 +130,10 @@ export default function RootLayout() {
     if (fontsLoaded || fontError) SplashScreen.hideAsync();
   }, [fontsLoaded, fontError]);
 
+  useEffect(() => {
+    prefetchTwemojiAssets();
+  }, []);
+
   // Refetch visible data when returning from background (native only).
   useEffect(() => {
     if (Platform.OS === 'web') return;
@@ -156,6 +163,8 @@ export default function RootLayout() {
           <CurrentUserProvider>
             {Platform.OS !== 'web' ? <PushNotificationsRegistrar /> : null}
             <GestureHandlerRootView style={{ flex: 1 }}>
+              <OverflowMenuHostProvider>
+              <WebAppFrame>
               <SafeAreaProvider>
                 <StatusBar style="dark" />
                 <RootLayoutNav />
@@ -163,6 +172,8 @@ export default function RootLayout() {
                 <UploadProgressBanner />
                 {Platform.OS !== 'web' ? <ForegroundNotificationBanner /> : null}
               </SafeAreaProvider>
+              </WebAppFrame>
+              </OverflowMenuHostProvider>
             </GestureHandlerRootView>
           </CurrentUserProvider>
         </AuthProvider>

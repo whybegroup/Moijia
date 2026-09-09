@@ -1011,8 +1011,8 @@ export class GroupService {
       },
     });
     if (!post) throw new Error('Post not found');
-    if (post.userId !== userId) {
-      throw new Error('You can only delete your own post');
+    if (post.userId !== userId && !(await this.isActiveAdminOrOwner(post.groupId, userId))) {
+      throw httpError(403, 'You can only delete your own post');
     }
     await this.requireActiveMember(post.groupId, userId);
     const urlsToPurge = [
@@ -1256,8 +1256,8 @@ export class GroupService {
       include: { post: { select: { groupId: true } } },
     });
     if (!comment) throw new Error('Comment not found');
-    if (comment.userId !== userId) {
-      throw new Error('You can only delete your own comment');
+    if (comment.userId !== userId && !(await this.isActiveAdminOrOwner(comment.post.groupId, userId))) {
+      throw httpError(403, 'You can only delete your own comment');
     }
     await this.requireActiveMember(comment.post.groupId, userId);
     const urlsToPurge = extractUploadUrlsFromForumBody(comment.body);

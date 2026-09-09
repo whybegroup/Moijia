@@ -20,7 +20,7 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Fonts, Radius, Shadows } from '../constants/theme';
 import { edgeToEdgeModalProps } from './edgeToEdgeModalProps';
 import { getGroupColor, getDefaultGroupThemeFromName, groupAvatarBorderRadius } from '../utils/helpers';
-import { formSectionTitleStyle, Avatar, Sheet } from './ui';
+import { formSectionTitleStyle, Sheet } from './ui';
 import {
   useGroup,
   useUsers,
@@ -44,6 +44,7 @@ import { GroupAvatar } from './GroupAvatar';
 import { AvatarPickerModal } from './AvatarPickerModal';
 import { UserAvatar } from './UserAvatar';
 import { deleteManagedUploadFireAndForget } from '../services/managedUploadDelete';
+import { confirmDestructive } from '../utils/confirmDestructive';
 import { ResolvableImage } from './ResolvableImage';
 import { pickAndUploadCoverPhoto, takeAndUploadCoverPhoto } from '../services/pickAndUploadImage';
 import Toast from 'react-native-toast-message';
@@ -623,28 +624,19 @@ export function GroupDetailView({ groupId }: GroupDetailViewProps) {
   const coverPhotosForDisplay = isAdmin ? localCoverPhotos : (group.coverPhotos ?? []);
   const showGroupCoverSection = true;
 
-  const removeCoverPhotoAt = async (index: number) => {
-    if (!currentUserId || !canEditPhotos) return;
-    const prev = localCoverPhotos;
-    const removed = prev[index];
-    const next = prev.filter((_, j) => j !== index);
-    setLocalCoverPhotos(next);
-    try {
-      await updateGroup.mutateAsync({
-        coverPhotos: next,
-        updatedBy: currentUserId,
-      });
-      if (removed) deleteManagedUploadFireAndForget(currentUserId, removed);
-    } catch {
-      setLocalCoverPhotos(prev);
-      if (Platform.OS === 'web') window.alert('Failed to remove photo');
-      else Alert.alert('Error', 'Failed to remove photo');
-    }
+  const removeCoverPhotoAt = (index: number) => {
+    const removed = localCoverPhotos[index];
+    if (!removed) return;
+    confirmDestructive(
+      'Delete photo?',
+      'This photo will be removed from the group and deleted.',
+      () => confirmRemoveGroupCoverPhoto(removed)
+    );
   };
 
   const confirmRemoveGroupCoverPhoto = (url: string) => {
     if (!currentUserId || !canEditPhotos) return;
-    const run = async () => {
+    void (async () => {
       const prev = localCoverPhotos;
       const next = prev.filter((u) => u !== url);
       if (next.length === prev.length) return;
@@ -661,16 +653,7 @@ export function GroupDetailView({ groupId }: GroupDetailViewProps) {
         if (Platform.OS === 'web') window.alert('Failed to remove photo');
         else Alert.alert('Error', 'Failed to remove photo');
       }
-    };
-    const go = () => void run();
-    if (Platform.OS === 'web') {
-      if (window.confirm('Delete this photo from the group?')) go();
-      return;
-    }
-    Alert.alert('Delete photo?', 'This photo will be removed from the group and deleted.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: go },
-    ]);
+    })();
   };
 
   const addCoverPhoto = async (url: string | string[]) => {
@@ -1160,8 +1143,6 @@ export function GroupDetailView({ groupId }: GroupDetailViewProps) {
         }
         onClose={() => setGroupPhotoLightbox(null)}
         onDelete={canEditPhotos ? confirmRemoveGroupCoverPhoto : undefined}
-        headerAvatar={<Avatar name={group.name} size={28} />}
-        title={group.name}
         subtitle={
           groupPhotoLightbox
             ? groupPhotoLightbox.urls.length > 1

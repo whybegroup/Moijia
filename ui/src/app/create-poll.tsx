@@ -48,11 +48,13 @@ import {
   uploadCoverPhotoDrafts,
   revokeCoverPhotoDraftPreview,
   coverPhotoDraftDisplayUri,
+  coverPhotoDraftIsVideo,
   isCancelled,
   ensureGroupCanUpload,
   type CoverPhotoDraft,
 } from '../services/pickAndUploadImage';
 import { firstSearchParam, parseReturnToParam } from '../utils/navigationReturn';
+import { confirmDestructive } from '../utils/confirmDestructive';
 
 const MAX_OPTIONS_PER_QUESTION = 50;
 
@@ -405,10 +407,12 @@ export default function CreatePollScreen() {
   };
 
   const removeCoverPhotoAt = (index: number) => {
-    setForm((p) => {
-      const d = p.coverPhotoDrafts[index];
-      if (d) revokeCoverPhotoDraftPreview(d);
-      return { ...p, coverPhotoDrafts: p.coverPhotoDrafts.filter((_, j) => j !== index) };
+    confirmDestructive('Delete photo?', 'This photo will be permanently deleted.', () => {
+      setForm((p) => {
+        const d = p.coverPhotoDrafts[index];
+        if (d) revokeCoverPhotoDraftPreview(d);
+        return { ...p, coverPhotoDrafts: p.coverPhotoDrafts.filter((_, j) => j !== index) };
+      });
     });
   };
 
@@ -932,7 +936,7 @@ export default function CreatePollScreen() {
                   coverPhotoFileInputRef.current = el;
                 }}
                 type="file"
-                accept="image/*"
+                accept="image/*,video/*,.gif,.gifv,.mp4,.mov,.webm"
                 multiple
                 style={{ display: 'none' }}
                 onChange={(e) => void onCoverPhotoWebFileChange(e)}
@@ -953,6 +957,7 @@ export default function CreatePollScreen() {
                     <View key={`${i}-${coverPhotoDraftDisplayUri(d)}`} style={{ position: 'relative' }}>
                       <ResolvableImage
                         storedUrl={coverPhotoDraftDisplayUri(d)}
+                        treatAsVideo={coverPhotoDraftIsVideo(d)}
                         style={{ width: 80, height: 80, borderRadius: Radius.lg }}
                         resizeMode="cover"
                       />

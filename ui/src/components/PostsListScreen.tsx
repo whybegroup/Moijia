@@ -23,12 +23,11 @@ import Toast from 'react-native-toast-message';
 import { Colors, Fonts, Radius, Shadows } from '../constants/theme';
 import { edgeToEdgeModalProps } from './edgeToEdgeModalProps';
 import { queryKeys } from '../config/queryClient';
+import { AnchoredOverflowMenu } from './AnchoredOverflowMenu';
 import { COMMENT_THREAD_OPTIONS_MENU_WIDTH, ThreadedCommentsSection, type ThreadComment } from './ThreadedCommentsSection';
 import { COMMENT_REACTION_EMOJIS } from '../constants/commentReactionEmojis';
-import { DEFAULT_COMMENT_QUICK_REACTIONS_LIST } from '../utils/commentQuickReactionsPrefs';
-import { useCommentQuickReactions } from '../hooks/useCommentQuickReactions';
 import { computeMentionUserIdsForPost, type MentionMemberRow } from '../utils/mentionUtils';
-import { EmojiBar } from './EmojiBar';
+import { ReactionQuickPicker } from './ReactionQuickPicker';
 import { ReactionEmojiGlyph } from './ReactionEmojiGlyph';
 import {
   getGroupColor,
@@ -58,6 +57,7 @@ import { ImageLightboxModal } from './ImageLightboxModal';
 import { FileExtensionIcon } from './FileExtensionPreview';
 import { PostAttachmentFileRow, PostMediaImage } from './DeletedPostMedia';
 import { isDeletedMediaUrl } from '../utils/deletedMedia';
+import { looksLikeMediaUrl } from '../utils/fileKind';
 import { ForumPostMarkdownBody, dropLightboxItem, type ForumPostImageLightboxState } from './ForumPostMarkdownBody';
 import {
   pickAndUploadCoverPhoto,
@@ -80,7 +80,8 @@ import {
   trackManagedUploadUrl,
   trackManagedUploadUrls,
 } from '../services/managedUploadDelete';
-import { canDeleteManagedMedia } from '../utils/canDeleteManagedMedia';
+import { canDeleteManagedMedia, isGroupAdminOrOwner } from '../utils/canDeleteManagedMedia';
+import { confirmDestructive } from '../utils/confirmDestructive';
 
 const POST_ATTACHMENT_MARKER = '[[MOIJIA_POST_ATTACHMENTS]]';
 
@@ -91,7 +92,7 @@ function parseImageLine(trimmedLine: string): { alt: string; url: string } | nul
   }
   const plainUrlLike = /^[^\s]+$/.test(trimmedLine);
   if (!plainUrlLike) return null;
-  const looksLikeImageUrl = /\.(png|jpe?g|gif|webp|bmp|svg)(\?.*)?$/i.test(trimmedLine);
+  const looksLikeImageUrl = looksLikeMediaUrl(trimmedLine);
   if (looksLikeImageUrl) {
     return { alt: 'Image', url: trimmedLine };
   }
@@ -228,7 +229,6 @@ export function PostsListScreen() {
   const postTopByIdRef = useRef<Record<string, number>>({});
   const pendingScrollToCommentsPostIdRef = useRef<string | null>(null);
   const commentsBlockRefs = useRef<Record<string, View | null>>({});
-  const reactionButtonRefs = useRef<Record<string, View | null>>({});
 
   const { data: allGroups = [], refetch: refetchGroups } = useGroups(currentUserId ?? '');
   const { refetch: refetchNotifications } = useNotifications(currentUserId || '');
@@ -273,12 +273,6 @@ export function PostsListScreen() {
   const [editPostPhotoUrls, setEditPostPhotoUrls] = useState<string[]>([]);
   const [editPostFileAttachments, setEditPostFileAttachments] = useState<Array<{ name: string; url: string }>>([]);
   const [editSaving, setEditSaving] = useState(false);
-  const [postMenuTarget, setPostMenuTarget] = useState<{
-    postId: string;
-    groupId: string;
-    anchor: { x: number; y: number; width: number; height: number };
-  } | null>(null);
-  const postMenuButtonRefs = useRef<Record<string, View | null>>({});
   const queryClient = useQueryClient();
   const [expandedCommentsByPost, setExpandedCommentsByPost] = useState<Record<string, boolean>>({});
   const [draftComments, setDraftComments] = useState<Record<string, string>>({});
@@ -293,17 +287,6 @@ export function PostsListScreen() {
   const [commentEditParentId, setCommentEditParentId] = useState<string | null>(null);
   const [commentSaving, setCommentSaving] = useState(false);
   const [reactionBusy, setReactionBusy] = useState(false);
-  const [reactionQuickPickerTarget, setReactionQuickPickerTarget] = useState<{
-    kind: 'post' | 'comment';
-    id: string;
-    groupId: string;
-  } | null>(null);
-  const [reactionQuickPickerAnchor, setReactionQuickPickerAnchor] = useState<{
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  } | null>(null);
   const [reactionPickerTarget, setReactionPickerTarget] = useState<{
     kind: 'post' | 'comment';
     id: string;
@@ -313,8 +296,6 @@ export function PostsListScreen() {
     emoji: string;
     userIds: string[];
   } | null>(null);
-  const { data: commentQuickReactions = [...DEFAULT_COMMENT_QUICK_REACTIONS_LIST] } =
-    useCommentQuickReactions(currentUserId);
 
   const groupIds = useMemo(() => groups.map((g) => g.id), [groups]);
   const groupPostsQueries = useGroupPostsForGroups(groupIds, currentUserId ?? '');
@@ -593,15 +574,7 @@ export function PostsListScreen() {
           Alert.alert('Error', 'Could not delete file');
         }
       };
-      const go = () => void run();
-      if (Platform.OS === 'web') {
-        if (window.confirm('Delete this file from the post?')) go();
-        return;
-      }
-      Alert.alert('Delete file?', 'This file will be removed from the post and deleted.', [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: go },
-      ]);
+      void run();
     },
     [currentUserId, queryClient, removeLightboxUrl]
   );
@@ -628,15 +601,7 @@ export function PostsListScreen() {
           Alert.alert('Error', 'Could not delete file');
         }
       };
-      const go = () => void run();
-      if (Platform.OS === 'web') {
-        if (window.confirm('Delete this file from the comment?')) go();
-        return;
-      }
-      Alert.alert('Delete file?', 'This file will be removed from the comment and deleted.', [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: go },
-      ]);
+      void run();
     },
     [currentUserId, queryClient, removeLightboxUrl]
   );
@@ -857,46 +822,13 @@ export function PostsListScreen() {
 
   const applyReactionAndDismiss = useCallback(
     (emoji: string) => {
-      const target = reactionQuickPickerTarget ?? reactionPickerTarget;
+      const target = reactionPickerTarget;
       if (!target) return;
       void applyReaction(target, emoji);
-      setReactionQuickPickerTarget(null);
-      setReactionQuickPickerAnchor(null);
       setReactionPickerTarget(null);
     },
-    [applyReaction, reactionPickerTarget, reactionQuickPickerTarget],
+    [applyReaction, reactionPickerTarget],
   );
-
-  const openReactionQuickPicker = useCallback(
-    (target: { kind: 'post' | 'comment'; id: string; groupId: string }) => {
-      const key = `${target.kind}:${target.id}`;
-      const node = reactionButtonRefs.current[key] as
-        | (View & { measureInWindow: (cb: (x: number, y: number, w: number, h: number) => void) => void })
-        | null;
-      if (!node?.measureInWindow) {
-        setReactionQuickPickerAnchor(null);
-        setReactionQuickPickerTarget(target);
-        return;
-      }
-      node.measureInWindow((x, y, width, height) => {
-        setReactionQuickPickerAnchor({ x, y, width, height });
-        setReactionQuickPickerTarget(target);
-      });
-    },
-    [],
-  );
-
-  const quickPickerStyle = useMemo(() => {
-    const screenWidth = Dimensions.get('window').width;
-    const cardWidth = 316;
-    const cardHeight = 62;
-    const margin = 10;
-    if (!reactionQuickPickerAnchor) return { top: 120, left: (screenWidth - cardWidth) / 2 };
-    const centeredLeft = reactionQuickPickerAnchor.x + reactionQuickPickerAnchor.width / 2 - cardWidth / 2;
-    const left = Math.max(margin, Math.min(screenWidth - cardWidth - margin, centeredLeft));
-    const top = Math.max(12, reactionQuickPickerAnchor.y - cardHeight - 8);
-    return { top, left };
-  }, [reactionQuickPickerAnchor]);
 
   const addComment = useCallback(
     async (postId: string, groupId: string) => {
@@ -1015,20 +947,12 @@ export function PostsListScreen() {
     [cancelEditComment, commentEdit, currentUserId, invalidatePostsForGroup, replyTargetByPost],
   );
 
-  const canManagePost = useCallback((post: { userId: string }) => {
-    return !!currentUserId && post.userId === currentUserId;
-  }, [currentUserId]);
-
-  const openPostMenu = useCallback((post: GroupPost & { groupId: string }) => {
-    const node = postMenuButtonRefs.current[post.id] as
-      | (View & {
-          measureInWindow?: (cb: (x: number, y: number, w: number, h: number) => void) => void;
-        })
-      | null;
-    node?.measureInWindow?.((x, y, width, height) => {
-      setPostMenuTarget({ postId: post.id, groupId: post.groupId, anchor: { x, y, width, height } });
-    });
-  }, []);
+  const canManagePost = useCallback((post: { userId: string; groupId: string }) => {
+    if (!currentUserId) return false;
+    if (post.userId === currentUserId) return true;
+    const g = allGroups.find((x) => x.id === post.groupId);
+    return isGroupAdminOrOwner(g, currentUserId);
+  }, [allGroups, currentUserId]);
 
   const beginEditPost = useCallback((post: GroupPost) => {
     clearTrackedUploads(editPostTrackedUploadsRef.current);
@@ -1037,7 +961,6 @@ export function PostsListScreen() {
     setEditPostBody(split.markdownSource);
     setEditPostPhotoUrls(split.attachmentImages.map((img) => img.url));
     setEditPostFileAttachments(split.attachmentFiles.map((f) => ({ name: f.name, url: f.url })));
-    setPostMenuTarget(null);
   }, []);
 
   const cancelEditPost = useCallback(() => {
@@ -1101,24 +1024,6 @@ export function PostsListScreen() {
       ]);
     }
   }, [cancelEditPost, currentUserId, editingPostId, invalidatePostsForGroup]);
-
-  const postMenuTargetPost = useMemo(
-    () => (postMenuTarget ? filtered.find((p) => p.id === postMenuTarget.postId) ?? null : null),
-    [filtered, postMenuTarget]
-  );
-
-  const postMenuPopoverLayout = useMemo(() => {
-    if (!postMenuTarget) return null;
-    const aw = Dimensions.get('window').width;
-    const { anchor } = postMenuTarget;
-    let left = anchor.x + anchor.width - COMMENT_THREAD_OPTIONS_MENU_WIDTH;
-    left = Math.max(8, Math.min(left, aw - COMMENT_THREAD_OPTIONS_MENU_WIDTH - 8));
-    const top = anchor.y + anchor.height + 4;
-    return { left, top };
-  }, [postMenuTarget]);
-
-  const canEditMenuPost = !!(postMenuTargetPost && postMenuTargetPost.userId === currentUserId);
-  const canDeleteMenuPost = !!(postMenuTargetPost && canManagePost(postMenuTargetPost));
 
   return (
     <View style={styles.safe}>
@@ -1303,7 +1208,11 @@ export function PostsListScreen() {
                         <ResolvableImage storedUrl={uri} style={styles.composerPhotoThumb} resizeMode="cover" />
                       </TouchableOpacity>
                       <TouchableOpacity
-                        onPress={() => removeNewDraftMedia(uri)}
+                        onPress={() =>
+                          confirmDestructive('Delete photo?', 'This photo will be permanently deleted.', () =>
+                            removeNewDraftMedia(uri)
+                          )
+                        }
                         style={styles.composerPhotoRemoveBtn}
                         accessibilityLabel="Remove photo"
                       >
@@ -1340,7 +1249,11 @@ export function PostsListScreen() {
                         </Text>
                       </TouchableOpacity>
                       <TouchableOpacity
-                        onPress={() => removeNewDraftMedia(file.url)}
+                        onPress={() =>
+                          confirmDestructive('Delete file?', 'This file will be permanently deleted.', () =>
+                            removeNewDraftMedia(file.url)
+                          )
+                        }
                         hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
                         accessibilityLabel="Remove attached file"
                         style={styles.composerFileChipRemove}
@@ -1357,8 +1270,8 @@ export function PostsListScreen() {
                     iconOnly
                     label="Add photo"
                     triggerIconName="camera-outline"
-                    optionsModalTitle="Add photo"
-                    linkModalTitle="Photo URL"
+                    optionsModalTitle="Add photo or video"
+                    linkModalTitle="Media URL"
                     disabled={isUploadingAttachment}
                     busy={isUploadingAttachment}
                     onBeforeOpen={requireNewPostGroup}
@@ -1386,7 +1299,7 @@ export function PostsListScreen() {
                   disabled={!canPost || createPostMutation.isPending}
                   onPress={handleCreatePost}
                 >
-                  <Text style={[styles.postBtnText, (!canPost || createPostMutation.isPending) && styles.postBtnTextDisabled]}>
+                  <Text style={styles.postBtnText}>
                     {createPostMutation.isPending ? 'Posting...' : 'Post'}
                   </Text>
                 </TouchableOpacity>
@@ -1465,17 +1378,84 @@ export function PostsListScreen() {
                           <View style={[styles.postGroupDot, { backgroundColor: p.dot }]} />
                         </View>
                       </View>
-                      <TouchableOpacity
-                        ref={(node) => {
-                          postMenuButtonRefs.current[post.id] = node;
-                        }}
-                        onPress={() => openPostMenu(post)}
-                        style={styles.postMenuBtn}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                        accessibilityLabel="Post options"
+                      <AnchoredOverflowMenu
+                        width={COMMENT_THREAD_OPTIONS_MENU_WIDTH}
+                        menu={(close) => (
+                          <>
+                            <TouchableOpacity
+                              style={styles.postOptionsRow}
+                              onPress={() => {
+                                const groupName = groups.find((g) => g.id === post.groupId)?.name;
+                                shareFromModal(close, () =>
+                                  sharePost(post.groupId, post.id, {
+                                    title: post.title,
+                                    body: post.body,
+                                    authorName: getUserDisplayName(post.userId),
+                                    groupName,
+                                  }),
+                                );
+                              }}
+                            >
+                              <Ionicons name="share-outline" size={20} color={Colors.text} />
+                              <Text style={styles.postOptionsLabel}>Share</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={[
+                                styles.postOptionsRow,
+                                post.userId !== currentUserId &&
+                                  !canManagePost(post) &&
+                                  styles.postOptionsRowLast,
+                              ]}
+                              onPress={async () => {
+                                const text = forumPostCopyText(post.body);
+                                await Clipboard.setStringAsync(text);
+                                close();
+                                Toast.show({ type: 'success', text1: 'Copied' });
+                              }}
+                            >
+                              <Ionicons name="copy-outline" size={20} color={Colors.text} />
+                              <Text style={styles.postOptionsLabel}>Copy</Text>
+                            </TouchableOpacity>
+                            {post.userId === currentUserId ? (
+                              <TouchableOpacity
+                                style={[
+                                  styles.postOptionsRow,
+                                  !canManagePost(post) && styles.postOptionsRowLast,
+                                ]}
+                                onPress={() => {
+                                  close();
+                                  beginEditPost(post);
+                                }}
+                              >
+                                <Ionicons name="create-outline" size={20} color={Colors.text} />
+                                <Text style={styles.postOptionsLabel}>Edit</Text>
+                              </TouchableOpacity>
+                            ) : null}
+                            {canManagePost(post) ? (
+                              <TouchableOpacity
+                                style={[styles.postOptionsRow, styles.postOptionsRowLast]}
+                                onPress={() => {
+                                  close();
+                                  confirmDeletePost(post.id, post.groupId);
+                                }}
+                              >
+                                <Ionicons name="trash-outline" size={20} color={Colors.notGoing} />
+                                <Text style={[styles.postOptionsLabel, styles.postOptionsLabelDanger]}>
+                                  Delete
+                                </Text>
+                              </TouchableOpacity>
+                            ) : null}
+                          </>
+                        )}
                       >
-                        <Ionicons name="ellipsis-vertical" size={18} color={Colors.textSub} />
-                      </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.postMenuBtn}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          accessibilityLabel="Post options"
+                        >
+                          <Ionicons name="ellipsis-vertical" size={18} color={Colors.textSub} />
+                        </TouchableOpacity>
+                      </AnchoredOverflowMenu>
                     </View>
                     {isEditing ? (
                       <>
@@ -1524,7 +1504,13 @@ export function PostsListScreen() {
                                   <ResolvableImage storedUrl={uri} style={styles.composerPhotoThumb} resizeMode="cover" />
                                 </TouchableOpacity>
                                 <TouchableOpacity
-                                  onPress={() => removeEditDraftMedia(uri)}
+                                  onPress={() =>
+                                    confirmDestructive(
+                                      'Delete photo?',
+                                      'This photo will be permanently deleted.',
+                                      () => removeEditDraftMedia(uri)
+                                    )
+                                  }
                                   style={styles.composerPhotoRemoveBtn}
                                   accessibilityLabel="Remove photo"
                                 >
@@ -1564,7 +1550,13 @@ export function PostsListScreen() {
                                   </Text>
                                 </TouchableOpacity>
                                 <TouchableOpacity
-                                  onPress={() => removeEditDraftMedia(file.url)}
+                                  onPress={() =>
+                                    confirmDestructive(
+                                      'Delete file?',
+                                      'This file will be permanently deleted.',
+                                      () => removeEditDraftMedia(file.url)
+                                    )
+                                  }
                                   hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
                                   accessibilityLabel="Remove attached file"
                                   style={styles.composerFileChipRemove}
@@ -1581,8 +1573,8 @@ export function PostsListScreen() {
                               iconOnly
                               label="Add photo"
                               triggerIconName="camera-outline"
-                              optionsModalTitle="Add photo"
-                              linkModalTitle="Photo URL"
+                              optionsModalTitle="Add photo or video"
+                              linkModalTitle="Media URL"
                               disabled={isUploadingAttachment}
                               busy={isUploadingAttachment}
                               onTakePhoto={() => void takePhotoAndAddComposerPhoto('edit', post.groupId)}
@@ -1723,18 +1715,23 @@ export function PostsListScreen() {
                       }}
                     >
                     <View style={styles.reactionRow}>
-                      <TouchableOpacity
-                        ref={(node) => {
-                          reactionButtonRefs.current[`post:${post.id}`] = node;
-                        }}
-                        style={styles.iconActionBtn}
-                        onPress={() => openReactionQuickPicker({ kind: 'post', id: post.id, groupId: post.groupId })}
-                        onLongPress={() => openReactionQuickPicker({ kind: 'post', id: post.id, groupId: post.groupId })}
-                        accessibilityLabel="Add reaction"
-                        activeOpacity={0.75}
+                      <ReactionQuickPicker
+                        onReact={(emoji) =>
+                          void applyReaction({ kind: 'post', id: post.id, groupId: post.groupId }, emoji)
+                        }
+                        onViewAll={() =>
+                          setReactionPickerTarget({ kind: 'post', id: post.id, groupId: post.groupId })
+                        }
+                        disabled={reactionBusy || !currentUserId}
                       >
-                        <Ionicons name="happy-outline" size={15} color={Colors.textSub} />
-                      </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.iconActionBtn}
+                          accessibilityLabel="Add reaction"
+                          activeOpacity={0.75}
+                        >
+                          <Ionicons name="happy-outline" size={15} color={Colors.textSub} />
+                        </TouchableOpacity>
+                      </ReactionQuickPicker>
                       <TouchableOpacity
                         style={styles.iconActionBtn}
                         onPress={() => {
@@ -1761,6 +1758,7 @@ export function PostsListScreen() {
                         scrollViewportYRef={scrollViewportYRef}
                         scrollOffsetYRef={scrollOffsetYRef}
                         currentUserId={currentUserId}
+                        canModerateComments={isGroupAdminOrOwner(group, currentUserId)}
                         getUserDisplayName={getUserDisplayName}
                         formatCommentTime={formatCreatedAtLabel}
                         draftText={draftComments[post.id] ?? ''}
@@ -1922,8 +1920,8 @@ export function PostsListScreen() {
                           void applyReaction({ kind: 'comment', id: commentId, groupId: post.groupId }, emoji)
                         }
                         onReactionChipLongPress={(payload) => setReactionDetailModal(payload)}
-                        onOpenReactionQuickPicker={(commentId) =>
-                          openReactionQuickPicker({ kind: 'comment', id: commentId, groupId: post.groupId })
+                        onOpenFullReactionPicker={(commentId) =>
+                          setReactionPickerTarget({ kind: 'comment', id: commentId, groupId: post.groupId })
                         }
                         onBeginEdit={(commentId) => {
                           const c = (post.comments ?? []).find((x) => x.id === commentId);
@@ -1933,7 +1931,6 @@ export function PostsListScreen() {
                           confirmDeleteComment(post.id, commentId, post.groupId)
                         }
                         containerStyle={styles.postCommentsSection}
-                        reactionButtonRefs={reactionButtonRefs}
                         renderAvatar={(userId, displayName) => {
                           const u = usersById.get(userId);
                           return (
@@ -2048,139 +2045,6 @@ export function PostsListScreen() {
           </View>
         </View>
       </Modal>
-
-      {postMenuTarget && postMenuPopoverLayout ? (
-        <Modal {...edgeToEdgeModalProps}
-          visible
-          transparent
-          animationType="fade"
-          onRequestClose={() => setPostMenuTarget(null)}
-        >
-          <View style={styles.postOptionsModalRoot} pointerEvents="box-none">
-            <Pressable
-              style={styles.postOptionsDismiss}
-              onPress={() => setPostMenuTarget(null)}
-              accessibilityRole="button"
-              accessibilityLabel="Dismiss menu"
-            />
-            <View
-              style={[
-                styles.postOptionsPopoverWrap,
-                {
-                  left: postMenuPopoverLayout.left,
-                  top: postMenuPopoverLayout.top,
-                  width: COMMENT_THREAD_OPTIONS_MENU_WIDTH,
-                },
-              ]}
-              pointerEvents="box-none"
-            >
-              <View style={styles.postOptionsCard}>
-                <TouchableOpacity
-                  style={styles.postOptionsRow}
-                  onPress={() => {
-                    const { postId, groupId } = postMenuTarget;
-                    const groupName = groups.find((g) => g.id === groupId)?.name;
-                    shareFromModal(
-                      () => setPostMenuTarget(null),
-                      () =>
-                        sharePost(groupId, postId, {
-                          title: postMenuTargetPost?.title,
-                          body: postMenuTargetPost?.body,
-                          authorName: postMenuTargetPost
-                            ? getUserDisplayName(postMenuTargetPost.userId)
-                            : undefined,
-                          groupName,
-                        }),
-                    );
-                  }}
-                >
-                  <Ionicons name="share-outline" size={20} color={Colors.text} />
-                  <Text style={styles.postOptionsLabel}>Share</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.postOptionsRow,
-                    !canEditMenuPost && !canDeleteMenuPost && styles.postOptionsRowLast,
-                  ]}
-                  onPress={async () => {
-                    const text = forumPostCopyText(postMenuTargetPost?.body);
-                    await Clipboard.setStringAsync(text);
-                    setPostMenuTarget(null);
-                    Toast.show({ type: 'success', text1: 'Copied' });
-                  }}
-                >
-                  <Ionicons name="copy-outline" size={20} color={Colors.text} />
-                  <Text style={styles.postOptionsLabel}>Copy</Text>
-                </TouchableOpacity>
-                {canEditMenuPost ? (
-                  <TouchableOpacity
-                    style={[styles.postOptionsRow, !canDeleteMenuPost && styles.postOptionsRowLast]}
-                    onPress={() => {
-                      setPostMenuTarget(null);
-                      if (postMenuTargetPost) beginEditPost(postMenuTargetPost);
-                    }}
-                  >
-                    <Ionicons name="create-outline" size={20} color={Colors.text} />
-                    <Text style={styles.postOptionsLabel}>Edit</Text>
-                  </TouchableOpacity>
-                ) : null}
-                {canDeleteMenuPost ? (
-                  <TouchableOpacity
-                    style={[styles.postOptionsRow, styles.postOptionsRowLast]}
-                    onPress={() => {
-                      const { postId, groupId } = postMenuTarget;
-                      setPostMenuTarget(null);
-                      confirmDeletePost(postId, groupId);
-                    }}
-                  >
-                    <Ionicons name="trash-outline" size={20} color={Colors.notGoing} />
-                    <Text style={[styles.postOptionsLabel, styles.postOptionsLabelDanger]}>Delete</Text>
-                  </TouchableOpacity>
-                ) : null}
-              </View>
-            </View>
-          </View>
-        </Modal>
-      ) : null}
-
-      {reactionQuickPickerTarget && currentUserId ? (
-        <Modal
-          {...edgeToEdgeModalProps}
-          visible
-          transparent
-          animationType="fade"
-          presentationStyle={Platform.OS === 'ios' ? 'overFullScreen' : undefined}
-          onRequestClose={() => setReactionQuickPickerTarget(null)}
-          statusBarTranslucent
-        >
-          <View style={styles.commentReactionPickerRoot}>
-            <Pressable
-              style={StyleSheet.absoluteFill}
-              onPress={() => {
-                setReactionQuickPickerTarget(null);
-                setReactionQuickPickerAnchor(null);
-              }}
-              accessibilityRole="button"
-              accessibilityLabel="Close quick reactions"
-            />
-            <View style={styles.commentReactionQuickPickerRoot} pointerEvents="box-none">
-              <View style={[styles.commentReactionQuickPickerCard, quickPickerStyle]} pointerEvents="auto">
-                <EmojiBar
-                  quickReactions={commentQuickReactions}
-                  onPressReaction={applyReactionAndDismiss}
-                  onPressViewAll={() => {
-                    setReactionPickerTarget(reactionQuickPickerTarget);
-                    setReactionQuickPickerTarget(null);
-                    setReactionQuickPickerAnchor(null);
-                  }}
-                  disabled={reactionBusy}
-                  viewAllAccessibilityLabel="View all emojis"
-                />
-              </View>
-            </View>
-          </View>
-        </Modal>
-      ) : null}
 
       {reactionPickerTarget && currentUserId ? (
         <Modal
@@ -2522,9 +2386,6 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.semiBold,
     fontSize: 13,
   },
-  postBtnTextDisabled: {
-    color: Colors.textMuted,
-  },
   sectionLabel: {
     fontSize: 11,
     fontFamily: Fonts.semiBold,
@@ -2584,23 +2445,6 @@ const styles = StyleSheet.create({
   },
   forumDraftBarHint: { fontSize: 12, fontFamily: Fonts.regular, color: Colors.textMuted, flex: 1, marginRight: 8 },
   forumDraftBarDiscard: { fontSize: 13, fontFamily: Fonts.semiBold, color: Colors.notGoing },
-  postOptionsModalRoot: { flex: 1 },
-  postOptionsDismiss: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'transparent',
-  },
-  postOptionsPopoverWrap: {
-    position: 'absolute',
-    zIndex: 20,
-    elevation: 20,
-  },
-  postOptionsCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: 16,
-    overflow: 'hidden',
-    width: '100%',
-    ...Shadows.lg,
-  },
   postOptionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2808,20 +2652,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 24,
-  },
-  commentReactionQuickPickerRoot: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  commentReactionQuickPickerCard: {
-    position: 'absolute',
-    width: 316,
-    borderRadius: Radius['2xl'],
-    backgroundColor: Colors.surface,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.border,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    ...Shadows.md,
   },
   commentReactionPickerCard: {
     width: '100%',

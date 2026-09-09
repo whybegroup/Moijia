@@ -7,7 +7,7 @@ import { openContentLink } from '../utils/inAppLinks';
 import { MentionText } from './MentionText';
 import { FileExtensionPreview } from './FileExtensionPreview';
 import { DeletedImagePlaceholder, PostMediaImage } from './DeletedPostMedia';
-import { isImageFileUrl } from '../utils/fileKind';
+import { isImageFileUrl, isVideoFileUrl } from '../utils/fileKind';
 import { isDeletedFileHref, isDeletedImageSrc, isDeletedMediaUrl } from '../utils/deletedMedia';
 
 /**
@@ -88,7 +88,9 @@ export const ForumPostMarkdownBody = memo(function ForumPostMarkdownBody({
         const deletedImage = isDeletedImageSrc(src);
         const deletedFile = isDeletedFileHref(src);
         const isImage = deletedImage || isImageFileUrl(src, alt);
-        const wrapStyle = isImage ? styles.markdownImageWrap : styles.markdownFileWrap;
+        const isVideo = isVideoFileUrl(src, alt);
+        const isMedia = isImage || isVideo;
+        const wrapStyle = isMedia ? styles.markdownImageWrap : styles.markdownFileWrap;
         if (deletedImage || deletedFile) {
           return (
             <View key={node.key} style={wrapStyle}>
@@ -116,7 +118,7 @@ export const ForumPostMarkdownBody = memo(function ForumPostMarkdownBody({
                 })
               }
             >
-              {isImage ? (
+              {isMedia ? (
                 <PostMediaImage storedUrl={src} style={styles.inlineImage} resizeMode="cover" />
               ) : (
                 <FileExtensionPreview url={src} fileName={alt} variant="inline" />
