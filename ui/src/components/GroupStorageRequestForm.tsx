@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -14,14 +14,34 @@ import {
   resolveGroupMaxStorageBytes,
   sizeTierFromGroup,
 } from '../utils/groupStorage';
-import { GROUP_TIERS, formatMemberLimit } from '../utils/groupTiers';
-import { useSetGroupStorageLimit } from '../hooks/api/useGroups';
+import { GROUP_TIERS, formatMemberLimit, parseSizeTier, type GroupSizeTier } from '../utils/groupTiers';
+import { useSetGroupStorageLimit, useCancelGroupStorageSubscription } from '../hooks/api/useGroups';
 import { apiErrorMessage } from '../utils/apiErrors';
+import { StoragePaywall } from './StoragePaywall';
+import { GroupDowngradeBanner } from './GroupDowngradeBanner';
 import { usePurchases } from '../contexts/PurchasesContext';
 import { sizeAddonByTier } from '../config/revenueCat';
-import { StoragePaywall } from './StoragePaywall';
+import {
+  formatPlanDate,
+  nextMonthlyAnniversary,
+  parseMaybeDate,
+} from '../utils/groupPlanPeriod';
 
-const PAID: Array<'medium' | 'large'> = ['medium', 'large'];
+function resolvePeriodEnd(input: {
+  sizeStartedAt?: Date | string | null;
+  graceEndsAt?: Date | string | null;
+  expirationDate?: string | null;
+  originalPurchaseDate?: string | null;
+}): Date | null {
+  const started =
+    parseMaybeDate(input.sizeStartedAt) ?? parseMaybeDate(input.originalPurchaseDate);
+  if (started) return nextMonthlyAnniversary(started);
+  return parseMaybeDate(input.expirationDate) ?? parseMaybeDate(input.graceEndsAt);
+}
+
+function planSummary(tier: GroupSizeTier): string {
+  return `${formatStorageBytes(GROUP_TIERS[tier].maxStorageBytes)} · ${formatMemberLimit(tier)}`;
+}
 
 export function GroupStorageRequestForm({
   groupId,
@@ -29,33 +49,52 @@ export function GroupStorageRequestForm({
   currentMaxBytes,
   usedBytes,
   sizeTier,
+  pendingSizeTier,
+  graceEndsAt,
+  sizeStartedAt,
 }: {
   groupId: string;
   userId: string;
   currentMaxBytes: number;
   usedBytes: number;
   sizeTier?: string | null;
+  pendingSizeTier?: string | null;
+  graceEndsAt?: Date | string | null;
+  sizeStartedAt?: Date | string | null;
 }) {
   const setLimit = useSetGroupStorageLimit(groupId, userId);
-  const { presentPaywall } = usePurchases();
+  const cancelSub = useCancelGroupStorageSubscription(groupId, userId);
+  const { customerInfo } = usePurchases();
   const currentTier = sizeTierFromGroup({ sizeTier, maxStorageBytes: currentMaxBytes });
-
-  const [selected, setSelected] = useState<'medium' | 'large'>(
-    currentTier === 'large' ? 'large' : 'medium'
-  );
+  const scheduledTier = pendingSizeTier ? parseSizeTier(pendingSizeTier) : currentTier;
+  const spec = GROUP_TIERS[currentTier];
+  const scheduledSpec = GROUP_TIERS[scheduledTier];
   const [paywallOpen, setPaywallOpen] = useState(false);
-
-  useEffect(() => {
-    setSelected(currentTier === 'large' ? 'large' : 'medium');
-  }, [currentTier]);
-
-  const requestedCap = GROUP_TIERS[selected].maxStorageBytes;
-  const used = Math.max(0, usedBytes);
-  const unchanged = selected === currentTier;
-  const belowUsage = requestedCap < used;
-  const needsPurchase = selected !== currentTier;
-  const saving = setLimit.isPending;
-  const canSubmit = !unchanged && !belowUsage && !saving;
+  const addon = sizeAddonByTier(currentTier);
+  const entitlement = addon ? customerInfo?.entitlements.active[addon.entitlementId] : null;
+  const goingToSmall = scheduledTier === 'small' && currentTier !== 'small';
+  const pendingChange = scheduledTier !== currentTier;
+  const periodEnd = useMemo(
+    () =>
+      resolvePeriodEnd({
+        sizeStartedAt,
+        graceEndsAt,
+        expirationDate: entitlement?.expirationDate,
+        originalPurchaseDate: entitlement?.originalPurchaseDate,
+      }),
+    [sizeStartedAt, graceEndsAt, entitlement?.expirationDate, entitlement?.originalPurchaseDate]
+  );
+  const startedOn = parseMaybeDate(sizeStartedAt) ?? parseMaybeDate(entitlement?.originalPurchaseDate);
+  const periodLabel =
+    currentTier === 'small' && scheduledTier === 'small'
+      ? null
+      : periodEnd
+        ? goingToSmall || entitlement?.willRenew === false
+          ? `Expires ${formatPlanDate(periodEnd)}`
+          : `Renews ${formatPlanDate(periodEnd)}`
+        : null;
+  const effectiveFrom = pendingChange ? periodEnd : startedOn;
+  const effectiveLine = effectiveFrom ? `Effective from ${formatPlanDate(effectiveFrom)}` : null;
 
   const applyLimit = async (tier: 'medium' | 'large') => {
     try {
@@ -67,77 +106,55 @@ export function GroupStorageRequestForm({
     }
   };
 
-  const submit = async () => {
-    if (!canSubmit) return;
-    const plan = sizeAddonByTier(selected);
-    if (plan && needsPurchase) {
-      const outcome = await presentPaywall(plan);
-      if (outcome === 'purchased' || outcome === 'restored' || outcome === 'already_pro') {
-        await applyLimit(selected);
-        return;
-      }
-      if (outcome === 'cancelled') return;
-    }
-    setPaywallOpen(true);
-  };
-
   return (
     <View style={styles.requestBlock}>
-      <Text style={styles.requestTitle}>Group size</Text>
-      <Text style={styles.hint}>
-        This group is {GROUP_TIERS[currentTier].label} ({formatStorageBytes(resolveGroupMaxStorageBytes(currentMaxBytes, currentTier))},{' '}
-        {formatMemberLimit(currentTier).toLowerCase()}). Medium and Large are monthly add-ons for
-        this group.
+      <GroupDowngradeBanner
+        compact
+        pendingSizeTier={pendingSizeTier}
+        graceEndsAt={graceEndsAt ?? periodEnd}
+      />
+      <Text style={styles.kicker}>Active plan</Text>
+      <Text style={styles.planName}>{spec.label}</Text>
+      <Text style={styles.planMeta}>
+        {formatStorageBytes(resolveGroupMaxStorageBytes(currentMaxBytes, currentTier))} ·{' '}
+        {formatMemberLimit(currentTier)}
       </Text>
-      <View style={styles.list}>
-        {PAID.map((tier) => {
-          const active = selected === tier;
-          const spec = GROUP_TIERS[tier];
-          return (
-            <TouchableOpacity
-              key={tier}
-              onPress={() => setSelected(tier)}
-              style={[styles.option, active && styles.optionActive]}
-              accessibilityRole="button"
-              accessibilityState={{ selected: active }}
-            >
-              <View>
-                <Text style={styles.optionTitle}>{spec.label}</Text>
-                <Text style={styles.optionBlurb}>
-                  {spec.gb} GB · {formatMemberLimit(tier)}
-                </Text>
-              </View>
-              <Text style={styles.optionMeta}>/ month</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-      {belowUsage ? (
-        <Text style={styles.error}>
-          This group is already using {formatStorageBytes(used)}. Choose a larger size or delete
-          files first.
-        </Text>
+      {usedBytes > 0 ? (
+        <Text style={styles.used}>{formatStorageBytes(usedBytes)} used</Text>
       ) : null}
+      {periodLabel ? <Text style={styles.period}>{periodLabel}</Text> : null}
+
+      <Text style={[styles.kicker, styles.kickerSpaced]}>Selected plan</Text>
+      <Text style={styles.planName}>{scheduledSpec.label}</Text>
+      <Text style={styles.planMeta}>{planSummary(scheduledTier)}</Text>
+      {effectiveLine ? <Text style={styles.period}>{effectiveLine}</Text> : null}
+
       <TouchableOpacity
-        onPress={() => void submit()}
-        disabled={!canSubmit}
-        style={[styles.submit, !canSubmit && styles.submitDisabled]}
+        onPress={() => setPaywallOpen(true)}
+        disabled={setLimit.isPending}
+        style={styles.submit}
         accessibilityRole="button"
+        accessibilityLabel="Modify group storage plan"
       >
-        {saving ? (
+        {setLimit.isPending ? (
           <ActivityIndicator color={Colors.accentFg} />
         ) : (
-          <Text style={styles.submitText}>
-            {needsPurchase ? 'Continue to subscribe' : 'Update size'}
-          </Text>
+          <Text style={styles.submitText}>Modify storage plan</Text>
         )}
       </TouchableOpacity>
       <StoragePaywall
         visible={paywallOpen}
         onClose={() => setPaywallOpen(false)}
-        initialTier={selected}
+        currentTier={currentTier}
+        scheduledTier={scheduledTier}
+        periodEndsAt={periodEnd}
+        goingToSmall={goingToSmall || entitlement?.willRenew === false}
+        selectedEffectiveFrom={effectiveFrom}
         onPurchased={(option) => {
           void applyLimit(option.plan.tier);
+        }}
+        onSwitchToSmall={async () => {
+          await cancelSub.mutateAsync();
         }}
       />
     </View>
@@ -146,36 +163,40 @@ export function GroupStorageRequestForm({
 
 const styles = StyleSheet.create({
   requestBlock: { marginTop: 4 },
-  requestTitle: { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.text },
-  hint: { fontSize: 13, fontFamily: Fonts.regular, color: Colors.textMuted, marginTop: 4, marginBottom: 12 },
-  list: { gap: 8, marginBottom: 12 },
-  option: {
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: Radius.lg,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: Colors.bg,
+  kicker: {
+    fontSize: 11,
+    fontFamily: Fonts.semiBold,
+    color: Colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginBottom: 4,
   },
-  optionActive: { borderColor: Colors.accent, backgroundColor: Colors.surface },
-  optionTitle: { fontSize: 16, fontFamily: Fonts.semiBold, color: Colors.text },
-  optionBlurb: { fontSize: 12, fontFamily: Fonts.regular, color: Colors.textMuted, marginTop: 2 },
-  optionMeta: { fontSize: 13, fontFamily: Fonts.medium, color: Colors.textMuted },
-  error: {
+  kickerSpaced: { marginTop: 16 },
+  planName: { fontSize: 18, fontFamily: Fonts.extraBold, color: Colors.text },
+  planMeta: {
+    fontSize: 14,
+    fontFamily: Fonts.regular,
+    color: Colors.textSub,
+    marginTop: 4,
+  },
+  used: {
+    fontSize: 13,
+    fontFamily: Fonts.regular,
+    color: Colors.textMuted,
+    marginTop: 2,
+  },
+  period: {
     fontSize: 13,
     fontFamily: Fonts.medium,
-    color: Colors.notGoing,
-    marginBottom: 10,
+    color: Colors.textSub,
+    marginTop: 6,
   },
   submit: {
     backgroundColor: Colors.accent,
     borderRadius: Radius.lg,
     paddingVertical: 10,
     alignItems: 'center',
+    marginTop: 14,
   },
-  submitDisabled: { backgroundColor: Colors.border },
   submitText: { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.accentFg },
 });

@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import Toast from 'react-native-toast-message';
 import { Colors, Fonts, Radius } from '../constants/theme';
 import { usePurchases } from '../contexts/PurchasesContext';
 import {
@@ -30,23 +31,14 @@ export function SubscriptionSettingsCard() {
     sizeAddon,
     customerInfo,
     presentCustomerCenter,
-    presentPaywall,
     restorePurchases,
   } = usePurchases();
   const [busy, setBusy] = useState<'manage' | 'restore' | 'paywall' | null>(null);
   const [paywallOpen, setPaywallOpen] = useState(false);
 
-  const subscribe = async () => {
+  const subscribe = () => {
     if (busy) return;
-    setBusy('paywall');
-    try {
-      const outcome = await presentPaywall();
-      if (outcome === 'unavailable') setPaywallOpen(true);
-    } catch {
-      setPaywallOpen(true);
-    } finally {
-      setBusy(null);
-    }
+    setPaywallOpen(true);
   };
 
   const manage = async () => {
@@ -74,7 +66,10 @@ export function SubscriptionSettingsCard() {
           : 'No Medium or Large group add-on was found for this store account.'
       );
     } catch (error) {
-      if (isPurchaseCancelled(error)) return;
+      if (isPurchaseCancelled(error)) {
+        Toast.show({ type: 'info', text1: 'Restore cancelled' });
+        return;
+      }
       alertMessage('Restore purchases', purchasesErrorMessage(error, 'Could not restore purchases.'));
     } finally {
       setBusy(null);
@@ -174,6 +169,7 @@ export function SubscriptionSettingsCard() {
         visible={paywallOpen}
         onClose={() => setPaywallOpen(false)}
         initialTier={sizeAddon?.tier ?? 'medium'}
+        currentTier={sizeAddon?.tier ?? 'small'}
       />
     </>
   );

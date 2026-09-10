@@ -3,9 +3,9 @@ import { groupStorage } from './GroupStorageService';
 import { NotificationService } from './NotificationService';
 import { sendOwnerEmail } from './EmailService';
 import { httpError } from '../utils/httpError';
+import { nextMonthlyAnniversary } from '../utils/groupPlanPeriod';
 import {
   FREE_OWNED_GROUP_LIMIT,
-  GROUP_DOWNGRADE_GRACE_MS,
   formatStorageBytes,
   isPaidSizeTier,
   maxMembersForTier,
@@ -108,7 +108,7 @@ export class GroupBillingService {
   }): Promise<{ maxStorageBytes: number; sizeTier: GroupSizeTier }> {
     const group = await prisma.group.findUnique({
       where: { id: input.groupId },
-      select: { id: true, name: true, deletedAt: true, sizeTier: true },
+      select: { id: true, name: true, deletedAt: true, sizeTier: true, sizeStartedAt: true },
     });
     if (!group || group.deletedAt) throw httpError(404, 'Group not found');
     const member = await prisma.groupMember.findUnique({
@@ -149,6 +149,7 @@ export class GroupBillingService {
         graceEndsAt: null,
         graceNotifiedAt: null,
         sizeProductId: productIdForTier(input.sizeTier),
+        sizeStartedAt: currentTier === 'small' || !group.sizeStartedAt ? new Date() : group.sizeStartedAt,
         maxStorageBytes: storageBytesToDb(cap),
       },
     });
@@ -232,7 +233,7 @@ export class GroupBillingService {
   ): Promise<void> {
     const existing = await prisma.group.findUnique({
       where: { id: groupId },
-      select: { graceEndsAt: true, sizeTier: true },
+      select: { graceEndsAt: true, sizeTier: true, sizeStartedAt: true },
     });
     if (!existing) return;
     if (parseSizeTier(existing.sizeTier) === pendingSizeTier) {
@@ -243,7 +244,8 @@ export class GroupBillingService {
       return;
     }
 
-    const graceEndsAt = existing.graceEndsAt ?? new Date(Date.now() + GROUP_DOWNGRADE_GRACE_MS);
+    const periodEnd = nextMonthlyAnniversary(existing.sizeStartedAt ?? new Date());
+    const graceEndsAt = existing.graceEndsAt ?? periodEnd;
     await prisma.group.update({
       where: { id: groupId },
       data: { pendingSizeTier, graceEndsAt },
@@ -282,7 +284,7 @@ export class GroupBillingService {
     });
     await sendOwnerEmail({
       to: owner?.email,
-      subject: `Your moijia group “${groupName}” has a 15-day grace period`,
+      subject: `Your moijia group “${groupName}” size changes on ${ends}`,
       text: body,
     }).catch(() => undefined);
   }
@@ -313,6 +315,7 @@ export class GroupBillingService {
         graceEndsAt: null,
         graceNotifiedAt: null,
         sizeProductId: isPaidSizeTier(pending) ? productIdForTier(pending as PaidSizeTier) : null,
+        ...(isPaidSizeTier(pending) ? {} : { sizeStartedAt: null }),
         maxStorageBytes: storageBytesToDb(cap),
       },
     });

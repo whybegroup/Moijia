@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import { AppState } from 'react-native';
 import type { CustomerInfo, PurchasesPackage } from 'react-native-purchases';
 import type { SizeAddon } from '../config/revenueCat';
+import type { GroupSizeTier } from '../utils/groupTiers';
 import { useAuth } from './AuthContext';
 import {
   addCustomerInfoListener,
@@ -29,9 +30,9 @@ type PurchasesContextValue = {
   customerInfo: CustomerInfo | null;
   hasPaidSizeAddon: boolean;
   sizeAddon: SizeAddon | null;
-  presentPaywall: (plan?: SizeAddon) => Promise<ProPaywallOutcome>;
+  presentPaywall: (plan?: SizeAddon, currentTier?: GroupSizeTier) => Promise<ProPaywallOutcome>;
   presentCustomerCenter: () => Promise<void>;
-  purchasePackage: (pkg: PurchasesPackage) => Promise<CustomerInfo>;
+  purchasePackage: (pkg: PurchasesPackage) => Promise<CustomerInfo | null>;
   purchaseExtraGroupSlot: () => Promise<void>;
   restorePurchases: () => Promise<CustomerInfo>;
   refresh: () => Promise<CustomerInfo | null>;
@@ -129,8 +130,10 @@ export const PurchasesProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   }, [refresh, user]);
 
   const presentPaywall = useCallback(
-    async (plan?: SizeAddon): Promise<ProPaywallOutcome> => {
-      const outcome = plan ? await presentStoragePaywall(plan) : await presentCurrentPaywall();
+    async (plan?: SizeAddon, currentTier?: GroupSizeTier): Promise<ProPaywallOutcome> => {
+      const outcome = plan
+        ? await presentStoragePaywall(plan, currentTier)
+        : await presentCurrentPaywall(currentTier);
       await refresh();
       return outcome;
     },
@@ -145,14 +148,14 @@ export const PurchasesProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     await refresh();
   }, [refresh, syncBilling]);
 
-  const purchasePackage = useCallback(async (pkg: PurchasesPackage) => {
+  const purchasePackage = useCallback(async (pkg: PurchasesPackage): Promise<CustomerInfo | null> => {
     try {
       const info = await purchaseProPackage(pkg);
       setCustomerInfo(info);
       await syncBilling(info);
       return info;
     } catch (error) {
-      if (isPurchaseCancelled(error)) throw error;
+      if (isPurchaseCancelled(error)) return null;
       throw new Error(purchasesErrorMessage(error, 'Could not complete purchase.'));
     }
   }, [syncBilling]);

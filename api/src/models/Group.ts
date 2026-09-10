@@ -27,6 +27,8 @@ export interface Group {
   maxStorageBytes: number;
   sizeTier: 'small' | 'medium' | 'large';
   pendingSizeTier?: 'small' | 'medium' | 'large' | null;
+  /** When the current paid size add-on started (billing day-of-month). */
+  sizeStartedAt?: Date | null;
   graceEndsAt?: Date | null;
   maxMemberCount?: number | null;
   memberAddsBlocked?: boolean;
@@ -66,6 +68,8 @@ export interface GroupScoped {
   maxStorageBytes: number;
   sizeTier: 'small' | 'medium' | 'large';
   pendingSizeTier?: 'small' | 'medium' | 'large' | null;
+  /** When the current paid size add-on started (billing day-of-month). */
+  sizeStartedAt?: Date | null;
   graceEndsAt?: Date | null;
   maxMemberCount?: number | null;
   memberAddsBlocked?: boolean;

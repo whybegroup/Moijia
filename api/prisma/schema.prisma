@@ -74,6 +74,8 @@ model Group {
   sizeTier String @default("small")
   /// Target tier after a cancelled/lapsed add-on (applied when graceEndsAt passes).
   pendingSizeTier String?
+  /// When the current paid size add-on started (billing day-of-month).
+  sizeStartedAt DateTime?
   graceEndsAt DateTime?
   graceNotifiedAt DateTime?
   /// RevenueCat product currently bound to this group's size add-on.

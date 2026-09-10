@@ -51,7 +51,8 @@ import Toast from 'react-native-toast-message';
 import { ImageLightboxModal } from './ImageLightboxModal';
 import { dropLightboxItem } from './ForumPostMarkdownBody';
 import { GroupStorageUsageBar } from './GroupStorageUsageBar';
-import { GroupDowngradeBanner } from './GroupDowngradeBanner';
+import { GroupStorageRequestForm } from './GroupStorageRequestForm';
+import { resolveGroupMaxStorageBytes } from '../utils/groupStorage';
 import { groupSubpageFromPathname } from './groupScope/useGroupSubpage';
 import { groupsTabParentHref, navigateGroupsTabTo } from '../utils/tabBreadcrumbNav';
 import { useGroupScopeNav } from './groupScope/GroupScopeNavContext';
@@ -973,6 +974,27 @@ export function GroupDetailView({ groupId }: GroupDetailViewProps) {
           </View>
         </View>
 
+        {isOwner && currentUserId && !isPending ? (
+          <View style={styles.planSection}>
+            <Text style={styles.sectionLabel}>MANAGE GROUP PLAN</Text>
+            <View style={[styles.card, styles.planCard]}>
+              <GroupStorageRequestForm
+                groupId={groupId}
+                userId={currentUserId}
+                currentMaxBytes={resolveGroupMaxStorageBytes(
+                  group.maxStorageBytes,
+                  group.sizeTier
+                )}
+                usedBytes={storageBreakdown?.usedBytes ?? group.usedStorageBytes ?? 0}
+                sizeTier={group.sizeTier}
+                pendingSizeTier={group.pendingSizeTier}
+                graceEndsAt={group.graceEndsAt}
+                sizeStartedAt={group.sizeStartedAt}
+              />
+            </View>
+          </View>
+        ) : null}
+
         {!isPending &&
         (group.membershipStatus === 'member' || group.membershipStatus === 'admin') &&
         typeof group.usedStorageBytes === 'number' ? (
@@ -987,14 +1009,6 @@ export function GroupDetailView({ groupId }: GroupDetailViewProps) {
             onPress={() =>
               router.push(buildGroupStorageUrl(groupId, { isInEventsTab, fromEventId }))
             }
-          />
-        ) : null}
-
-        {!isPending &&
-        (group.membershipStatus === 'member' || group.membershipStatus === 'admin') ? (
-          <GroupDowngradeBanner
-            pendingSizeTier={group.pendingSizeTier}
-            graceEndsAt={group.graceEndsAt}
           />
         ) : null}
 
@@ -1555,6 +1569,8 @@ const styles = StyleSheet.create({
   },
   cardPendingNotice:{ backgroundColor: '#FFFBEB', borderWidth: StyleSheet.hairlineWidth, borderColor: '#FDE68A' },
   cardDanger:       { borderWidth: StyleSheet.hairlineWidth, borderColor: '#FECACA' },
+  planCard:         { paddingHorizontal: 16, paddingVertical: 14 },
+  planSection:      { marginHorizontal: 20, marginTop: 12 },
   sectionLabel:     {
     fontSize: 11,
     fontFamily: Fonts.semiBold,

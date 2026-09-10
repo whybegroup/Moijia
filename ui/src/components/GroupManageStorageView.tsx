@@ -5,20 +5,17 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  Platform,
-  Alert,
 } from 'react-native';
 import { usePathname, useLocalSearchParams, type Href } from 'expo-router';
 import { useAppRouter as useRouter } from '../hooks/useAppRouter';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Fonts, Radius } from '../constants/theme';
 import { KeyboardSafeScrollView } from './KeyboardSafeScrollView';
-import { useGroup, useGroupStorageBreakdown, useCancelGroupStorageSubscription } from '../hooks/api';
+import { useGroup, useGroupStorageBreakdown } from '../hooks/api';
 import { useCurrentUserContext } from '../contexts/CurrentUserContext';
 import { usePullToRefresh } from '../hooks/usePullToRefresh';
 import { useMissingGroupRedirect } from '../hooks/useMissingResourceAlert';
 import { GroupStorageUsageBar } from './GroupStorageUsageBar';
-import { GroupStorageRequestForm } from './GroupStorageRequestForm';
 import { GroupDowngradeBanner } from './GroupDowngradeBanner';
 import { formatStorageBytes, resolveGroupMaxStorageBytes } from '../utils/groupStorage';
 import { parseFromEventId, buildGroupStorageCategoryUrl } from '../utils/breadcrumbUrl';
@@ -27,7 +24,6 @@ import {
   GROUP_STORAGE_CATEGORY_LABELS,
   groupStorageCategoryUsages,
 } from '../utils/groupStorageCategories';
-import { apiErrorMessage } from '../utils/apiErrors';
 
 export function GroupManageStorageView({ groupId }: { groupId: string }) {
   const router = useRouter();
@@ -46,7 +42,6 @@ export function GroupManageStorageView({ groupId }: { groupId: string }) {
   );
   const isMember =
     group?.membershipStatus === 'member' || group?.membershipStatus === 'admin';
-  const isOwner = (group?.ownerId ?? '') === currentUserId;
   const canView = !!currentUserId && isMember;
 
   const { data: breakdown, refetch: refetchBreakdown } = useGroupStorageBreakdown(
@@ -54,7 +49,6 @@ export function GroupManageStorageView({ groupId }: { groupId: string }) {
     currentUserId ?? '',
     canView
   );
-  const cancelSub = useCancelGroupStorageSubscription(groupId, currentUserId ?? '');
   const { refreshControl } = usePullToRefresh([refetchGroup, refetchBreakdown]);
 
   useMissingGroupRedirect(isError, groupError, group?.membershipStatus, fallbackHref);
@@ -79,16 +73,6 @@ export function GroupManageStorageView({ groupId }: { groupId: string }) {
     group.sizeTier
   );
   const categories = groupStorageCategoryUsages(breakdown?.categories);
-
-  const cancelSubscription = async () => {
-    try {
-      await cancelSub.mutateAsync();
-    } catch (e) {
-      const msg = apiErrorMessage(e, 'Could not cancel subscription');
-      if (Platform.OS === 'web') window.alert(msg);
-      else Alert.alert('Error', msg);
-    }
-  };
 
   return (
     <View style={styles.page}>
@@ -135,35 +119,6 @@ export function GroupManageStorageView({ groupId }: { groupId: string }) {
               </TouchableOpacity>
             ))}
           </View>
-          {isOwner && currentUserId ? (
-            <>
-              <Text style={[styles.sectionLabel, styles.sectionSpaced]}>STORAGE LIMIT</Text>
-              <View style={[styles.card, styles.requestCard]}>
-                <GroupStorageRequestForm
-                  groupId={groupId}
-                  userId={currentUserId}
-                  currentMaxBytes={maxBytes ?? 0}
-                  usedBytes={usedBytes}
-                  sizeTier={group.sizeTier}
-                />
-              </View>
-              {(group.sizeTier === 'medium' || group.sizeTier === 'large') && !group.graceEndsAt ? (
-                <TouchableOpacity
-                  onPress={() => void cancelSubscription()}
-                  disabled={cancelSub.isPending}
-                  style={styles.cancelBtn}
-                  accessibilityRole="button"
-                  accessibilityLabel="Cancel size add-on"
-                >
-                  {cancelSub.isPending ? (
-                    <ActivityIndicator color={Colors.notGoing} />
-                  ) : (
-                    <Text style={styles.cancelBtnText}>Cancel size add-on</Text>
-                  )}
-                </TouchableOpacity>
-              ) : null}
-            </>
-          ) : null}
         </View>
       </KeyboardSafeScrollView>
     </View>
@@ -186,14 +141,12 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     marginTop: 16,
   },
-  sectionSpaced: { marginTop: 20 },
   card: {
     backgroundColor: Colors.surface,
     borderRadius: Radius['2xl'],
     overflow: 'hidden',
     marginHorizontal: 20,
   },
-  requestCard: { paddingHorizontal: 16, paddingVertical: 14 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -205,15 +158,4 @@ const styles = StyleSheet.create({
   rowBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border },
   rowDot: { width: 10, height: 10, borderRadius: 5 },
   rowLabel: { flex: 1, fontSize: 14, fontFamily: Fonts.medium, color: Colors.text },
-  cancelBtn: {
-    marginHorizontal: 20,
-    marginTop: 12,
-    paddingVertical: 12,
-    alignItems: 'center',
-    borderRadius: Radius.lg,
-    borderWidth: 1.5,
-    borderColor: Colors.notGoing,
-    backgroundColor: Colors.notGoingBg,
-  },
-  cancelBtnText: { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.notGoing },
 });

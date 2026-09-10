@@ -34,7 +34,13 @@ export function isPurchaseCancelled(error: unknown): boolean {
       error.userCancelled === true
     );
   }
-  return false;
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'object' && error !== null && 'message' in error
+        ? String((error as { message: unknown }).message)
+        : '';
+  return /purchase(s)? cancelled|user cancelled|canceled/i.test(message);
 }
 
 export function purchasesErrorMessage(error: unknown, fallback = 'Something went wrong with your subscription.'): string {

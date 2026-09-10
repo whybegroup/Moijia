@@ -25,6 +25,7 @@ import { KeyboardSafeScrollView } from '../components/KeyboardSafeScrollView';
 import { useCreateGroup, useGroup, useUpdateGroup } from '../hooks/api/useGroups';
 import { useOwnedGroupQuota } from '../hooks/api/useUsers';
 import { usePurchases } from '../contexts/PurchasesContext';
+import { isPurchaseCancelled } from '../services/revenueCat';
 import { useAuth } from '../contexts/AuthContext';
 import { useCurrentUserContext } from '../contexts/CurrentUserContext';
 import { GroupAvatar } from '../components/GroupAvatar';
@@ -281,7 +282,15 @@ export default function CreateGroupScreen() {
                 );
               });
         if (!ok) return;
-        await purchaseExtraGroupSlot();
+        try {
+          await purchaseExtraGroupSlot();
+        } catch (e) {
+          if (isPurchaseCancelled(e)) {
+            Toast.show({ type: 'info', text1: 'Purchase cancelled' });
+            return;
+          }
+          throw e;
+        }
         await refetchQuota();
       }
 
@@ -301,6 +310,10 @@ export default function CreateGroupScreen() {
 
       handleBack();
     } catch (e) {
+      if (isPurchaseCancelled(e)) {
+        Toast.show({ type: 'info', text1: 'Purchase cancelled' });
+        return;
+      }
       let message = isEditing
         ? 'Failed to update group. Please try again.'
         : 'Failed to create group. Please try again.';

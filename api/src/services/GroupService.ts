@@ -266,6 +266,7 @@ export class GroupService {
     return {
       sizeTier,
       pendingSizeTier: group.pendingSizeTier ? parseSizeTier(group.pendingSizeTier) : null,
+      sizeStartedAt: group.sizeStartedAt ?? null,
       graceEndsAt: group.graceEndsAt ?? null,
       maxMemberCount: maxMembersForTier(sizeTier),
       memberAddsBlocked: memberAddsBlocked(sizeTier, memberCount),
