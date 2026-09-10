@@ -24,6 +24,10 @@ model User {
   notifPrefsJson String?
   /// JSON: ordered group ids for list / switcher UI (user preference)
   groupOrderJson String?
+  /// Purchased extra owned-group slots beyond the 5 free Small groups.
+  extraGroupSlots Int @default(0)
+  /// Email from the auth provider, used for billing notices.
+  email      String?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
@@ -64,8 +68,16 @@ model Group {
   inviteCode String?   @unique
   /// When true, new joins start as pending until an admin approves.
   requireApprovalToJoin Boolean @default(true)
-  /// Max bytes this group may store in S3. Default 2 GiB.
-  maxStorageBytes String @default("2147483648")
+  /// Max bytes this group may store in S3. Default Small = 1 GiB.
+  maxStorageBytes String @default("1073741824")
+  /// small | medium | large — source of storage and member caps.
+  sizeTier String @default("small")
+  /// Target tier after a cancelled/lapsed add-on (applied when graceEndsAt passes).
+  pendingSizeTier String?
+  graceEndsAt DateTime?
+  graceNotifiedAt DateTime?
+  /// RevenueCat product currently bound to this group's size add-on.
+  sizeProductId String?
   createdBy  String
   updatedBy  String
   createdAt  DateTime  @default(now())

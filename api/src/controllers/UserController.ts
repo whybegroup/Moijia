@@ -12,10 +12,11 @@ import {
   SuccessResponse,
   Response,
 } from 'tsoa';
-import { User, UserInput, UserUpdate, GroupOrderInput } from '../models';
+import { User, UserInput, UserUpdate, GroupOrderInput, GroupBillingSyncInput, OwnedGroupQuota } from '../models';
 import type { PushTokenInput } from '../models/PushToken';
 import { UserService } from '../services/UserService';
 import { PushTokenService } from '../services/PushTokenService';
+import { groupBilling } from '../services/GroupBillingService';
 
 @Route('users')
 @Tags('Users')
@@ -67,6 +68,38 @@ export class UserController extends Controller {
   @Post('sync')
   public async syncUser(@Body() body: UserInput): Promise<User> {
     return this.userService.upsertFromAuth(body);
+  }
+
+  /**
+   * How many groups this user can still own (5 free + extra slots).
+   */
+  @Get('{id}/owned-group-quota')
+  public async getOwnedGroupQuota(@Path() id: string): Promise<OwnedGroupQuota> {
+    return groupBilling.getOwnedGroupQuota(id);
+  }
+
+  /**
+   * Record a purchased extra owned-group slot ($0.99).
+   */
+  @Post('{id}/extra-group-slots')
+  public async addExtraGroupSlot(@Path() id: string): Promise<{ extraGroupSlots: number }> {
+    return groupBilling.addExtraGroupSlot(id);
+  }
+
+  /**
+   * Reconcile Medium/Large add-ons from RevenueCat with owned groups.
+   * Lapsed entitlements start a 15-day grace; restored entitlements clear it.
+   */
+  @Post('{id}/billing-sync')
+  public async syncBilling(
+    @Path() id: string,
+    @Body() body: GroupBillingSyncInput
+  ): Promise<OwnedGroupQuota> {
+    await groupBilling.syncOwnerEntitlements(id, {
+      mediumActive: !!body.mediumActive,
+      largeActive: !!body.largeActive,
+    });
+    return groupBilling.getOwnedGroupQuota(id);
   }
 
   /**

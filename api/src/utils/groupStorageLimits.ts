@@ -1,6 +1,22 @@
-export const DEFAULT_GROUP_MAX_STORAGE_BYTES = 2 * 1024 * 1024 * 1024;
-export const MIN_GROUP_STORAGE_LIMIT_BYTES = 10 * 1024 * 1024 * 1024;
-export const MAX_OWNER_STORAGE_LIMIT_BYTES = 100 * 1024 * 1024 * 1024;
+import {
+  DEFAULT_GROUP_MAX_STORAGE_BYTES,
+  parseSizeTier,
+  storageCapForTier,
+} from './groupTiers';
+
+export {
+  DEFAULT_GROUP_MAX_STORAGE_BYTES,
+  FREE_OWNED_GROUP_LIMIT,
+  GROUP_DOWNGRADE_GRACE_MS,
+  GROUP_TIERS,
+  inferSizeTierFromBytes,
+  isPaidSizeTier,
+  maxMembersForTier,
+  memberAddsBlocked,
+  parseSizeTier,
+  storageCapForTier,
+  type GroupSizeTier,
+} from './groupTiers';
 
 export function storageBytesFromDb(raw: unknown): number {
   if (typeof raw === 'number' && Number.isFinite(raw)) return Math.floor(raw);
@@ -19,11 +35,12 @@ export function storageBytesToDb(n: number): string {
   return String(Math.max(0, Math.floor(Number.isFinite(n) ? n : 0)));
 }
 
-export function groupMaxStorageBytes(raw: unknown): number {
-  const n = storageBytesFromDb(raw);
-  if (n <= 0 || n < MIN_GROUP_STORAGE_LIMIT_BYTES) {
-    return DEFAULT_GROUP_MAX_STORAGE_BYTES;
+export function groupMaxStorageBytes(raw: unknown, sizeTier?: unknown): number {
+  if (sizeTier === 'small' || sizeTier === 'medium' || sizeTier === 'large') {
+    return storageCapForTier(sizeTier);
   }
+  const n = storageBytesFromDb(raw);
+  if (n <= 0) return DEFAULT_GROUP_MAX_STORAGE_BYTES;
   return n;
 }
 
@@ -49,6 +66,19 @@ export function formatStorageBytes(bytes: number): string {
 
 export function gbToBytes(gb: number): number {
   return Math.round(gb) * 1024 * 1024 * 1024;
+}
+
+export function isPaidStorageCap(bytes: number): boolean {
+  const tier = parseSizeTier(
+    bytes >= storageCapForTier('large') ? 'large' : bytes >= storageCapForTier('medium') ? 'medium' : 'small'
+  );
+  return tier !== 'small' && storageCapForTier(tier) === bytes;
+}
+
+export function paidSizeTierFromBytes(bytes: number): 'medium' | 'large' | null {
+  if (bytes === storageCapForTier('large')) return 'large';
+  if (bytes === storageCapForTier('medium')) return 'medium';
+  return null;
 }
 
 export function groupStorageExceededMessage(maxBytes: number): string {

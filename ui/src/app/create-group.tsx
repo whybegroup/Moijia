@@ -23,6 +23,8 @@ import { UserAvatar } from '../components/UserAvatar';
 import { EventFormPopoverChrome } from '../components/EventFormPopoverChrome';
 import { KeyboardSafeScrollView } from '../components/KeyboardSafeScrollView';
 import { useCreateGroup, useGroup, useUpdateGroup } from '../hooks/api/useGroups';
+import { useOwnedGroupQuota } from '../hooks/api/useUsers';
+import { usePurchases } from '../contexts/PurchasesContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useCurrentUserContext } from '../contexts/CurrentUserContext';
 import { GroupAvatar } from '../components/GroupAvatar';
@@ -72,6 +74,11 @@ export default function CreateGroupScreen() {
   const { userId: currentUserId, user: currentUser } = useCurrentUserContext();
   const createGroup = useCreateGroup();
   const updateGroup = useUpdateGroup(editId ?? '', currentUserId ?? '');
+  const { purchaseExtraGroupSlot } = usePurchases();
+  const actorIdForQuota = (currentUserId ?? user?.uid ?? '').trim();
+  const { data: groupQuota, refetch: refetchQuota } = useOwnedGroupQuota(
+    isEditing ? '' : actorIdForQuota
+  );
   const { data: editingGroup } = useGroup(editId ?? '', currentUserId ?? '', { enabled: isEditing });
   const [newGroupId] = useState(() => Crypto.randomUUID());
   const groupId = editId ?? newGroupId;
@@ -253,6 +260,29 @@ export default function CreateGroupScreen() {
         Toast.show({ type: 'success', text1: 'Group updated' });
         handleBack();
         return;
+      }
+
+      const quota = groupQuota ?? (await refetchQuota()).data;
+      if (quota && !quota.canCreateGroup) {
+        const extra = quota.ownedGroupCount - quota.freeGroupLimit + 1;
+        const ok =
+          Platform.OS === 'web'
+            ? window.confirm(
+                `Your first ${quota.freeGroupLimit} groups are free. Extra group #${extra} is $0.99. Continue to purchase?`
+              )
+            : await new Promise<boolean>((resolve) => {
+                Alert.alert(
+                  'Extra group',
+                  `Your first ${quota.freeGroupLimit} groups are free. Another group is $0.99.`,
+                  [
+                    { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+                    { text: 'Buy $0.99', onPress: () => resolve(true) },
+                  ]
+                );
+              });
+        if (!ok) return;
+        await purchaseExtraGroupSlot();
+        await refetchQuota();
       }
 
       await createGroup.mutateAsync({

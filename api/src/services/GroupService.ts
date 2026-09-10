@@ -25,9 +25,16 @@ import { extractUploadUrlsFromForumBody } from '../utils/groupPostBodyUploads';
 import { NotificationService } from './NotificationService';
 import { S3UploadService } from './S3UploadService';
 import { groupStorage } from './GroupStorageService';
+import { groupBilling } from './GroupBillingService';
 import { UserService } from './UserService';
 import { sortByGroupOrder } from '../utils/groupOrder';
-import { DEFAULT_GROUP_MAX_STORAGE_BYTES, groupMaxStorageBytes, storageBytesToDb } from '../utils/groupStorageLimits';
+import {
+  groupMaxStorageBytes,
+  maxMembersForTier,
+  memberAddsBlocked,
+  parseSizeTier,
+  storageBytesToDb,
+} from '../utils/groupStorageLimits';
 import { httpError } from '../utils/httpError';
 import {
   extractMentionTokens,
@@ -254,6 +261,18 @@ export class GroupService {
     return group.coverPhotos.map((p) => p.photoUrl);
   }
 
+  private groupSizeFields(group: any, memberCount: number) {
+    const sizeTier = parseSizeTier(group.sizeTier);
+    return {
+      sizeTier,
+      pendingSizeTier: group.pendingSizeTier ? parseSizeTier(group.pendingSizeTier) : null,
+      graceEndsAt: group.graceEndsAt ?? null,
+      maxMemberCount: maxMembersForTier(sizeTier),
+      memberAddsBlocked: memberAddsBlocked(sizeTier, memberCount),
+      maxStorageBytes: groupMaxStorageBytes(group.maxStorageBytes, group.sizeTier),
+    };
+  }
+
   /**
    * Map Prisma group to GroupScoped based on user's membership
    */
@@ -283,7 +302,7 @@ export class GroupService {
       coverPhotos: this.mapGroupCoverUrls(group),
       avatarSeed: group.avatarSeed,
       requireApprovalToJoin: group.requireApprovalToJoin ?? true,
-      maxStorageBytes: groupMaxStorageBytes(group.maxStorageBytes),
+      ...this.groupSizeFields(group, memberCount),
       memberCount,
       membershipStatus,
       deletedAt: group.deletedAt ?? undefined,
@@ -333,7 +352,9 @@ export class GroupService {
       throw Object.assign(new Error('ownerId and createdBy are required'), { status: 400 });
     }
 
-    const maxStorageBytes = DEFAULT_GROUP_MAX_STORAGE_BYTES;
+    await groupBilling.assertCanCreateOwnedGroup(ownerId.trim());
+
+    const maxStorageBytes = groupMaxStorageBytes(undefined, 'small');
     const pendingUsed = await groupStorage.getUsedStorageBytes(input.id);
     if (pendingUsed > maxStorageBytes) {
       throw httpError(400, groupStorage.usedExceedsMaxMessage(pendingUsed));
@@ -379,6 +400,7 @@ export class GroupService {
     const group = await prisma.group.create({
       data: {
         ...groupData,
+        sizeTier: 'small',
         maxStorageBytes: storageBytesToDb(maxStorageBytes),
         inviteCode: finalInviteCode,
         createdBy,
@@ -604,9 +626,9 @@ export class GroupService {
   public async setStorageLimit(
     groupId: string,
     userId: string,
-    maxStorageBytes: number
-  ): Promise<{ maxStorageBytes: number }> {
-    return groupStorage.setMaxStorage({ groupId, userId, maxStorageBytes });
+    sizeTier: 'medium' | 'large'
+  ): Promise<{ maxStorageBytes: number; sizeTier: string }> {
+    return groupBilling.applyPaidSizeTier({ groupId, userId, sizeTier });
   }
 
   public async cancelStorageSubscription(
@@ -1402,6 +1424,7 @@ export class GroupService {
       }
       if (existing.status === 'rejected') {
         const status = group.requireApprovalToJoin ? 'pending' : 'active';
+        if (status === 'active') await groupBilling.assertCanAddMember(groupId);
         await prisma.groupMember.update({
           where: { groupId_userId: { groupId, userId } },
           data: { status },
@@ -1418,6 +1441,7 @@ export class GroupService {
     }
 
     const status = group.requireApprovalToJoin ? 'pending' : 'active';
+    if (status === 'active') await groupBilling.assertCanAddMember(groupId);
     await prisma.groupMember.create({
       data: {
         groupId,
@@ -1626,6 +1650,7 @@ export class GroupService {
     const { userId, action: requestAction } = action;
 
     if (requestAction === 'approve') {
+      await groupBilling.assertCanAddMember(groupId);
       await prisma.groupMember.update({
         where: {
           groupId_userId: {
@@ -1832,7 +1857,7 @@ export class GroupService {
       avatarSeed: group.avatarSeed,
       inviteCode: group.inviteCode,
       requireApprovalToJoin: group.requireApprovalToJoin ?? true,
-      maxStorageBytes: groupMaxStorageBytes(group.maxStorageBytes),
+      ...this.groupSizeFields(group, activeMembers.length),
       ownerId: owner ? owner.userId : '',
       adminIds: admins.map((m: any) => m.userId),
       memberIds: activeMembers.map((m: any) => m.userId),

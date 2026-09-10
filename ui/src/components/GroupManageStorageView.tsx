@@ -19,11 +19,8 @@ import { usePullToRefresh } from '../hooks/usePullToRefresh';
 import { useMissingGroupRedirect } from '../hooks/useMissingResourceAlert';
 import { GroupStorageUsageBar } from './GroupStorageUsageBar';
 import { GroupStorageRequestForm } from './GroupStorageRequestForm';
-import {
-  DEFAULT_GROUP_MAX_STORAGE_BYTES,
-  formatStorageBytes,
-  resolveGroupMaxStorageBytes,
-} from '../utils/groupStorage';
+import { GroupDowngradeBanner } from './GroupDowngradeBanner';
+import { formatStorageBytes, resolveGroupMaxStorageBytes } from '../utils/groupStorage';
 import { parseFromEventId, buildGroupStorageCategoryUrl } from '../utils/breadcrumbUrl';
 import {
   GROUP_STORAGE_CATEGORY_COLORS,
@@ -77,7 +74,10 @@ export function GroupManageStorageView({ groupId }: { groupId: string }) {
   }
 
   const usedBytes = breakdown?.usedBytes ?? group.usedStorageBytes ?? 0;
-  const maxBytes = resolveGroupMaxStorageBytes(breakdown?.maxBytes ?? group.maxStorageBytes);
+  const maxBytes = resolveGroupMaxStorageBytes(
+    breakdown?.maxBytes ?? group.maxStorageBytes,
+    group.sizeTier
+  );
   const categories = groupStorageCategoryUsages(breakdown?.categories);
 
   const cancelSubscription = async () => {
@@ -100,6 +100,10 @@ export function GroupManageStorageView({ groupId }: { groupId: string }) {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.content}>
+          <GroupDowngradeBanner
+            pendingSizeTier={group.pendingSizeTier}
+            graceEndsAt={group.graceEndsAt}
+          />
           <GroupStorageUsageBar
             usedBytes={usedBytes}
             maxBytes={maxBytes}
@@ -140,20 +144,21 @@ export function GroupManageStorageView({ groupId }: { groupId: string }) {
                   userId={currentUserId}
                   currentMaxBytes={maxBytes ?? 0}
                   usedBytes={usedBytes}
+                  sizeTier={group.sizeTier}
                 />
               </View>
-              {(maxBytes ?? 0) > DEFAULT_GROUP_MAX_STORAGE_BYTES ? (
+              {(group.sizeTier === 'medium' || group.sizeTier === 'large') && !group.graceEndsAt ? (
                 <TouchableOpacity
                   onPress={() => void cancelSubscription()}
                   disabled={cancelSub.isPending}
                   style={styles.cancelBtn}
                   accessibilityRole="button"
-                  accessibilityLabel="Cancel subscription"
+                  accessibilityLabel="Cancel size add-on"
                 >
                   {cancelSub.isPending ? (
                     <ActivityIndicator color={Colors.notGoing} />
                   ) : (
-                    <Text style={styles.cancelBtnText}>Cancel subscription</Text>
+                    <Text style={styles.cancelBtnText}>Cancel size add-on</Text>
                   )}
                 </TouchableOpacity>
               ) : null}

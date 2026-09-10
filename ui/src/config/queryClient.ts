@@ -22,6 +22,7 @@ export const queryKeys = {
   users: {
     all: ['users'] as const,
     detail: (id: string) => ['users', id] as const,
+    quota: (id: string) => ['users', id, 'owned-group-quota'] as const,
   },
   groups: {
     _base: ['groups'] as const,

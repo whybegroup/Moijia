@@ -41,3 +41,11 @@ export function useUpdateUser(id: string) {
     },
   });
 }
+
+export function useOwnedGroupQuota(userId: string) {
+  return useQuery({
+    queryKey: queryKeys.users.quota(userId),
+    queryFn: () => UsersService.getOwnedGroupQuota(userId),
+    enabled: !!userId,
+  });
+}

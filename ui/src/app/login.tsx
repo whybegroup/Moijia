@@ -19,8 +19,11 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { signInWithGoogle, signInWithEmail, signUpWithEmail, sendPasswordReset } from '../config/firebase';
 import { googleIosClientId, googleWebClientId } from '../config/googleAuth';
 import { signInWithGoogleIdTokenNative } from '../config/googleSignIn';
+import { type Href } from 'expo-router';
 import { Colors, Fonts, Radius, Shadows } from '../constants/theme';
 import { edgeToEdgeModalProps } from '../components/edgeToEdgeModalProps';
+import { useAppRouter as useRouter } from '../hooks/useAppRouter';
+import { PRIVACY_PATH, TERMS_PATH } from '../constants/legal';
 
 type AuthMode = 'signin' | 'signup';
 
@@ -54,6 +57,7 @@ function nativeGoogleSignInHint(err: unknown): string | undefined {
 }
 
 export default function LoginScreen() {
+  const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const sheetHeight = Math.round(windowHeight * 0.92);
@@ -245,7 +249,20 @@ export default function LoginScreen() {
           </TouchableOpacity>
 
           <Text style={styles.disclaimer}>
-            By continuing, you agree to our Terms of Service and Privacy Policy
+            By continuing, you agree to our{' '}
+            <Text
+              style={styles.disclaimerLink}
+              onPress={() => router.push(TERMS_PATH as Href)}
+            >
+              Terms of Service
+            </Text>
+            {' '}and{' '}
+            <Text
+              style={styles.disclaimerLink}
+              onPress={() => router.push(PRIVACY_PATH as Href)}
+            >
+              Privacy Policy
+            </Text>
           </Text>
         </View>
       </SafeAreaView>
@@ -600,5 +617,10 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 18,
     marginTop: 8,
+  },
+  disclaimerLink: {
+    fontFamily: Fonts.medium,
+    color: Colors.textSub,
+    textDecorationLine: 'underline',
   },
 });

@@ -23,8 +23,13 @@ export interface Group {
   inviteCode?: string | null;
   /** When true, new members must be approved; when false, join is immediate */
   requireApprovalToJoin: boolean;
-  /** Max bytes this group may store in S3. Default 2 GiB. */
+  /** Max bytes this group may store in S3. Default Small = 1 GiB. */
   maxStorageBytes: number;
+  sizeTier: 'small' | 'medium' | 'large';
+  pendingSizeTier?: 'small' | 'medium' | 'large' | null;
+  graceEndsAt?: Date | null;
+  maxMemberCount?: number | null;
+  memberAddsBlocked?: boolean;
   /** Bytes used by this group's images and file attachments. */
   usedStorageBytes?: number;
   /** ID of the group's owner */
@@ -57,8 +62,13 @@ export interface GroupScoped {
   coverPhotos: string[];
   avatarSeed?: string | null;
   requireApprovalToJoin: boolean;
-  /** Max bytes this group may store in S3. Default 2 GiB. */
+  /** Max bytes this group may store in S3. Default Small = 1 GiB. */
   maxStorageBytes: number;
+  sizeTier: 'small' | 'medium' | 'large';
+  pendingSizeTier?: 'small' | 'medium' | 'large' | null;
+  graceEndsAt?: Date | null;
+  maxMemberCount?: number | null;
+  memberAddsBlocked?: boolean;
   /** Bytes used by this group's images and file attachments. Present on group detail. */
   usedStorageBytes?: number;
   memberCount: number;
@@ -203,9 +213,21 @@ export interface GroupPostReactionInput {
   emoji: string;
 }
 
-/** Owner-applied change to the group's storage cap. Takes effect immediately. */
+/** Owner-applied Medium or Large add-on. Takes effect immediately on upgrade; downgrade uses grace if over cap. */
 export interface GroupStorageLimitInput {
-  maxStorageBytes: number;
+  sizeTier: 'medium' | 'large';
+}
+
+export interface GroupBillingSyncInput {
+  mediumActive: boolean;
+  largeActive: boolean;
+}
+
+export interface OwnedGroupQuota {
+  ownedGroupCount: number;
+  freeGroupLimit: number;
+  extraGroupSlots: number;
+  canCreateGroup: boolean;
 }
 
 export type GroupStorageCategoryId = 'group' | 'events' | 'polls' | 'posts';

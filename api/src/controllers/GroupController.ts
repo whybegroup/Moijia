@@ -251,25 +251,30 @@ export class GroupController extends Controller {
   }
 
   /**
-   * Set this group's storage cap. Owner only. Takes effect immediately.
-   * Must stay above current usage and within 10–100 GB.
+   * Set this group's size add-on (Medium or Large). Owner only.
+   * Upgrades apply immediately (stores prorate). Downgrades that don't fit start a 15-day grace.
    */
   @Put('{id}/max-storage')
   public async setGroupStorageLimit(
     @Path() id: string,
     @Query() userId: string,
     @Body() body: GroupStorageLimitInput
-  ): Promise<{ maxStorageBytes: number }> {
+  ): Promise<{ maxStorageBytes: number; sizeTier: string }> {
     if (!userId) {
       this.setStatus(400);
       throw new Error('userId is required');
     }
-    return this.groupService.setStorageLimit(id, userId, body.maxStorageBytes);
+    if (body.sizeTier !== 'medium' && body.sizeTier !== 'large') {
+      this.setStatus(400);
+      throw new Error('sizeTier must be medium or large');
+    }
+    return this.groupService.setStorageLimit(id, userId, body.sizeTier);
   }
 
   /**
-   * Revert this group's storage cap to the 2 GB default. Owner only.
-   * Fails if current usage is above 2 GB.
+   * Start a 15-day grace toward Small after canceling the size add-on. Owner only.
+   * Apple/Google still bill until the paid period ends; this is the in-app downgrade clock
+   * once paid access is gone or the owner opts out.
    */
   @Post('{id}/cancel-storage-subscription')
   public async cancelStorageSubscription(

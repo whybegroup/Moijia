@@ -7,11 +7,10 @@ import {
 } from '../utils/groupPostBodyUploads';
 import {
   DEFAULT_GROUP_MAX_STORAGE_BYTES,
-  MAX_OWNER_STORAGE_LIMIT_BYTES,
-  MIN_GROUP_STORAGE_LIMIT_BYTES,
   formatStorageBytes,
   groupMaxStorageBytes,
   groupStorageExceededMessage,
+  paidSizeTierFromBytes,
   storageBytesToDb,
 } from '../utils/groupStorageLimits';
 import { httpError } from '../utils/httpError';
@@ -36,10 +35,10 @@ export class GroupStorageService {
   public async getMaxStorageBytes(groupId: string): Promise<number> {
     const group = await prisma.group.findUnique({
       where: { id: groupId },
-      select: { maxStorageBytes: true },
+      select: { maxStorageBytes: true, sizeTier: true },
     });
     if (!group) return DEFAULT_GROUP_MAX_STORAGE_BYTES;
-    return groupMaxStorageBytes(group.maxStorageBytes);
+    return groupMaxStorageBytes(group.maxStorageBytes, group.sizeTier);
   }
 
   public async trackedBytesForKey(objectKey: string): Promise<number> {
@@ -63,7 +62,7 @@ export class GroupStorageService {
 
     const group = await prisma.group.findUnique({
       where: { id: groupId },
-      select: { id: true, maxStorageBytes: true, deletedAt: true },
+      select: { id: true, maxStorageBytes: true, sizeTier: true, deletedAt: true },
     });
 
     if (group) {
@@ -81,7 +80,9 @@ export class GroupStorageService {
       }
     }
 
-    const maxBytes = group ? groupMaxStorageBytes(group.maxStorageBytes) : DEFAULT_GROUP_MAX_STORAGE_BYTES;
+    const maxBytes = group
+      ? groupMaxStorageBytes(group.maxStorageBytes, group.sizeTier)
+      : DEFAULT_GROUP_MAX_STORAGE_BYTES;
     const used = await this.getUsedStorageBytes(groupId);
     if (used >= maxBytes || used + extra > maxBytes) {
       throw httpError(413, groupStorageExceededMessage(maxBytes));
@@ -472,6 +473,27 @@ export class GroupStorageService {
     return [...new Set([...referenced, ...tracked.map((r) => r.publicUrl)].filter(Boolean))];
   }
 
+  public async purgeOldestUntilUnderCap(groupId: string, capBytes: number): Promise<void> {
+    const files = await prisma.groupStorageFile.findMany({
+      where: { groupId },
+      orderBy: { createdAt: 'asc' },
+      select: { publicUrl: true },
+    });
+    const { S3UploadService } = await import('./S3UploadService');
+    const objectStore = new S3UploadService();
+    let used = await this.getUsedStorageBytes(groupId);
+    for (const file of files) {
+      if (used <= capBytes) break;
+      try {
+        await this.unlinkFileFromGroup(groupId, file.publicUrl);
+      } catch {
+        /* already unlinked */
+      }
+      await objectStore.deleteManagedUploadBestEffort(file.publicUrl);
+      used = await this.getUsedStorageBytes(groupId);
+    }
+  }
+
   public usedExceedsMaxMessage(used: number): string {
     return `Uploaded files already use ${formatStorageBytes(used)}, which exceeds this group's storage limit.`;
   }
@@ -485,46 +507,16 @@ export class GroupStorageService {
     userId: string;
     maxStorageBytes: number;
   }): Promise<{ maxStorageBytes: number }> {
-    const group = await prisma.group.findUnique({
-      where: { id: input.groupId },
-      select: { id: true, name: true, deletedAt: true, maxStorageBytes: true },
+    const tier = paidSizeTierFromBytes(Math.floor(input.maxStorageBytes));
+    if (!tier) {
+      throw httpError(400, 'Storage limit must be Medium (10 GB) or Large (100 GB)');
+    }
+    const { groupBilling } = await import('./GroupBillingService');
+    return groupBilling.applyPaidSizeTier({
+      groupId: input.groupId,
+      userId: input.userId,
+      sizeTier: tier,
     });
-    if (!group || group.deletedAt) {
-      throw httpError(404, 'Group not found');
-    }
-    const member = await prisma.groupMember.findUnique({
-      where: { groupId_userId: { groupId: input.groupId, userId: input.userId } },
-      select: { status: true, role: true },
-    });
-    if (!member || member.status !== 'active' || member.role !== 'owner') {
-      throw httpError(403, 'Must be the group owner to change the storage limit');
-    }
-
-    const cap = Math.floor(input.maxStorageBytes);
-    if (!Number.isFinite(cap) || cap < MIN_GROUP_STORAGE_LIMIT_BYTES) {
-      throw httpError(400, 'Storage limit must be at least 10 GB');
-    }
-    if (cap > MAX_OWNER_STORAGE_LIMIT_BYTES) {
-      throw httpError(400, 'Storage limit cannot exceed 100 GB');
-    }
-    const current = groupMaxStorageBytes(group.maxStorageBytes);
-    if (cap === current) {
-      return { maxStorageBytes: cap };
-    }
-    const used = await this.getUsedStorageBytes(input.groupId);
-    if (cap <= used) {
-      throw httpError(
-        400,
-        `Storage limit must be higher than current usage (${formatStorageBytes(used)}).`
-      );
-    }
-
-    await prisma.group.update({
-      where: { id: input.groupId },
-      data: { maxStorageBytes: storageBytesToDb(cap) },
-    });
-    await this.notifyStorageLimit(input.groupId, group.name, cap);
-    return { maxStorageBytes: cap };
   }
 
   public async cancelStorageSubscription(input: {
@@ -533,7 +525,7 @@ export class GroupStorageService {
   }): Promise<{ maxStorageBytes: number }> {
     const group = await prisma.group.findUnique({
       where: { id: input.groupId },
-      select: { id: true, name: true, deletedAt: true, maxStorageBytes: true },
+      select: { id: true, name: true, deletedAt: true, maxStorageBytes: true, sizeTier: true, graceNotifiedAt: true },
     });
     if (!group || group.deletedAt) {
       throw httpError(404, 'Group not found');
@@ -546,25 +538,14 @@ export class GroupStorageService {
       throw httpError(403, 'Must be the group owner to cancel the storage subscription');
     }
 
-    const cap = DEFAULT_GROUP_MAX_STORAGE_BYTES;
-    const current = groupMaxStorageBytes(group.maxStorageBytes);
-    if (current <= cap) {
-      return { maxStorageBytes: current };
+    const { parseSizeTier, isPaidSizeTier } = await import('../utils/groupStorageLimits');
+    const current = parseSizeTier(group.sizeTier);
+    if (!isPaidSizeTier(current)) {
+      return { maxStorageBytes: groupMaxStorageBytes(group.maxStorageBytes, group.sizeTier) };
     }
-    const used = await this.getUsedStorageBytes(input.groupId);
-    if (used > cap) {
-      throw httpError(
-        400,
-        `This group is using ${formatStorageBytes(used)}, which is more than ${formatStorageBytes(cap)}. Delete files before canceling the subscription.`
-      );
-    }
-
-    await prisma.group.update({
-      where: { id: input.groupId },
-      data: { maxStorageBytes: storageBytesToDb(cap) },
-    });
-    await this.notifyStorageLimit(input.groupId, group.name, cap);
-    return { maxStorageBytes: cap };
+    const { groupBilling } = await import('./GroupBillingService');
+    await groupBilling.startGrace(group.id, group.name, input.userId, 'small', group.graceNotifiedAt);
+    return { maxStorageBytes: groupMaxStorageBytes(group.maxStorageBytes, group.sizeTier) };
   }
 
   public async grantStorage(groupId: string, maxStorageBytes: number): Promise<void> {
@@ -582,7 +563,13 @@ export class GroupStorageService {
 
     await prisma.group.update({
       where: { id: groupId },
-      data: { maxStorageBytes: storageBytesToDb(cap) },
+      data: {
+        maxStorageBytes: storageBytesToDb(cap),
+        sizeTier: paidSizeTierFromBytes(cap) ?? 'small',
+        pendingSizeTier: null,
+        graceEndsAt: null,
+        graceNotifiedAt: null,
+      },
     });
     await this.notifyStorageLimit(groupId, group.name, cap);
   }

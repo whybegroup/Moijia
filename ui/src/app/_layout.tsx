@@ -22,6 +22,7 @@ import { queryClient } from '../config/queryClient';
 import { refreshAppOnResume } from '../utils/refreshAppOnResume';
 import { prefetchTwemojiAssets } from '../services/twemojiCache';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
+import { PurchasesProvider } from '../contexts/PurchasesContext';
 import { CurrentUserProvider } from '../contexts/CurrentUserContext';
 import { PushNotificationsRegistrar } from '../components/PushNotificationsRegistrar';
 import { ForegroundNotificationBanner } from '../components/ForegroundNotificationBanner';
@@ -29,6 +30,7 @@ import { WebAppFrame } from '../components/WebAppFrame';
 import { OverflowMenuHostProvider } from '../components/OverflowMenuHost';
 import { NavigationGuardReset } from '../components/NavigationGuardReset';
 import { firstSearchParam, parseReturnToParam, withReturnTo } from '../utils/navigationReturn';
+import { isPublicAppSegment } from '../constants/legal';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -44,11 +46,12 @@ function RootLayoutNav() {
       return;
     }
 
+    const publicScreen = isPublicAppSegment(segments[0]);
     const inAuthGroup = segments[0] === 'login';
 
     // Small delay to ensure navigation is ready
     const timeout = setTimeout(() => {
-      if (!user && !inAuthGroup) {
+      if (!user && !publicScreen) {
         const returnPath = pathname && pathname !== '/' ? pathname : undefined;
         router.replace(returnPath ? withReturnTo('/login', returnPath) : '/login');
       } else if (user && inAuthGroup) {
@@ -67,6 +70,8 @@ function RootLayoutNav() {
     <NavigationGuardReset />
     <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
       <Stack.Screen name="login" options={{ headerShown: false }} />
+      <Stack.Screen name="terms" options={{ headerShown: false }} />
+      <Stack.Screen name="privacy" options={{ headerShown: false }} />
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="event/[id]" />
       <Stack.Screen
@@ -160,7 +165,8 @@ export default function RootLayout() {
     <ReduxProvider store={store}>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
-          <CurrentUserProvider>
+          <PurchasesProvider>
+            <CurrentUserProvider>
             {Platform.OS !== 'web' ? <PushNotificationsRegistrar /> : null}
             <GestureHandlerRootView style={{ flex: 1 }}>
               <OverflowMenuHostProvider>
@@ -175,7 +181,8 @@ export default function RootLayout() {
               </WebAppFrame>
               </OverflowMenuHostProvider>
             </GestureHandlerRootView>
-          </CurrentUserProvider>
+            </CurrentUserProvider>
+          </PurchasesProvider>
         </AuthProvider>
       </QueryClientProvider>
     </ReduxProvider>

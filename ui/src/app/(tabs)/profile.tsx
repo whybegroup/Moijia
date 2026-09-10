@@ -8,6 +8,7 @@ import { usePullToRefresh } from '../../hooks/usePullToRefresh';
 import { useAuth } from '../../contexts/AuthContext';
 import { useCurrentUserContext } from '../../contexts/CurrentUserContext';
 import { UserAvatar } from '../../components/UserAvatar';
+import { SubscriptionSettingsCard } from '../../components/SubscriptionSettingsCard';
 import { AvatarPickerModal } from '../../components/AvatarPickerModal';
 import { Toggle } from '../../components/ui';
 import { deleteManagedUploadFireAndForget } from '../../services/managedUploadDelete';
@@ -489,6 +490,8 @@ export default function ProfileScreen() {
             <Text style={styles.infoValueMuted}>{signInProviderLabels(firebaseUser)}</Text>
           </View>
         </View>
+
+        <SubscriptionSettingsCard />
 
         {user.notifPrefs ? (
           <>

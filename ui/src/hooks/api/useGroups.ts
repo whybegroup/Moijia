@@ -14,6 +14,7 @@ import {
   type GroupScoped,
   type MembershipRequestAction,
   type Partial_NotifPrefs_,
+  GroupStorageLimitInput,
 } from '@moijia/client';
 import { reorderGroupsInCache } from '../../utils/groupOrder';
 import { queryKeys } from '../../config/queryClient';
@@ -108,6 +109,7 @@ export function useCreateGroup() {
     mutationFn: (data: GroupInput) => GroupsService.createGroup(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.groups._base });
+      queryClient.invalidateQueries({ queryKey: queryKeys.users.all });
     },
   });
 }
@@ -166,8 +168,13 @@ export function useUpdateGroup(id: string, userId: string) {
 export function useSetGroupStorageLimit(groupId: string, userId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (maxStorageBytes: number) =>
-      GroupsService.setGroupStorageLimit(groupId, userId, { maxStorageBytes }),
+    mutationFn: (sizeTier: 'medium' | 'large') =>
+      GroupsService.setGroupStorageLimit(groupId, userId, {
+        sizeTier:
+          sizeTier === 'large'
+            ? GroupStorageLimitInput.sizeTier.LARGE
+            : GroupStorageLimitInput.sizeTier.MEDIUM,
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.groups.storageBreakdown(groupId) });
       queryClient.invalidateQueries({ queryKey: queryKeys.groups.detail(groupId, userId) });

@@ -8,7 +8,7 @@ const prisma = new PrismaClient();
 
 export class UserService {
   private mapUser(row: any): User {
-    const { notifPrefsJson, ...rest } = row;
+    const { notifPrefsJson, extraGroupSlots: _slots, email: _email, ...rest } = row;
     return {
       ...rest,
       notifPrefs: parseNotifPrefsJson(notifPrefsJson),
@@ -57,11 +57,13 @@ export class UserService {
         displayName: input.displayName,
         avatarSeed: input.avatarSeed ?? null,
         thumbnail: input.thumbnail ?? null,
+        ...(input.email !== undefined ? { email: input.email } : {}),
       },
       update: {
         name: input.name,
         ...(input.avatarSeed !== undefined ? { avatarSeed: input.avatarSeed } : {}),
         ...(input.thumbnail !== undefined ? { thumbnail: input.thumbnail } : {}),
+        ...(input.email !== undefined ? { email: input.email } : {}),
       },
     });
     return this.mapUser(row);

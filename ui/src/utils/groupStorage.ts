@@ -1,4 +1,12 @@
-export const DEFAULT_GROUP_MAX_STORAGE_BYTES = 2 * 1024 * 1024 * 1024;
+import {
+  DEFAULT_GROUP_MAX_STORAGE_BYTES,
+  GROUP_TIERS,
+  parseSizeTier,
+  storageCapForTier,
+  type GroupSizeTier,
+} from './groupTiers';
+
+export { DEFAULT_GROUP_MAX_STORAGE_BYTES } from './groupTiers';
 
 export const GROUP_STORAGE_FULL_TITLE = 'Not enough storage';
 export const GROUP_STORAGE_FULL_MESSAGE =
@@ -12,9 +20,14 @@ export function groupStorageDoesNotFitMessage(fileBytes: number, remainingBytes:
   return `This file is ${formatStorageBytes(fileBytes)}, but only ${formatStorageBytes(remainingBytes)} is left. Delete files or choose a smaller file.`;
 }
 
-export function resolveGroupMaxStorageBytes(max?: number | null): number {
+export function resolveGroupMaxStorageBytes(
+  max?: number | null,
+  sizeTier?: string | null
+): number {
+  if (sizeTier === 'small' || sizeTier === 'medium' || sizeTier === 'large') {
+    return storageCapForTier(sizeTier);
+  }
   const n = max && max > 0 ? max : DEFAULT_GROUP_MAX_STORAGE_BYTES;
-  if (n < STORAGE_REQUEST_MIN_GB * 1024 * 1024 * 1024) return DEFAULT_GROUP_MAX_STORAGE_BYTES;
   return n;
 }
 
@@ -27,19 +40,22 @@ function storageNumber(value: unknown): number {
   return 0;
 }
 
-export function groupStorageRemainingBytes(used?: unknown, max?: unknown): number {
+export function groupStorageRemainingBytes(
+  used?: unknown,
+  max?: unknown,
+  sizeTier?: string | null
+): number {
   const usedN = storageNumber(used);
-  const maxN = resolveGroupMaxStorageBytes(storageNumber(max));
+  const maxN = resolveGroupMaxStorageBytes(storageNumber(max), sizeTier);
   return Math.max(0, maxN - usedN);
 }
 
-export function isGroupStorageFull(used?: unknown, max?: unknown): boolean {
-  return groupStorageRemainingBytes(used, max) <= 0;
+export function isGroupStorageFull(used?: unknown, max?: unknown, sizeTier?: string | null): boolean {
+  return groupStorageRemainingBytes(used, max, sizeTier) <= 0;
 }
 
-export const STORAGE_REQUEST_MIN_GB = 10;
-export const STORAGE_REQUEST_MAX_GB = 100;
-export const STORAGE_REQUEST_STEP_GB = 10;
+export const PAID_SIZE_TIERS = ['medium', 'large'] as const;
+export type PaidSizeTier = (typeof PAID_SIZE_TIERS)[number];
 
 export function formatStorageBytes(bytes: number): string {
   const n = Math.max(0, Math.floor(Number.isFinite(bytes) ? bytes : 0));
@@ -65,11 +81,13 @@ export function gbToBytes(gb: number): number {
   return Math.round(gb) * 1024 * 1024 * 1024;
 }
 
-export function snapStorageRequestGb(raw: number): number {
-  const stepped = Math.round(raw / STORAGE_REQUEST_STEP_GB) * STORAGE_REQUEST_STEP_GB;
-  return Math.min(STORAGE_REQUEST_MAX_GB, Math.max(STORAGE_REQUEST_MIN_GB, stepped));
-}
-
-export function bytesToStorageRequestGb(bytes: number): number {
-  return snapStorageRequestGb(bytes / (1024 * 1024 * 1024));
+export function sizeTierFromGroup(group: {
+  sizeTier?: string | null;
+  maxStorageBytes?: number | null;
+}): GroupSizeTier {
+  if (group.sizeTier) return parseSizeTier(group.sizeTier);
+  const max = group.maxStorageBytes ?? 0;
+  if (max >= GROUP_TIERS.large.maxStorageBytes) return 'large';
+  if (max >= GROUP_TIERS.medium.maxStorageBytes) return 'medium';
+  return 'small';
 }

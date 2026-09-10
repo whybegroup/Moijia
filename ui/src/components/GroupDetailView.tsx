@@ -51,6 +51,7 @@ import Toast from 'react-native-toast-message';
 import { ImageLightboxModal } from './ImageLightboxModal';
 import { dropLightboxItem } from './ForumPostMarkdownBody';
 import { GroupStorageUsageBar } from './GroupStorageUsageBar';
+import { GroupDowngradeBanner } from './GroupDowngradeBanner';
 import { groupSubpageFromPathname } from './groupScope/useGroupSubpage';
 import { groupsTabParentHref, navigateGroupsTabTo } from '../utils/tabBreadcrumbNav';
 import { useGroupScopeNav } from './groupScope/GroupScopeNavContext';
@@ -986,6 +987,14 @@ export function GroupDetailView({ groupId }: GroupDetailViewProps) {
             onPress={() =>
               router.push(buildGroupStorageUrl(groupId, { isInEventsTab, fromEventId }))
             }
+          />
+        ) : null}
+
+        {!isPending &&
+        (group.membershipStatus === 'member' || group.membershipStatus === 'admin') ? (
+          <GroupDowngradeBanner
+            pendingSizeTier={group.pendingSizeTier}
+            graceEndsAt={group.graceEndsAt}
           />
         ) : null}
 

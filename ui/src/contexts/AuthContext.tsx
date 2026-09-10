@@ -34,6 +34,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         id: firebaseUser.uid,
         name: displayName,
         displayName: displayName,
+        email: firebaseUser.email ?? null,
       });
     } catch {
       // Don't block auth flow if database sync fails

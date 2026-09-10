@@ -5,6 +5,7 @@ import cors from 'cors';
 import { RegisterRoutes } from './generated/routes';
 import { registerSharePreviewRoutes } from './sharePreviewRoutes';
 import { registerMediaShareRoutes } from './mediaShareRoutes';
+import { startGroupBillingJobs } from './jobs/groupBillingJobs';
 import { apiReference } from '@scalar/express-api-reference';
 import * as fs from 'fs';
 import * as yaml from 'js-yaml';
@@ -69,6 +70,7 @@ app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
   console.log(`📚 API docs available at http://localhost:${PORT}/docs`);
   console.log(`💚 Health check at http://localhost:${PORT}/health`);
+  startGroupBillingJobs();
 });
 
 export default app;

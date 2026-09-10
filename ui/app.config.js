@@ -109,6 +109,7 @@ module.exports = {
       },
     },
     android: {
+      permissions: ['com.android.vending.BILLING'],
       googleServicesFile: './google-services.json',
       adaptiveIcon: {
         backgroundColor: '#FAFAF9',
