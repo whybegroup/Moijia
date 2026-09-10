@@ -102,9 +102,7 @@ export function StoragePaywall({
       : null;
   const selectedDateLine = selectedEffectiveFrom
     ? `Effective from ${formatPlanDate(selectedEffectiveFrom)}`
-    : periodStamp
-      ? `Effective from ${periodStamp}`
-      : null;
+    : null;
 
   useEffect(() => {
     if (!visible) return;
@@ -168,6 +166,9 @@ export function StoragePaywall({
       }
       onPurchased?.(option);
       onClose();
+      if (activeTier === 'large' && selected === 'medium') {
+        Toast.show({ type: 'success', text1: 'Medium starts at the end of this period' });
+      }
     } catch (e) {
       if (isPurchaseCancelled(e)) {
         Toast.show({ type: 'info', text1: 'Purchase cancelled' });
@@ -265,9 +266,10 @@ export function StoragePaywall({
                 {ALL_TIERS.map((tier) => {
                   const isActive = activeTier === tier;
                   const isScheduled = nextTier === tier;
+                  const split = nextTier !== activeTier;
                   const isPicked = selected === tier;
                   const priceLabel = priceForTier(tier, options);
-                  const locked = isActive && isScheduled;
+                  const locked = isScheduled;
                   return (
                     <TouchableOpacity
                       key={tier}
@@ -275,23 +277,23 @@ export function StoragePaywall({
                       disabled={locked}
                       style={[
                         styles.plan,
-                        locked && styles.planCurrent,
+                        locked && styles.planLocked,
                         isPicked && !locked && styles.planSelected,
                       ]}
                       accessibilityRole="button"
-                      accessibilityState={{ selected: isPicked, disabled: locked }}
-                      accessibilityLabel={`${planTitle(tier)}${isActive ? ', active plan' : ''}${isScheduled ? ', selected plan' : ''}`}
+                      accessibilityState={{ selected: isPicked || locked, disabled: locked }}
+                      accessibilityLabel={`${planTitle(tier)}${isActive ? ', active plan' : ''}${split && isScheduled ? ', selected plan' : ''}`}
                     >
-                      {isActive || isScheduled ? (
+                      {isActive || (split && isScheduled) ? (
                         <View style={styles.pillRow}>
                           {isActive ? (
-                            <View style={styles.currentPill}>
-                              <Text style={styles.currentPillText}>Active plan</Text>
+                            <View style={styles.planPill}>
+                              <Text style={styles.planPillText}>Active plan</Text>
                             </View>
                           ) : null}
-                          {isScheduled ? (
-                            <View style={[styles.currentPill, styles.selectedPill]}>
-                              <Text style={styles.currentPillText}>Selected plan</Text>
+                          {split && isScheduled ? (
+                            <View style={styles.planPill}>
+                              <Text style={styles.planPillText}>Selected plan</Text>
                             </View>
                           ) : null}
                         </View>
@@ -302,7 +304,7 @@ export function StoragePaywall({
                       {isActive && activeDateLine ? (
                         <Text style={styles.planDate}>{activeDateLine}</Text>
                       ) : null}
-                      {isScheduled && selectedDateLine ? (
+                      {split && isScheduled && selectedDateLine ? (
                         <Text style={styles.planDate}>{selectedDateLine}</Text>
                       ) : null}
                     </TouchableOpacity>
@@ -430,19 +432,16 @@ const styles = StyleSheet.create({
   planSelected: {
     borderColor: Colors.text,
   },
-  planCurrent: {
+  planLocked: {
     backgroundColor: '#ECECEE',
     borderColor: 'transparent',
   },
-  currentPill: {
+  planPill: {
     alignSelf: 'flex-start',
     backgroundColor: '#E4E4E7',
     borderRadius: Radius.full,
     paddingHorizontal: 10,
     paddingVertical: 4,
-  },
-  selectedPill: {
-    backgroundColor: '#D4D4D8',
   },
   pillRow: {
     flexDirection: 'row',
@@ -450,7 +449,7 @@ const styles = StyleSheet.create({
     gap: 6,
     marginBottom: 10,
   },
-  currentPillText: { fontSize: 12, fontFamily: Fonts.semiBold, color: Colors.textSub },
+  planPillText: { fontSize: 12, fontFamily: Fonts.semiBold, color: Colors.textSub },
   planTitle: { fontSize: 16, fontFamily: Fonts.extraBold, color: Colors.text },
   planBlurb: {
     fontSize: 13,

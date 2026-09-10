@@ -3,14 +3,16 @@ import { groupStorage } from './GroupStorageService';
 import { NotificationService } from './NotificationService';
 import { sendOwnerEmail } from './EmailService';
 import { httpError } from '../utils/httpError';
-import { nextMonthlyAnniversary } from '../utils/groupPlanPeriod';
+import { monthPeriodExpiresAt } from '../utils/groupPlanPeriod';
 import {
   FREE_OWNED_GROUP_LIMIT,
   formatStorageBytes,
   isPaidSizeTier,
   maxMembersForTier,
   memberAddsBlocked,
+  memberLimitTier,
   parseSizeTier,
+  sizeTierRank,
   storageBytesToDb,
   storageCapForTier,
   type GroupSizeTier,
@@ -85,13 +87,16 @@ export class GroupBillingService {
   public async assertCanAddMember(groupId: string): Promise<void> {
     const group = await prisma.group.findUnique({
       where: { id: groupId },
-      select: { sizeTier: true, deletedAt: true, name: true },
+      select: { sizeTier: true, pendingSizeTier: true, deletedAt: true, name: true },
     });
     if (!group || group.deletedAt) throw httpError(404, 'Group not found');
     const activeCount = await prisma.groupMember.count({
       where: { groupId, status: 'active' },
     });
-    const tier = parseSizeTier(group.sizeTier);
+    const tier = memberLimitTier(
+      parseSizeTier(group.sizeTier),
+      group.pendingSizeTier ? parseSizeTier(group.pendingSizeTier) : null
+    );
     if (!memberAddsBlocked(tier, activeCount)) return;
     const max = maxMembersForTier(tier);
     throw httpError(
@@ -121,19 +126,9 @@ export class GroupBillingService {
 
     const currentTier = parseSizeTier(group.sizeTier);
     const cap = storageCapForTier(input.sizeTier);
-    const used = await groupStorage.getUsedStorageBytes(input.groupId);
-    const activeCount = await prisma.groupMember.count({
-      where: { groupId: input.groupId, status: 'active' },
-    });
-    const memberOver =
-      maxMembersForTier(input.sizeTier) != null &&
-      activeCount > (maxMembersForTier(input.sizeTier) ?? activeCount);
-    const storageOver = used > cap;
-    const isDowngrade =
-      storageCapForTier(currentTier) > cap ||
-      (currentTier === 'large' && input.sizeTier === 'medium');
+    const isDowngrade = sizeTierRank(input.sizeTier) < sizeTierRank(currentTier);
 
-    if (isDowngrade && (storageOver || memberOver)) {
+    if (isDowngrade) {
       await this.startGrace(group.id, group.name, input.userId, input.sizeTier, null);
       return {
         maxStorageBytes: storageCapForTier(currentTier),
@@ -163,9 +158,9 @@ export class GroupBillingService {
   }
 
   /**
-   * Store billing: Apple/Google keep paid access until period end (proration / deferred
-   * replacement). When the entitlement is already gone, start a 15-day grace before
-   * applying the smaller tier.
+   * Store billing: Apple/Google keep paid access until period end.
+   * Owner-scheduled downgrades stay pending even while the current entitlement is still active.
+   * When the current add-on is gone, schedule the next smaller tier they still pay for (or Small).
    */
   public async syncOwnerEntitlements(
     userId: string,
@@ -208,12 +203,6 @@ export class GroupBillingService {
           : entitlements.mediumActive && !claimed.has('medium');
       if (covered) {
         claimed.add(tier);
-        if (group.pendingSizeTier || group.graceEndsAt) {
-          await prisma.group.update({
-            where: { id: group.id },
-            data: { pendingSizeTier: null, graceEndsAt: null, graceNotifiedAt: null },
-          });
-        }
         continue;
       }
 
@@ -233,7 +222,7 @@ export class GroupBillingService {
   ): Promise<void> {
     const existing = await prisma.group.findUnique({
       where: { id: groupId },
-      select: { graceEndsAt: true, sizeTier: true, sizeStartedAt: true },
+      select: { graceEndsAt: true, graceNotifiedAt: true, sizeTier: true, sizeStartedAt: true },
     });
     if (!existing) return;
     if (parseSizeTier(existing.sizeTier) === pendingSizeTier) {
@@ -244,14 +233,14 @@ export class GroupBillingService {
       return;
     }
 
-    const periodEnd = nextMonthlyAnniversary(existing.sizeStartedAt ?? new Date());
+    const periodEnd = monthPeriodExpiresAt(existing.sizeStartedAt ?? new Date());
     const graceEndsAt = existing.graceEndsAt ?? periodEnd;
     await prisma.group.update({
       where: { id: groupId },
       data: { pendingSizeTier, graceEndsAt },
     });
 
-    if (alreadyNotifiedAt) return;
+    if (alreadyNotifiedAt ?? existing.graceNotifiedAt) return;
     await prisma.group.update({
       where: { id: groupId },
       data: { graceNotifiedAt: new Date() },

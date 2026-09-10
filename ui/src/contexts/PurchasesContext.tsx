@@ -94,7 +94,6 @@ export const PurchasesProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         const info = await identifyRevenueCatUser({
           appUserID: user.uid,
           email: user.email,
-          displayName: user.displayName,
         });
         if (!cancelled) {
           setCustomerInfo(info);

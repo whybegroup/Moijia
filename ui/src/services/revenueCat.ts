@@ -102,15 +102,13 @@ export async function configureRevenueCat(appUserID: string): Promise<void> {
 export async function identifyRevenueCatUser(input: {
   appUserID: string;
   email?: string | null;
-  displayName?: string | null;
 }): Promise<CustomerInfo> {
   await configureRevenueCat(input.appUserID);
   const { customerInfo } = await Purchases.logIn(input.appUserID);
-  try {
-    await Purchases.setEmail(input.email?.trim() || null);
-    await Purchases.setDisplayName(input.displayName?.trim() || null);
-  } catch {
-    // Attributes are best-effort; purchases still work without them.
+  const email = input.email?.trim() || '';
+  if (email) {
+    await Purchases.setAttributes({ $email: email }).catch(() => undefined);
+    await Purchases.setEmail(email).catch(() => undefined);
   }
   if (Platform.OS === 'ios' || Platform.OS === 'android') {
     try {

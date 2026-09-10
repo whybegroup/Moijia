@@ -8,6 +8,7 @@ import {
   signInWithPopup,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
+  sendEmailVerification,
   sendPasswordResetEmail,
   reauthenticateWithCredential,
   updatePassword,
@@ -145,13 +146,47 @@ export const signInWithEmail = async (email: string, password: string) => {
 export const signUpWithEmail = async (email: string, password: string) => {
   const trimmedEmail = email.trim();
   const result = await createUserWithEmailAndPassword(auth, trimmedEmail, password);
-  
-  // Set display name to the part before @ in the email
+  const user = auth.currentUser ?? result.user;
+
   const displayName = trimmedEmail.split('@')[0] || 'User';
-  await updateProfile(result.user, { displayName });
-  
-  return result.user;
+  await updateProfile(user, { displayName });
+
+  auth.useDeviceLanguage();
+  try {
+    await sendEmailVerification(auth.currentUser ?? user);
+  } catch {
+    // Verify screen resends if this fails; do not block sign-up.
+  }
+
+  return auth.currentUser ?? user;
 };
+
+/** Email/password accounts must verify. OAuth (Google/Apple) is already trusted. */
+export function needsEmailVerification(user: User | null | undefined): boolean {
+  if (!user?.email || user.emailVerified) return false;
+  const providers = user.providerData.map((p) => p.providerId);
+  const oauthOnly =
+    providers.length > 0 &&
+    providers.every((id) => id === 'google.com' || id === 'apple.com' || id === 'facebook.com');
+  return !oauthOnly;
+}
+
+export async function sendVerificationEmail(): Promise<void> {
+  const user = auth.currentUser;
+  if (!user) {
+    throw Object.assign(new Error('Not signed in'), { code: 'auth/no-current-user' });
+  }
+  auth.useDeviceLanguage();
+  await sendEmailVerification(user);
+}
+
+export async function reloadCurrentUser(): Promise<User | null> {
+  const user = auth.currentUser;
+  if (!user) return null;
+  await user.reload();
+  await user.getIdToken(true);
+  return auth.currentUser;
+}
 
 export const sendPasswordReset = async (email: string) => {
   auth.useDeviceLanguage();

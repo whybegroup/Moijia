@@ -40,6 +40,21 @@ export function isPaidSizeTier(tier: GroupSizeTier): boolean {
   return tier === 'medium' || tier === 'large';
 }
 
+export function sizeTierRank(tier: GroupSizeTier): number {
+  if (tier === 'large') return 2;
+  if (tier === 'medium') return 1;
+  return 0;
+}
+
+/** While a smaller size is scheduled, member caps follow the upcoming plan. */
+export function memberLimitTier(
+  current: GroupSizeTier,
+  pending?: GroupSizeTier | null
+): GroupSizeTier {
+  if (pending && sizeTierRank(pending) < sizeTierRank(current)) return pending;
+  return current;
+}
+
 export function memberAddsBlocked(tier: GroupSizeTier, activeMemberCount: number): boolean {
   const max = maxMembersForTier(tier);
   return max != null && activeMemberCount >= max;

@@ -22,21 +22,32 @@ import { GroupDowngradeBanner } from './GroupDowngradeBanner';
 import { usePurchases } from '../contexts/PurchasesContext';
 import { sizeAddonByTier } from '../config/revenueCat';
 import {
+  addCalendarDays,
   formatPlanDate,
+  monthPeriodExpiresAt,
   nextMonthlyAnniversary,
   parseMaybeDate,
 } from '../utils/groupPlanPeriod';
 
-function resolvePeriodEnd(input: {
+function resolvePeriodDates(input: {
   sizeStartedAt?: Date | string | null;
   graceEndsAt?: Date | string | null;
   expirationDate?: string | null;
   originalPurchaseDate?: string | null;
-}): Date | null {
+}): { renewsAt: Date | null; expiresAt: Date | null } {
   const started =
     parseMaybeDate(input.sizeStartedAt) ?? parseMaybeDate(input.originalPurchaseDate);
-  if (started) return nextMonthlyAnniversary(started);
-  return parseMaybeDate(input.expirationDate) ?? parseMaybeDate(input.graceEndsAt);
+  if (started) {
+    return {
+      renewsAt: nextMonthlyAnniversary(started),
+      expiresAt: monthPeriodExpiresAt(started),
+    };
+  }
+  const expiresAt = parseMaybeDate(input.expirationDate) ?? parseMaybeDate(input.graceEndsAt);
+  return {
+    renewsAt: expiresAt ? addCalendarDays(expiresAt, 1) : null,
+    expiresAt,
+  };
 }
 
 function planSummary(tier: GroupSizeTier): string {
@@ -72,11 +83,10 @@ export function GroupStorageRequestForm({
   const [paywallOpen, setPaywallOpen] = useState(false);
   const addon = sizeAddonByTier(currentTier);
   const entitlement = addon ? customerInfo?.entitlements.active[addon.entitlementId] : null;
-  const goingToSmall = scheduledTier === 'small' && currentTier !== 'small';
   const pendingChange = scheduledTier !== currentTier;
-  const periodEnd = useMemo(
+  const { renewsAt, expiresAt } = useMemo(
     () =>
-      resolvePeriodEnd({
+      resolvePeriodDates({
         sizeStartedAt,
         graceEndsAt,
         expirationDate: entitlement?.expirationDate,
@@ -84,17 +94,22 @@ export function GroupStorageRequestForm({
       }),
     [sizeStartedAt, graceEndsAt, entitlement?.expirationDate, entitlement?.originalPurchaseDate]
   );
-  const startedOn = parseMaybeDate(sizeStartedAt) ?? parseMaybeDate(entitlement?.originalPurchaseDate);
+  const showExpire = pendingChange || entitlement?.willRenew === false;
+  const periodDate = showExpire ? expiresAt : renewsAt;
   const periodLabel =
-    currentTier === 'small' && scheduledTier === 'small'
+    currentTier === 'small' && !pendingChange
       ? null
-      : periodEnd
-        ? goingToSmall || entitlement?.willRenew === false
-          ? `Expires ${formatPlanDate(periodEnd)}`
-          : `Renews ${formatPlanDate(periodEnd)}`
+      : periodDate
+        ? `${showExpire ? 'Expires' : 'Renews'} ${formatPlanDate(periodDate)}`
         : null;
-  const effectiveFrom = pendingChange ? periodEnd : startedOn;
-  const effectiveLine = effectiveFrom ? `Effective from ${formatPlanDate(effectiveFrom)}` : null;
+  const selectedEffectiveFrom = pendingChange
+    ? expiresAt
+      ? addCalendarDays(expiresAt, 1)
+      : renewsAt
+    : null;
+  const effectiveLine = selectedEffectiveFrom
+    ? `Effective from ${formatPlanDate(selectedEffectiveFrom)}`
+    : null;
 
   const applyLimit = async (tier: 'medium' | 'large') => {
     try {
@@ -111,24 +126,28 @@ export function GroupStorageRequestForm({
       <GroupDowngradeBanner
         compact
         pendingSizeTier={pendingSizeTier}
-        graceEndsAt={graceEndsAt ?? periodEnd}
+        graceEndsAt={graceEndsAt ?? expiresAt}
       />
-      <Text style={styles.kicker}>Active plan</Text>
-      <Text style={styles.planName}>{spec.label}</Text>
-      <Text style={styles.planMeta}>
-        {formatStorageBytes(resolveGroupMaxStorageBytes(currentMaxBytes, currentTier))} ·{' '}
-        {formatMemberLimit(currentTier)}
-      </Text>
-      {usedBytes > 0 ? (
-        <Text style={styles.used}>{formatStorageBytes(usedBytes)} used</Text>
+      <View style={styles.planCard}>
+        <Text style={styles.kicker}>Active plan</Text>
+        <Text style={styles.planName}>{spec.label}</Text>
+        <Text style={styles.planMeta}>
+          {formatStorageBytes(resolveGroupMaxStorageBytes(currentMaxBytes, currentTier))} ·{' '}
+          {formatMemberLimit(currentTier)}
+        </Text>
+        {usedBytes > 0 ? (
+          <Text style={styles.used}>{formatStorageBytes(usedBytes)} used</Text>
+        ) : null}
+        {periodLabel ? <Text style={styles.period}>{periodLabel}</Text> : null}
+      </View>
+      {pendingChange ? (
+        <View style={[styles.planCard, styles.planCardSelected]}>
+          <Text style={styles.kicker}>Selected plan</Text>
+          <Text style={styles.planName}>{scheduledSpec.label}</Text>
+          <Text style={styles.planMeta}>{planSummary(scheduledTier)}</Text>
+          {effectiveLine ? <Text style={styles.period}>{effectiveLine}</Text> : null}
+        </View>
       ) : null}
-      {periodLabel ? <Text style={styles.period}>{periodLabel}</Text> : null}
-
-      <Text style={[styles.kicker, styles.kickerSpaced]}>Selected plan</Text>
-      <Text style={styles.planName}>{scheduledSpec.label}</Text>
-      <Text style={styles.planMeta}>{planSummary(scheduledTier)}</Text>
-      {effectiveLine ? <Text style={styles.period}>{effectiveLine}</Text> : null}
-
       <TouchableOpacity
         onPress={() => setPaywallOpen(true)}
         disabled={setLimit.isPending}
@@ -147,9 +166,9 @@ export function GroupStorageRequestForm({
         onClose={() => setPaywallOpen(false)}
         currentTier={currentTier}
         scheduledTier={scheduledTier}
-        periodEndsAt={periodEnd}
-        goingToSmall={goingToSmall || entitlement?.willRenew === false}
-        selectedEffectiveFrom={effectiveFrom}
+        periodEndsAt={showExpire ? expiresAt : renewsAt}
+        goingToSmall={showExpire}
+        selectedEffectiveFrom={selectedEffectiveFrom}
         onPurchased={(option) => {
           void applyLimit(option.plan.tier);
         }}
@@ -163,6 +182,18 @@ export function GroupStorageRequestForm({
 
 const styles = StyleSheet.create({
   requestBlock: { marginTop: 4 },
+  planCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius['2xl'],
+    borderWidth: 2,
+    borderColor: Colors.border,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  planCardSelected: {
+    borderColor: Colors.text,
+    marginTop: 10,
+  },
   kicker: {
     fontSize: 11,
     fontFamily: Fonts.semiBold,
@@ -171,7 +202,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6,
     marginBottom: 4,
   },
-  kickerSpaced: { marginTop: 16 },
   planName: { fontSize: 18, fontFamily: Fonts.extraBold, color: Colors.text },
   planMeta: {
     fontSize: 14,

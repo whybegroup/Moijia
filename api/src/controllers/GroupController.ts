@@ -252,7 +252,7 @@ export class GroupController extends Controller {
 
   /**
    * Set this group's size add-on (Medium or Large). Owner only.
-   * Upgrades apply immediately (stores prorate). Downgrades that don't fit start a 15-day grace.
+   * Upgrades apply immediately. Downgrades keep the current size until period end.
    */
   @Put('{id}/max-storage')
   public async setGroupStorageLimit(

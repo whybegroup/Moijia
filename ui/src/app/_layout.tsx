@@ -31,11 +31,12 @@ import { OverflowMenuHostProvider } from '../components/OverflowMenuHost';
 import { NavigationGuardReset } from '../components/NavigationGuardReset';
 import { firstSearchParam, parseReturnToParam, withReturnTo } from '../utils/navigationReturn';
 import { isPublicAppSegment } from '../constants/legal';
+import { needsEmailVerification } from '../config/firebase';
 
 SplashScreen.preventAutoHideAsync();
 
 function RootLayoutNav() {
-  const { user, loading } = useAuth();
+  const { user, emailVerified, loading } = useAuth();
   const segments = useSegments();
   const pathname = usePathname();
   const searchParams = useGlobalSearchParams<{ returnTo?: string | string[] }>();
@@ -48,20 +49,35 @@ function RootLayoutNav() {
 
     const publicScreen = isPublicAppSegment(segments[0]);
     const inAuthGroup = segments[0] === 'login';
+    const onVerifyEmail = segments[0] === 'verify-email';
+    const returnTo = parseReturnToParam(firstSearchParam(searchParams.returnTo));
 
     // Small delay to ensure navigation is ready
     const timeout = setTimeout(() => {
       if (!user && !publicScreen) {
-        const returnPath = pathname && pathname !== '/' ? pathname : undefined;
+        const returnPath =
+          onVerifyEmail && returnTo
+            ? returnTo
+            : pathname && pathname !== '/' && !onVerifyEmail
+              ? pathname
+              : undefined;
         router.replace(returnPath ? withReturnTo('/login', returnPath) : '/login');
-      } else if (user && inAuthGroup) {
-        const returnTo = parseReturnToParam(firstSearchParam(searchParams.returnTo));
+        return;
+      }
+      const allowUnverified =
+        onVerifyEmail || segments[0] === 'terms' || segments[0] === 'privacy';
+      if (user && needsEmailVerification(user) && !allowUnverified) {
+        const returnPath = inAuthGroup ? returnTo : pathname && pathname !== '/' ? pathname : returnTo;
+        router.replace(returnPath ? withReturnTo('/verify-email', returnPath) : '/verify-email');
+        return;
+      }
+      if (user && !needsEmailVerification(user) && (inAuthGroup || onVerifyEmail)) {
         router.replace((returnTo ?? '/(tabs)/groups') as Href);
       }
     }, 100);
 
     return () => clearTimeout(timeout);
-  }, [user, loading, segments, router, pathname, searchParams.returnTo]);
+  }, [user, emailVerified, loading, segments, router, pathname, searchParams.returnTo]);
 
   // Always mount Stack — returning null here unmounts the navigator and can trigger
   // "Rendered fewer hooks than expected" in expo-router / React Navigation during sign-out.
@@ -70,6 +86,7 @@ function RootLayoutNav() {
     <NavigationGuardReset />
     <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
       <Stack.Screen name="login" options={{ headerShown: false }} />
+      <Stack.Screen name="verify-email" options={{ headerShown: false }} />
       <Stack.Screen name="terms" options={{ headerShown: false }} />
       <Stack.Screen name="privacy" options={{ headerShown: false }} />
       <Stack.Screen name="(tabs)" />

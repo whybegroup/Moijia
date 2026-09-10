@@ -34,6 +34,17 @@ export function nextMonthlyAnniversary(startedAt: Date, now = new Date()): Date 
   return next;
 }
 
+export function addCalendarDays(from: Date, days: number): Date {
+  const next = new Date(from.getTime());
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+/** Paid access ends the day before the next billing anniversary. */
+export function monthPeriodExpiresAt(startedAt: Date, now = new Date()): Date {
+  return addCalendarDays(nextMonthlyAnniversary(startedAt, now), -1);
+}
+
 export function formatPlanDate(raw: Date | string): string {
   const date = raw instanceof Date ? raw : new Date(raw);
   if (Number.isNaN(date.getTime())) return '';

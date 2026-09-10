@@ -13,7 +13,9 @@ export {
   isPaidSizeTier,
   maxMembersForTier,
   memberAddsBlocked,
+  memberLimitTier,
   parseSizeTier,
+  sizeTierRank,
   storageCapForTier,
   type GroupSizeTier,
 } from './groupTiers';

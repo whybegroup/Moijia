@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { signInWithGoogle, signInWithEmail, signUpWithEmail, sendPasswordReset } from '../config/firebase';
+import { signInWithGoogle, signInWithEmail, signUpWithEmail, sendPasswordReset, needsEmailVerification } from '../config/firebase';
 import { googleIosClientId, googleWebClientId } from '../config/googleAuth';
 import { signInWithGoogleIdTokenNative } from '../config/googleSignIn';
 import { type Href } from 'expo-router';
@@ -109,6 +109,11 @@ export default function LoginScreen() {
     }
   };
 
+  const goAfterAuth = (authed: Parameters<typeof needsEmailVerification>[0]) => {
+    setEmailMode(null);
+    router.replace(needsEmailVerification(authed) ? '/verify-email' : '/(tabs)/groups');
+  };
+
   const handleEmailAuth = async () => {
     const trimmedEmail = email.trim();
     if (!trimmedEmail || !password) {
@@ -128,11 +133,11 @@ export default function LoginScreen() {
     setError('');
     setLoading(true);
     try {
-      if (emailMode === 'signup') {
-        await signUpWithEmail(trimmedEmail, password);
-      } else {
-        await signInWithEmail(trimmedEmail, password);
-      }
+      const authed =
+        emailMode === 'signup'
+          ? await signUpWithEmail(trimmedEmail, password)
+          : await signInWithEmail(trimmedEmail, password);
+      goAfterAuth(authed);
     } catch (err: any) {
       showError(authErrorMessage(err?.code) ?? err?.message ?? 'Failed to sign in');
     } finally {
@@ -145,7 +150,8 @@ export default function LoginScreen() {
     if (Platform.OS === 'web') {
       setLoading(true);
       try {
-        await signInWithGoogle();
+        const authed = await signInWithGoogle();
+        goAfterAuth(authed);
       } catch (err: any) {
         showError(authErrorMessage(err?.code) ?? err?.message ?? 'Failed to sign in');
       } finally {
@@ -167,7 +173,7 @@ export default function LoginScreen() {
       if (!tokens) {
         return;
       }
-      await signInWithGoogle(tokens.idToken, tokens.accessToken);
+      await goAfterAuth(await signInWithGoogle(tokens.idToken, tokens.accessToken));
     } catch (err: any) {
       if (err?.code === 'GOOGLE_SIGN_IN_TIMEOUT') {
         showError(

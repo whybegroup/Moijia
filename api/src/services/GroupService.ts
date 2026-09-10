@@ -32,6 +32,7 @@ import {
   groupMaxStorageBytes,
   maxMembersForTier,
   memberAddsBlocked,
+  memberLimitTier,
   parseSizeTier,
   storageBytesToDb,
 } from '../utils/groupStorageLimits';
@@ -263,13 +264,14 @@ export class GroupService {
 
   private groupSizeFields(group: any, memberCount: number) {
     const sizeTier = parseSizeTier(group.sizeTier);
+    const pendingSizeTier = group.pendingSizeTier ? parseSizeTier(group.pendingSizeTier) : null;
     return {
       sizeTier,
-      pendingSizeTier: group.pendingSizeTier ? parseSizeTier(group.pendingSizeTier) : null,
+      pendingSizeTier,
       sizeStartedAt: group.sizeStartedAt ?? null,
       graceEndsAt: group.graceEndsAt ?? null,
       maxMemberCount: maxMembersForTier(sizeTier),
-      memberAddsBlocked: memberAddsBlocked(sizeTier, memberCount),
+      memberAddsBlocked: memberAddsBlocked(memberLimitTier(sizeTier, pendingSizeTier), memberCount),
       maxStorageBytes: groupMaxStorageBytes(group.maxStorageBytes, group.sizeTier),
     };
   }
