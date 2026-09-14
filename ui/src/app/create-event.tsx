@@ -162,6 +162,21 @@ function parseYmdLocal(ymd: string): Date {
   return new Date(y, m - 1, d, 12, 0, 0, 0);
 }
 
+/** Earliest selectable start: now + 1 minute, aligned to the minute. */
+function soonestAllowedStartTime(): Date {
+  const d = new Date(Date.now() + 60_000);
+  d.setSeconds(0, 0);
+  return d;
+}
+
+function clampStartTimeIfPast(dateYmd: string, hm: string): string {
+  if (!dateYmd || !hm) return hm;
+  if (dateYmd !== formatLocalDateInput(new Date())) return hm;
+  if (wallDateAndHmToDate(dateYmd, hm).getTime() > Date.now()) return hm;
+  const soonest = soonestAllowedStartTime();
+  return `${pad2(soonest.getHours())}:${pad2(soonest.getMinutes())}`;
+}
+
 function wallDateAndHmToDate(dateYmd: string, hm: string): Date {
   const [hh, mm] = hm.split(':').map(Number);
   const [y, mo, d] = dateYmd.split('-').map(Number);
@@ -697,12 +712,8 @@ export default function CreateEventScreen() {
   }, []);
 
   const getMinimumStartTime = () => {
-    const selectedDate = new Date(form.startDate);
-    const todayDate = new Date();
-    todayDate.setHours(0, 0, 0, 0);
-    
-    if (selectedDate.getTime() === todayDate.getTime()) {
-      return new Date();
+    if (form.startDate === formatLocalDateInput(new Date())) {
+      return soonestAllowedStartTime();
     }
     return undefined;
   };
@@ -721,11 +732,7 @@ export default function CreateEventScreen() {
       setErrors(e => ({ ...e, startDate: '' }));
       return;
     }
-    const selectedDate = new Date(dateStr);
-    const todayDate = new Date();
-    todayDate.setHours(0, 0, 0, 0);
-    
-    if (selectedDate < todayDate) {
+    if (dateStr < formatLocalDateInput(new Date())) {
       setErrors(e => ({ ...e, startDate: 'Date cannot be in the past' }));
     } else {
       setErrors(e => ({ ...e, startDate: '' }));
@@ -737,10 +744,7 @@ export default function CreateEventScreen() {
       setErrors(e => ({ ...e, endDate: '' }));
       return;
     }
-    const endDate = new Date(endDateStr);
-    const startDate = new Date(startDateStr);
-    
-    if (endDate < startDate) {
+    if (endDateStr < startDateStr) {
       setErrors(e => ({ ...e, endDate: 'End date cannot be before start date' }));
     } else {
       setErrors(e => ({ ...e, endDate: '' }));
@@ -756,23 +760,14 @@ export default function CreateEventScreen() {
       setErrors(e => ({ ...e, startTime: '' }));
       return;
     }
-    
-    const selectedDate = new Date(dateStr);
-    const todayDate = new Date();
-    todayDate.setHours(0, 0, 0, 0);
-    
-    if (selectedDate.getTime() === todayDate.getTime()) {
-      const [h, m] = timeStr.split(':').map(Number);
-      const now = new Date();
-      const selectedTime = new Date();
-      selectedTime.setHours(h, m, 0, 0);
-      
-      if (selectedTime <= now) {
+
+    if (dateStr === formatLocalDateInput(new Date())) {
+      if (wallDateAndHmToDate(dateStr, timeStr).getTime() <= Date.now()) {
         setErrors(e => ({ ...e, startTime: 'Start time must be in the future' }));
         return;
       }
     }
-    
+
     setErrors(e => ({ ...e, startTime: '' }));
   };
 
@@ -881,7 +876,7 @@ export default function CreateEventScreen() {
     if (selectedTime) {
       const hours = String(selectedTime.getHours()).padStart(2, '0');
       const minutes = String(selectedTime.getMinutes()).padStart(2, '0');
-      const timeStr = `${hours}:${minutes}`;
+      const timeStr = clampStartTimeIfPast(form.startDate, `${hours}:${minutes}`);
       const shifted = endPreservingDuration({
         prevStartDate: form.startDate,
         prevStartTime: form.startTime,
@@ -903,7 +898,8 @@ export default function CreateEventScreen() {
     }
   };
 
-  const handleStartTimeInputChange = (timeStr: string) => {
+  const handleStartTimeInputChange = (timeStrRaw: string) => {
+    const timeStr = clampStartTimeIfPast(form.startDate, timeStrRaw);
     const shifted = endPreservingDuration({
       prevStartDate: form.startDate,
       prevStartTime: form.startTime,
@@ -982,7 +978,10 @@ export default function CreateEventScreen() {
   };
 
   const commitIosStartTime = () => {
-    const timeStr = `${pad2(iosStartTimeDraft.getHours())}:${pad2(iosStartTimeDraft.getMinutes())}`;
+    const timeStr = clampStartTimeIfPast(
+      form.startDate,
+      `${pad2(iosStartTimeDraft.getHours())}:${pad2(iosStartTimeDraft.getMinutes())}`,
+    );
     const shifted = endPreservingDuration({
       prevStartDate: form.startDate,
       prevStartTime: form.startTime,
@@ -1761,7 +1760,9 @@ export default function CreateEventScreen() {
                 mode="time"
                 display="spinner"
                 onChange={(_, d) => {
-                  if (d) setIosStartTimeDraft(d);
+                  if (!d) return;
+                  const min = getMinimumStartTime();
+                  setIosStartTimeDraft(min && d.getTime() < min.getTime() ? min : d);
                 }}
                 minimumDate={getMinimumStartTime()}
               />

@@ -166,12 +166,21 @@ export type StoragePlanOption = {
 
 export async function listStoragePlanOptions(): Promise<StoragePlanOption[]> {
   const offering = await getStorageOffering();
-  if (!offering) return [];
+  if (!offering) {
+    throw new Error(
+      'No storage offering is available from the App Store. In RevenueCat, attach Apple products subscription_medium_group and subscription_large_group to offering_group_subscriptions.'
+    );
+  }
   const options: StoragePlanOption[] = [];
   for (const plan of SIZE_ADDONS) {
     const pkg = packageForAddon(offering, plan);
     if (!pkg) continue;
     options.push({ plan, offering, pkg });
+  }
+  if (options.length === 0) {
+    throw new Error(
+      'App Store did not return Medium or Large. Create those auto-renewable subscriptions in App Store Connect with the same product IDs, then add them to the RevenueCat offering.'
+    );
   }
   return options;
 }

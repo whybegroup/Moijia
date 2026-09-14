@@ -106,6 +106,7 @@ module.exports = {
           'moijia can add this event to Apple Calendar.',
         NSRemindersUsageDescription: 'moijia can add this event to Apple Calendar.',
         NSRemindersFullAccessUsageDescription: 'moijia can add this event to Apple Calendar.',
+        ITSAppUsesNonExemptEncryption: false,
       },
     },
     android: {

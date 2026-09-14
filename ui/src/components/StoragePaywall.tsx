@@ -115,8 +115,10 @@ export function StoragePaywall({
         setOptions(next);
         setSelected(nextTier);
       })
-      .catch(() => {
-        if (!cancelled) setError('Could not load storage plans.');
+      .catch((e) => {
+        if (!cancelled) {
+          setError(purchasesErrorMessage(e, 'Could not load storage plans.'));
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

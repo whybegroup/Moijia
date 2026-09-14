@@ -65,7 +65,10 @@ function RootLayoutNav() {
         return;
       }
       const allowUnverified =
-        onVerifyEmail || segments[0] === 'terms' || segments[0] === 'privacy';
+        onVerifyEmail ||
+        segments[0] === 'terms' ||
+        segments[0] === 'privacy' ||
+        segments[0] === 'support';
       if (user && needsEmailVerification(user) && !allowUnverified) {
         const returnPath = inAuthGroup ? returnTo : pathname && pathname !== '/' ? pathname : returnTo;
         router.replace(returnPath ? withReturnTo('/verify-email', returnPath) : '/verify-email');
@@ -89,6 +92,7 @@ function RootLayoutNav() {
       <Stack.Screen name="verify-email" options={{ headerShown: false }} />
       <Stack.Screen name="terms" options={{ headerShown: false }} />
       <Stack.Screen name="privacy" options={{ headerShown: false }} />
+      <Stack.Screen name="support" options={{ headerShown: false }} />
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="event/[id]" />
       <Stack.Screen

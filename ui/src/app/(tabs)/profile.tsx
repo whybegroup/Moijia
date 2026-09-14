@@ -1,12 +1,16 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, type ReactNode } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, Platform, TextInput, ActivityIndicator } from 'react-native';
 import { KeyboardSafeScrollView } from '../../components/KeyboardSafeScrollView';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { type Href } from 'expo-router';
 import { Colors, Fonts, Layout, Radius } from '../../constants/theme';
 import { useUpdateUser, useUser } from '../../hooks/api';
 import { usePullToRefresh } from '../../hooks/usePullToRefresh';
 import { useAuth } from '../../contexts/AuthContext';
 import { useCurrentUserContext } from '../../contexts/CurrentUserContext';
+import { useAppRouter as useRouter } from '../../hooks/useAppRouter';
+import { SUPPORT_PATH } from '../../constants/legal';
 import { UserAvatar } from '../../components/UserAvatar';
 import { SubscriptionSettingsCard } from '../../components/SubscriptionSettingsCard';
 import { AvatarPickerModal } from '../../components/AvatarPickerModal';
@@ -136,7 +140,34 @@ function SettingsPasswordInput({
 
 const REMINDER_OPTIONS = ['Never', '1 hour before', '1 day before', '1 week before'] as const;
 
+function ProfileHeader({
+  avatar,
+  onSupport,
+}: {
+  avatar?: ReactNode;
+  onSupport: () => void;
+}) {
+  return (
+    <View style={styles.header}>
+      <View style={styles.headerTitleRow}>
+        {avatar}
+        <Text style={styles.title}>Profile</Text>
+      </View>
+      <TouchableOpacity
+        onPress={onSupport}
+        style={styles.headerIconBtn}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel="Support"
+      >
+        <Ionicons name="help-circle-outline" size={22} color={Colors.text} />
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 export default function ProfileScreen() {
+  const router = useRouter();
   const { user: firebaseUser, signOut } = useAuth();
   const { userId, user, loading } = useCurrentUserContext();
   const { refetch: refetchUser } = useUser(userId || '');
@@ -266,9 +297,12 @@ export default function ProfileScreen() {
     }
   };
 
+  const openSupport = () => router.push(SUPPORT_PATH as Href);
+
   if (loading) {
     return (
       <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
+        <ProfileHeader onSupport={openSupport} />
         <View style={styles.emptyState}>
           <ActivityIndicator color={Colors.accent} />
           <Text style={styles.emptyStateText}>Loading your profile...</Text>
@@ -280,6 +314,7 @@ export default function ProfileScreen() {
   if (!user) {
     return (
       <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
+        <ProfileHeader onSupport={openSupport} />
         <View style={styles.emptyState}>
           <Text style={styles.emptyStateTitle}>Profile data unavailable</Text>
           <Text style={styles.emptyStateText}>
@@ -297,17 +332,17 @@ export default function ProfileScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
-        <View style={styles.header}>
-          <View style={styles.headerTitleRow}>
+        <ProfileHeader
+          onSupport={openSupport}
+          avatar={
             <UserAvatar
               seed={user.displayName || user.name}
               thumbnail={user.thumbnail}
               backgroundColor={[user.avatarSeed]}
               size={28}
             />
-            <Text style={styles.title}>Profile</Text>
-          </View>
-        </View>
+          }
+        />
 
       <KeyboardSafeScrollView
         contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
@@ -673,6 +708,17 @@ const styles = StyleSheet.create({
   safe:             { flex: 1, backgroundColor: Colors.bg },
   header:           { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: Layout.tabHeaderMinHeight, paddingHorizontal: 20, paddingVertical: 12, backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border },
   headerTitleRow:   { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1, minWidth: 0 },
+  headerIconBtn:    {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
   title:            { fontSize: 18, fontFamily: Fonts.extraBold, color: Colors.text },
   sectionLabel:     { fontSize: 11, fontFamily: Fonts.semiBold, color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8 },
   sectionHint:      { fontSize: 12, fontFamily: Fonts.regular, color: Colors.textMuted, marginTop: -6, marginBottom: 10, lineHeight: 17 },

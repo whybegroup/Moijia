@@ -127,10 +127,10 @@ export function NotificationsPanelCard({
                       {n.title}
                     </Text>
                     {!n.read && <View style={styles.unreadDot} />}
-                    <Text style={styles.ts} numberOfLines={1}>
-                      {formatNotificationTimestamp(n.ts)}
-                    </Text>
                   </View>
+                  <Text style={styles.ts} numberOfLines={1}>
+                    {formatNotificationTimestamp(n.ts)}
+                  </Text>
                   <Text style={{ fontSize: 12, color: Colors.textSub }} numberOfLines={2}>
                     {n.body}
                   </Text>
@@ -199,5 +199,5 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   unreadDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: Colors.notGoing },
-  ts: { fontSize: 11, fontFamily: Fonts.regular, color: Colors.textMuted, flexShrink: 0 },
+  ts: { fontSize: 11, fontFamily: Fonts.regular, color: Colors.textMuted, marginBottom: 2 },
 });

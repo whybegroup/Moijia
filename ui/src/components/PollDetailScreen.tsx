@@ -1178,11 +1178,11 @@ export function PollDetailScreen({
   }, [parsedQuestions, selectedByQuestion, textAnswerByQuestion]);
 
   useEffect(() => {
-    if (!results || parsedQuestions.length === 0 || rankingDragActive || editingSavedAnswer) {
+    if (!results || parsedQuestions.length === 0 || answersEditable) {
       return;
     }
     setSelectedByQuestion(selectedByQuestionFromResults(results, parsedQuestions));
-  }, [results, parsedQuestions, editingSavedAnswer, rankingDragActive]);
+  }, [results, parsedQuestions, answersEditable]);
 
   useEffect(() => {
     if (!editingSavedAnswer) return;

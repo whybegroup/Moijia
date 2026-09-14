@@ -204,6 +204,22 @@ function formatHmFromDate(d: Date): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
+function soonestAllowedStartTime(): Date {
+  const d = new Date(Date.now() + 60_000);
+  d.setSeconds(0, 0);
+  return d;
+}
+
+function clampStartTimeIfPast(dateYmd: string, hm: string): string {
+  if (!dateYmd || !hm) return hm;
+  if (dateYmd !== formatLocalDateInput(new Date())) return hm;
+  const [h, m] = hm.split(':').map(Number);
+  const selected = new Date();
+  selected.setHours(h || 0, m || 0, 0, 0);
+  if (selected.getTime() > Date.now()) return hm;
+  return formatHmFromDate(soonestAllowedStartTime());
+}
+
 // ── Comment Photo Gallery (inline version) ───────────────────────────────────
 const COMMENT_PHOTO_SIZE = 80;
 const COMMENT_PHOTO_GAP = 4;
@@ -918,9 +934,7 @@ export function EventDetailScreen({
   const handleDetailStartTimeChange = useCallback((_e: unknown, selectedTime?: Date) => {
     if (Platform.OS === 'android') setShowDetailStartTimePicker(false);
     if (!selectedTime) return;
-    const hours = String(selectedTime.getHours()).padStart(2, '0');
-    const minutes = String(selectedTime.getMinutes()).padStart(2, '0');
-    const timeStr = `${hours}:${minutes}`;
+    const timeStr = clampStartTimeIfPast(draftStartDate, formatHmFromDate(selectedTime));
     const shifted = endPreservingDuration({
       prevStartDate: draftStartDate,
       prevStartTime: draftStartTime,
@@ -954,7 +968,8 @@ export function EventDetailScreen({
     }
   }, [draftStartDate, draftStartTime, draftEndDate, draftEndTime, draftAllDay]);
 
-  const applyDraftStartTime = useCallback((timeStr: string) => {
+  const applyDraftStartTime = useCallback((timeStrRaw: string) => {
+    const timeStr = clampStartTimeIfPast(draftStartDate, timeStrRaw);
     const shifted = endPreservingDuration({
       prevStartDate: draftStartDate,
       prevStartTime: draftStartTime,
@@ -995,11 +1010,8 @@ export function EventDetailScreen({
   }, []);
 
   const getDetailMinimumStartTime = useCallback(() => {
-    const selectedDate = new Date(draftStartDate);
-    const todayDate = new Date();
-    todayDate.setHours(0, 0, 0, 0);
-    if (selectedDate.getTime() === todayDate.getTime()) {
-      return new Date();
+    if (draftStartDate === formatLocalDateInput(new Date())) {
+      return soonestAllowedStartTime();
     }
     return undefined;
   }, [draftStartDate]);
