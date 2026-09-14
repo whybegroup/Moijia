@@ -248,6 +248,7 @@ export class GroupStorageService {
           select: {
             name: true,
             coverPhotos: { select: { photoUrl: true } },
+            attachments: { select: { fileUrl: true, fileName: true } },
             comments: { select: { text: true, photos: { select: { photoUrl: true } } } },
           },
         },
@@ -292,6 +293,7 @@ export class GroupStorageService {
     for (const ev of group.events) {
       const label = ev.name?.trim() || 'Event';
       for (const p of ev.coverPhotos) pushUnique(events, p.photoUrl, label);
+      for (const a of ev.attachments) pushUnique(events, a.fileUrl, label, a.fileName ?? undefined);
       for (const c of ev.comments) {
         for (const p of c.photos) pushUnique(events, p.photoUrl, label);
         for (const item of extractUploadItemsFromPlainText(c.text)) {
@@ -420,6 +422,9 @@ export class GroupStorageService {
 
     await prisma.eventPhoto.deleteMany({
       where: { photoUrl: url, event: { groupId } },
+    });
+    await prisma.eventAttachment.deleteMany({
+      where: { fileUrl: url, event: { groupId } },
     });
     await prisma.commentPhoto.deleteMany({
       where: { photoUrl: url, comment: { event: { groupId } } },

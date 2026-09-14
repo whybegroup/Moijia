@@ -92,6 +92,7 @@ import DateTimePicker from './AppDateTimePicker';
 import { useCurrentUserContext } from '../contexts/CurrentUserContext';
 import { ResolvableImage } from './ResolvableImage';
 import { FileExtensionPreview } from './FileExtensionPreview';
+import { PostAttachmentFileRow } from './DeletedPostMedia';
 import { isImageFileUrl, isVideoFileUrl } from '../utils/fileKind';
 import { ReactionEmojiGlyph } from './ReactionEmojiGlyph';
 import { ImageLightboxModal } from './ImageLightboxModal';
@@ -514,8 +515,11 @@ export function EventDetailScreen({
 
   const [localCoverPhotos, setLocalCoverPhotos] = useState<string[]>([]);
   const [coverPhotoBusy, setCoverPhotoBusy] = useState(false);
+  const [localAttachments, setLocalAttachments] = useState<Array<{ url: string; fileName?: string }>>([]);
+  const [attachmentBusy, setAttachmentBusy] = useState(false);
   /** Server snapshot key; when the API returns new cover URLs, sync local state (same event id stays mounted across edit → back). */
   const lastServerCoverPhotosKeyRef = useRef<string>('');
+  const lastServerAttachmentsKeyRef = useRef<string>('');
 
   useEffect(() => {
     const e = viewEv as EventDetailed | undefined;
@@ -524,6 +528,15 @@ export function EventDetailScreen({
     if (key === lastServerCoverPhotosKeyRef.current) return;
     lastServerCoverPhotosKeyRef.current = key;
     setLocalCoverPhotos(e.coverPhotos ?? []);
+  }, [viewEv]);
+
+  useEffect(() => {
+    const e = viewEv as EventDetailed | undefined;
+    if (!e?.id) return;
+    const key = JSON.stringify(e.attachments ?? []);
+    if (key === lastServerAttachmentsKeyRef.current) return;
+    lastServerAttachmentsKeyRef.current = key;
+    setLocalAttachments(e.attachments ?? []);
   }, [viewEv]);
 
   /** Group roster for @mentions (server validates the same set). */
@@ -581,6 +594,7 @@ export function EventDetailScreen({
   } | null>(null);
   const [lightbox, setLightbox] = useState<{
     urls: string[];
+    names?: Array<string | undefined>;
     index: number;
     name: string;
     ts: Date;
@@ -1325,9 +1339,10 @@ export function EventDetailScreen({
   const canEditDescription = canEdit && editingEvent;
   const isGroupAdminOrOwner =
     group.ownerId === currentUserId || (group.adminIds ?? []).includes(currentUserId ?? '');
-  /** Event creator or group admins/owners may manage cover photos anytime (not tied to edit mode). */
+  /** Event creator or group admins/owners may manage cover photos and files anytime (not tied to edit mode). */
   const canEditPhotos =
     !!currentUserId && (ev.createdBy === currentUserId || isGroupAdminOrOwner);
+  const canEditAttachments = canEditPhotos;
   function clearPendingAfterSuccessfulSave() {
     pendingAfterSuccessfulSaveRef.current = null;
   }
@@ -1998,6 +2013,70 @@ export function EventDetailScreen({
       setCoverPhotoBusy(false);
     }
   };
+
+  const persistAttachments = async (next: Array<{ url: string; fileName?: string }>) => {
+    if (!currentUserId) return;
+    await updateEventMutation.mutateAsync({
+      updatedBy: currentUserId,
+      attachments: next,
+    });
+  };
+
+  const addEventAttachments = async (files: Array<{ url: string; fileName?: string }>) => {
+    if (!currentUserId || !canEditAttachments || !files.length) return;
+    const prev = localAttachments;
+    const next = [...prev, ...files];
+    setLocalAttachments(next);
+    try {
+      await persistAttachments(next);
+    } catch {
+      setLocalAttachments(prev);
+      Alert.alert('Error', 'Failed to add file');
+    }
+  };
+
+  const confirmRemoveEventAttachment = (url: string) => {
+    if (!currentUserId || !canEditAttachments) return;
+    void (async () => {
+      const prev = localAttachments;
+      const next = prev.filter((f) => f.url !== url);
+      if (next.length === prev.length) return;
+      setLocalAttachments(next);
+      setLightbox((cur) => (cur ? dropLightboxItem(cur, url) : cur));
+      try {
+        await persistAttachments(next);
+        deleteManagedUploadFireAndForget(currentUserId, url);
+      } catch {
+        setLocalAttachments(prev);
+        Alert.alert('Error', 'Failed to remove file');
+      }
+    })();
+  };
+
+  const attachFilesToEvent = async () => {
+    if (!currentUserId || !canEditAttachments || attachmentBusy) return;
+    setAttachmentBusy(true);
+    try {
+      const uploaded = await pickAndUploadFileFromDevice(currentUserId, { groupId: ev?.groupId });
+      if (uploaded?.length) {
+        await addEventAttachments(
+          uploaded.map((file) => ({
+            url: uploadUrlToDownloadUrl(file.publicUrl),
+            fileName: file.fileName,
+          }))
+        );
+      }
+    } catch (e) {
+      if (e instanceof Error && e.message === 'cancelled') return;
+      Alert.alert('Upload', e instanceof Error ? e.message : 'Could not attach file');
+    } finally {
+      setAttachmentBusy(false);
+    }
+  };
+
+  const attachmentsForDisplay = canEditAttachments
+    ? localAttachments
+    : (displayEv.attachments ?? []);
 
   const evWithWatch = ev as EventDetailed & {
     viewerWatching?: boolean;
@@ -2882,6 +2961,77 @@ export function EventDetailScreen({
           </View>
         </View>
 
+        <View style={[styles.eventScrollInset, styles.eventSectionGap]}>
+          <Text style={styles.eventSectionLabel}>
+            Files{attachmentsForDisplay.length > 0 ? ` · ${attachmentsForDisplay.length}` : ''}
+          </Text>
+          <View style={styles.eventMainCard}>
+            {attachmentsForDisplay.length > 0 || canEditAttachments ? (
+              <View style={styles.eventFilesBody}>
+                {attachmentsForDisplay.map((file, i) => (
+                  <View key={`${file.url}-${i}`} style={styles.eventFileRow}>
+                    <PostAttachmentFileRow
+                      url={file.url}
+                      name={file.fileName}
+                      textStyle={styles.eventFileName}
+                      onPress={() =>
+                        setLightbox({
+                          urls: attachmentsForDisplay.map((f) => f.url),
+                          index: i,
+                          names: attachmentsForDisplay.map((f) => f.fileName || ''),
+                          name: getUserSafe(ev.createdBy).displayName,
+                          ts: new Date(ev.createdAt),
+                          onDelete: canEditAttachments
+                            ? (url) => confirmRemoveEventAttachment(url)
+                            : undefined,
+                        })
+                      }
+                    />
+                    {canEditAttachments ? (
+                      <TouchableOpacity
+                        onPress={() =>
+                          confirmDestructive(
+                            'Delete file?',
+                            'This file will be removed from the event and deleted.',
+                            () => confirmRemoveEventAttachment(file.url)
+                          )
+                        }
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        accessibilityLabel="Remove attached file"
+                        style={styles.eventFileRemove}
+                      >
+                        <Ionicons name="close" size={14} color={Colors.textSub} />
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                ))}
+                {canEditAttachments ? (
+                  <TouchableOpacity
+                    style={[styles.eventAttachBtn, attachmentBusy && styles.postBtnDisabled]}
+                    onPress={() => void attachFilesToEvent()}
+                    disabled={attachmentBusy}
+                    accessibilityRole="button"
+                    accessibilityLabel="Attach file"
+                  >
+                    {attachmentBusy ? (
+                      <ActivityIndicator size="small" color={Colors.textSub} />
+                    ) : (
+                      <Ionicons name="attach-outline" size={16} color={Colors.textSub} />
+                    )}
+                    <Text style={styles.eventAttachBtnText}>
+                      {attachmentBusy ? 'Uploading…' : 'Attach file'}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            ) : (
+              <View style={styles.photosEmptyBody}>
+                <Text style={styles.photosEmptyText}>No files</Text>
+              </View>
+            )}
+          </View>
+        </View>
+
         {canEditLive ? (
           <View style={[styles.eventScrollInset, styles.eventSectionGap]}>
             <Text style={styles.eventSectionLabel}>Settings</Text>
@@ -3331,6 +3481,7 @@ export function EventDetailScreen({
       <ImageLightboxModal
         visible={!!lightbox}
         urls={lightbox?.urls ?? []}
+        names={lightbox?.names}
         index={lightbox?.index ?? 0}
         onChangeIndex={(nextIndex) => setLightbox((prev) => (prev ? { ...prev, index: nextIndex } : prev))}
         onClose={() => setLightbox(null)}
@@ -4414,6 +4565,46 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: Fonts.regular,
     color: Colors.textMuted,
+  },
+  eventFilesBody: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  eventFileRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  eventFileName: {
+    flex: 1,
+    fontSize: 14,
+    fontFamily: Fonts.medium,
+    color: Colors.text,
+  },
+  eventFileRemove: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  eventAttachBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    marginTop: 4,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 9,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    backgroundColor: Colors.bg,
+  },
+  eventAttachBtnText: {
+    fontSize: 13,
+    fontFamily: Fonts.semiBold,
+    color: Colors.textSub,
   },
   commentsEmptyInsideCard: { paddingVertical: 28, paddingHorizontal: 16, alignItems: 'center', gap: 8 },
   modalInProgressBanner: {

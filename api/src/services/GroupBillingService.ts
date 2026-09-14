@@ -6,6 +6,7 @@ import { httpError } from '../utils/httpError';
 import { monthPeriodExpiresAt } from '../utils/groupPlanPeriod';
 import {
   FREE_OWNED_GROUP_LIMIT,
+  GROUP_TIERS,
   formatStorageBytes,
   isPaidSizeTier,
   maxMembersForTier,
@@ -148,11 +149,10 @@ export class GroupBillingService {
         maxStorageBytes: storageBytesToDb(cap),
       },
     });
-    await notificationService.createForUsers(
-      [input.userId],
+    await this.notifyOwnerAndAdmins(
+      input.groupId,
       'Group size updated',
-      `${group.name} is now a ${input.sizeTier} group (${formatStorageBytes(cap)}).`,
-      { type: 'group_storage', icon: 'cloud-circle-outline', groupId: input.groupId, dest: 'group' }
+      `${group.name} is now a ${GROUP_TIERS[input.sizeTier].label} group (${formatStorageBytes(cap)}).`
     );
     return { maxStorageBytes: cap, sizeTier: input.sizeTier };
   }
@@ -253,19 +253,14 @@ export class GroupBillingService {
         ? ''
         : ` Member limit will be ${maxMembersForTier(pendingSizeTier)}.`;
     const body =
-      `${groupName} is scheduled to become a ${pendingSizeTier} group on ${ends}. ` +
+      `${groupName} is scheduled to become a ${GROUP_TIERS[pendingSizeTier].label} group on ${ends}. ` +
       `Until then, storage stays as-is so you can fix billing or download files. ` +
       `After that, older files will be deleted until usage is under ${formatStorageBytes(cap)}.` +
       memberLine;
 
-    await notificationService
-      .createForUser(ownerId, 'Group size grace period', body, {
-        type: 'group_storage',
-        icon: 'warning-outline',
-        groupId,
-        dest: 'group',
-      })
-      .catch(() => undefined);
+    await this.notifyOwnerAndAdmins(groupId, 'Group size grace period', body, {
+      icon: 'warning-outline',
+    });
 
     const owner = await prisma.user.findUnique({
       where: { id: ownerId },
@@ -295,6 +290,10 @@ export class GroupBillingService {
 
   public async finishGrace(groupId: string, pending: GroupSizeTier): Promise<void> {
     const cap = storageCapForTier(pending);
+    const group = await prisma.group.findUnique({
+      where: { id: groupId },
+      select: { name: true },
+    });
     await groupStorage.purgeOldestUntilUnderCap(groupId, cap);
     await prisma.group.update({
       where: { id: groupId },
@@ -308,6 +307,39 @@ export class GroupBillingService {
         maxStorageBytes: storageBytesToDb(cap),
       },
     });
+    if (group) {
+      await this.notifyOwnerAndAdmins(
+        groupId,
+        'Group size updated',
+        `${group.name} is now a ${GROUP_TIERS[pending].label} group (${formatStorageBytes(cap)}).`
+      );
+    }
+  }
+
+  private async notifyOwnerAndAdmins(
+    groupId: string,
+    title: string,
+    body: string,
+    options?: { icon?: string }
+  ): Promise<void> {
+    const members = await prisma.groupMember.findMany({
+      where: {
+        groupId,
+        status: 'active',
+        role: { in: ['owner', 'admin'] },
+      },
+      select: { userId: true },
+    });
+    const ids = [...new Set(members.map((m) => m.userId))];
+    if (ids.length === 0) return;
+    await notificationService
+      .createForUsers(ids, title, body, {
+        type: 'group_storage',
+        icon: options?.icon ?? 'cloud-circle-outline',
+        groupId,
+        dest: 'group',
+      })
+      .catch(() => undefined);
   }
 }
 

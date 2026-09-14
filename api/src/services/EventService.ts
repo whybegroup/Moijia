@@ -55,6 +55,22 @@ const COMMENT_INCLUDE_FOR_API = {
   },
 } as const;
 
+const EVENT_MEDIA_INCLUDE = {
+  coverPhotos: true,
+  attachments: { orderBy: { id: 'asc' as const } },
+};
+
+function attachmentCreateRows(
+  attachments?: Array<{ url: string; fileName?: string }> | null
+): Array<{ fileUrl: string; fileName: string | null }> {
+  return (attachments ?? [])
+    .map((a) => ({
+      fileUrl: (a.url || '').trim(),
+      fileName: a.fileName?.trim() || null,
+    }))
+    .filter((a) => a.fileUrl);
+}
+
 function previewForReplyQuote(text: string | null | undefined, photoCount: number): string {
   const t = (text ?? '').trim();
   if (t.length > 0) {
@@ -151,9 +167,7 @@ export class EventService {
 
     const events = await prisma.event.findMany({
       where,
-      include: {
-        coverPhotos: true,
-      },
+      include: EVENT_MEDIA_INCLUDE,
       orderBy: {
         start: 'asc',
       },
@@ -205,7 +219,7 @@ export class EventService {
     const events = await prisma.event.findMany({
       where,
       include: {
-        coverPhotos: true,
+        ...EVENT_MEDIA_INCLUDE,
         rsvps: true,
         comments: {
           include: COMMENT_INCLUDE_FOR_API,
@@ -291,16 +305,16 @@ export class EventService {
   }
 
   /**
-   * Host may always update. Active group admins/owners may update cover photos only
-   * (see `coverPhotosOnly`). Host may update even if no longer a group member.
+   * Host may always update. Active group admins/owners may update cover photos and
+   * attachments only (see `mediaOnly`). Host may update even if no longer a group member.
    */
   private async assertCanUpdateEvent(
     event: { groupId: string; createdBy: string },
     actorId: string,
-    opts?: { coverPhotosOnly?: boolean },
+    opts?: { mediaOnly?: boolean },
   ): Promise<void> {
     if (event.createdBy === actorId) return;
-    if (opts?.coverPhotosOnly) {
+    if (opts?.mediaOnly) {
       const role = await this.getActiveMemberRole(event.groupId, actorId);
       if (role && this.isAdminOrOwnerRole(role)) return;
     }
@@ -331,7 +345,7 @@ export class EventService {
     const event = await prisma.event.findUnique({
       where: { id },
       include: {
-        coverPhotos: true,
+        ...EVENT_MEDIA_INCLUDE,
         rsvps: true,
         comments: {
           include: COMMENT_INCLUDE_FOR_API,
@@ -551,6 +565,7 @@ export class EventService {
   public async create(input: EventInput & { viewerTimeZone?: string }): Promise<Event> {
     const {
       coverPhotos = [],
+      attachments = [],
       createdBy,
       recurrenceRule: rrIn,
       id: clientId,
@@ -568,6 +583,7 @@ export class EventService {
     const durationMs = end.getTime() - start.getTime();
 
     const photoRows = coverPhotos.map((photoUrl) => ({ photoUrl }));
+    const fileRows = attachmentCreateRows(attachments);
 
     const baseScalars = {
       groupId: eventData.groupId,
@@ -600,7 +616,10 @@ export class EventService {
       isAllDay: eventData.isAllDay ?? false,
     };
 
-    let event: Awaited<ReturnType<typeof prisma.event.create>> & { coverPhotos: { photoUrl: string }[] };
+    let event: Awaited<ReturnType<typeof prisma.event.create>> & {
+      coverPhotos: { photoUrl: string }[];
+      attachments: { fileUrl: string; fileName: string | null }[];
+    };
 
     if (recurrenceRule) {
       let dates: Date[];
@@ -644,8 +663,9 @@ export class EventService {
               recurrenceRule,
               recurrenceSeriesId: seriesId,
               coverPhotos: { create: [...photoRows] },
+              attachments: { create: [...fileRows] },
             },
-            include: { coverPhotos: true },
+            include: EVENT_MEDIA_INCLUDE,
           });
           if (i === 0) first = row as typeof event;
         }
@@ -671,8 +691,9 @@ export class EventService {
           recurrenceRule: null,
           recurrenceSeriesId: null,
           coverPhotos: { create: [...photoRows] },
+          attachments: { create: [...fileRows] },
         },
-        include: { coverPhotos: true, group: true },
+        include: { ...EVENT_MEDIA_INCLUDE, group: true },
       });
     }
 
@@ -714,7 +735,7 @@ export class EventService {
    * Update an event
    */
   public async update(id: string, input: EventUpdate): Promise<Event> {
-    const { coverPhotos, updatedBy, seriesUpdateScope, viewerTimeZone, rsvpDeadline, ...eventData } =
+    const { coverPhotos, attachments, updatedBy, seriesUpdateScope, viewerTimeZone, rsvpDeadline, ...eventData } =
       input;
 
     const existing = await prisma.event.findUnique({
@@ -730,17 +751,18 @@ export class EventService {
         recurrenceRule: true,
         recurrenceSeriesId: true,
         coverPhotos: { select: { photoUrl: true } },
+        attachments: { select: { fileUrl: true } },
       },
     });
     if (!existing) {
       throw Object.assign(new Error('Event not found'), { status: 404 });
     }
     const scalarFieldUpdates = Object.values(eventData).some((v) => v !== undefined);
-    const coverPhotosOnly =
-      coverPhotos !== undefined &&
+    const mediaOnly =
+      (coverPhotos !== undefined || attachments !== undefined) &&
       !scalarFieldUpdates &&
       rsvpDeadline === undefined;
-    await this.assertCanUpdateEvent(existing, updatedBy, { coverPhotosOnly });
+    await this.assertCanUpdateEvent(existing, updatedBy, { mediaOnly });
 
     const seriesId = existing.recurrenceSeriesId;
     const scope = resolveSeriesUpdateScope(seriesId, seriesUpdateScope);
@@ -780,7 +802,7 @@ export class EventService {
     }
 
     let siblingIds: string[] = [id];
-    if (coverPhotos !== undefined && seriesId && appliesSeriesBulk) {
+    if ((coverPhotos !== undefined || attachments !== undefined) && seriesId && appliesSeriesBulk) {
       if (scope === 'all_occurrences') {
         siblingIds = await seriesSiblingIdsAll(seriesId);
       } else if (subsetIdsThisAndFollowing?.length) {
@@ -804,6 +826,26 @@ export class EventService {
       await Promise.all(removedUrls.map((u) => objectStore.deleteManagedUploadBestEffort(u)));
     };
 
+    const replaceAttachmentsForEvent = async (
+      eventId: string,
+      prevRows: { fileUrl: string }[]
+    ) => {
+      if (attachments === undefined) return;
+      const nextRows = attachmentCreateRows(attachments);
+      const nextSet = new Set(nextRows.map((r) => r.fileUrl));
+      const previousUrls = prevRows.map((p) => p.fileUrl);
+      const removedUrls = previousUrls.filter((u) => !nextSet.has(u));
+      await prisma.$transaction(async (tx) => {
+        await tx.eventAttachment.deleteMany({ where: { eventId } });
+        if (nextRows.length > 0) {
+          await tx.eventAttachment.createMany({
+            data: nextRows.map((row) => ({ eventId, ...row })),
+          });
+        }
+      });
+      await Promise.all(removedUrls.map((u) => objectStore.deleteManagedUploadBestEffort(u)));
+    };
+
     if (coverPhotos !== undefined) {
       for (const eid of siblingIds) {
         const prev =
@@ -816,6 +858,21 @@ export class EventService {
                 })
               )?.coverPhotos ?? [];
         await replacePhotosForEvent(eid, prev);
+      }
+    }
+
+    if (attachments !== undefined) {
+      for (const eid of siblingIds) {
+        const prev =
+          eid === id
+            ? existing.attachments
+            : (
+                await prisma.event.findUnique({
+                  where: { id: eid },
+                  select: { attachments: { select: { fileUrl: true } } },
+                })
+              )?.attachments ?? [];
+        await replaceAttachmentsForEvent(eid, prev);
       }
     }
 
@@ -1035,7 +1092,7 @@ export class EventService {
     const event = await prisma.event.update({
       where: { id },
       data: updateData as any,
-      include: { coverPhotos: true },
+      include: EVENT_MEDIA_INCLUDE,
     });
 
     const normLoc = (l: string | null | undefined) => (l ?? '').trim();
@@ -1141,7 +1198,7 @@ export class EventService {
     }
     const kept = await prisma.event.findUnique({
       where: { id: keepFirst.id },
-      include: { coverPhotos: true },
+      include: EVENT_MEDIA_INCLUDE,
     });
     if (!kept) {
       return { deleted: true };
@@ -1159,6 +1216,7 @@ export class EventService {
         groupId: true,
         createdBy: true,
         coverPhotos: { select: { photoUrl: true } },
+        attachments: { select: { fileUrl: true } },
         comments: {
           select: {
             photos: { select: { photoUrl: true } },
@@ -1171,8 +1229,9 @@ export class EventService {
     }
     await this.assertCanDeleteEvent(existing, actorUserId);
     const coverUrls = existing.coverPhotos.map((p) => p.photoUrl);
+    const attachmentUrls = existing.attachments.map((a) => a.fileUrl);
     const commentPhotoUrls = existing.comments.flatMap((c) => c.photos.map((p) => p.photoUrl));
-    const urlsToPurge = [...new Set([...coverUrls, ...commentPhotoUrls])];
+    const urlsToPurge = [...new Set([...coverUrls, ...attachmentUrls, ...commentPhotoUrls])];
     await prisma.event.delete({
       where: { id },
     });
@@ -1955,7 +2014,7 @@ export class EventService {
       });
       return tx.event.findUnique({
         where: { id: eventId },
-        include: { coverPhotos: true },
+        include: EVENT_MEDIA_INCLUDE,
       });
     });
     if (!updated) {
@@ -2024,7 +2083,11 @@ export class EventService {
       updatedBy: event.updatedBy,
       name: event.name,
       description: event.description,
-      coverPhotos: event.coverPhotos.map((p: any) => p.photoUrl),
+      coverPhotos: (event.coverPhotos ?? []).map((p: any) => p.photoUrl),
+      attachments: (event.attachments ?? []).map((a: any) => ({
+        url: a.fileUrl,
+        fileName: a.fileName || undefined,
+      })),
       start: event.start,
       end: event.end,
       isAllDay: event.isAllDay,

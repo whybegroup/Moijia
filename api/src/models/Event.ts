@@ -16,6 +16,8 @@ export interface Event {
   description?: string | null;
   /** Array of cover photo URLs */
   coverPhotos: string[];
+  /** Host/admin file attachments on the event */
+  attachments: EventFileAttachment[];
   /** Event start date/time */
   start: Date;
   /** Event end date/time */
@@ -56,6 +58,12 @@ export interface Event {
   createdAt: Date;
   /** Timestamp when the event was last updated */
   updatedAt: Date;
+}
+
+/** File attached to an event by the host or a group admin. */
+export interface EventFileAttachment {
+  url: string;
+  fileName?: string;
 }
 
 /** Alternate schedule proposed by a member; host may accept to update the event. */
@@ -126,6 +134,7 @@ export interface EventInput {
   /** Event description (multiline) */
   description?: string;
   coverPhotos?: string[];
+  attachments?: EventFileAttachment[];
   start: Date | string;
   end: Date | string;
   isAllDay?: boolean;
@@ -155,6 +164,7 @@ export interface EventUpdate {
   /** Event description (multiline) */
   description?: string;
   coverPhotos?: string[];
+  attachments?: EventFileAttachment[];
   start?: Date | string;
   end?: Date | string;
   isAllDay?: boolean;

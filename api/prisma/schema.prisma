@@ -248,6 +248,7 @@ model Event {
   group       Group        @relation(fields: [groupId], references: [id], onDelete: Cascade)
   creator     User         @relation(fields: [createdBy], references: [id])
   coverPhotos       EventPhoto[]
+  attachments       EventAttachment[]
   rsvps             RSVP[]
   comments          Comment[]
   watches           EventWatch[]
@@ -285,6 +286,19 @@ model EventPhoto {
   event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
 
   @@map("event_photos")
+}
+
+model EventAttachment {
+  id        Int      @id @default(autoincrement())
+  eventId   String
+  fileUrl   String
+  fileName  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@map("event_attachments")
 }
 
 // ============================================

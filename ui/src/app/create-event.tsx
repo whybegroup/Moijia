@@ -45,6 +45,7 @@ import { buildRecurrenceRule, defaultRecurrenceFormState, parseRecurrenceToForm,
 import { useGroups, useCreateEvent, useUpdateEvent, useEvent, useAllGroupMemberColors } from '../hooks/api';
 import { uid } from '../utils/api-helpers';
 import { useCurrentUserContext } from '../contexts/CurrentUserContext';
+import { FileExtensionIcon } from '../components/FileExtensionPreview';
 import { ResolvableImage } from '../components/ResolvableImage';
 import { GroupAvatar } from '../components/GroupAvatar';
 import { AddImageButton } from '../components/AddImageButton';
@@ -60,7 +61,11 @@ import {
   coverPhotoDraftIsVideo,
   isCancelled,
   ensureGroupCanUpload,
+  pickFilesFromDevice,
+  uploadPickedFileAsset,
+  uploadWebFile,
   type CoverPhotoDraft,
+  type PickedFileAsset,
 } from '../services/pickAndUploadImage';
 import { firstSearchParam, parseReturnToParam } from '../utils/navigationReturn';
 import { confirmDestructive } from '../utils/confirmDestructive';
@@ -72,7 +77,13 @@ import { useLocationSuggestions } from '../hooks/useLocationSuggestions';
 import { LocationSuggestionCard } from '../components/LocationSuggestionCard';
 import { resolvePlaceSuggestionDetails } from '../utils/locationSuggestions';
 
-/** Stable snapshot for “dirty?” after URL + default-group hydration. */
+type PendingEventFile =
+  | { kind: 'native'; asset: PickedFileAsset }
+  | { kind: 'web'; file: File };
+
+function pendingEventFileName(f: PendingEventFile): string {
+  return f.kind === 'native' ? f.asset.fileName : f.file.name;
+}
 function serializeCreateFormBaseline(
   f: {
     name: string;
@@ -250,6 +261,7 @@ export default function CreateEventScreen() {
       allowMaybe: false,
       enableWaitlist: false,
       coverPhotoDrafts: [] as CoverPhotoDraft[],
+      pendingFiles: [] as PendingEventFile[],
       recurrence: defaultRecurrenceFormState() as RecurrenceFormState,
     };
   });
@@ -260,6 +272,8 @@ export default function CreateEventScreen() {
     endTime: '',
   });
   const [coverPhotoBusy, setCoverPhotoBusy] = useState(false);
+  const [fileBusy, setFileBusy] = useState(false);
+  const eventFileInputRef = useRef<{ click: () => void } | null>(null);
   /** Create flow: pick group first, then event details. Edit always starts on details. */
   const [createStep, setCreateStep] = useState<'group' | 'details'>(() =>
     isEditing || !!paramGroupId ? 'details' : 'group'
@@ -348,6 +362,7 @@ export default function CreateEventScreen() {
         kind: 'remote' as const,
         url,
       })),
+      pendingFiles: [] as PendingEventFile[],
       recurrence,
     });
     setErrors({ startDate: '', startTime: '', endDate: '', endTime: '' });
@@ -460,6 +475,49 @@ export default function CreateEventScreen() {
     });
   };
 
+  const addEventFilesFromPicker = async () => {
+    if (!currentUserId) return;
+    if (!(await ensureGroupCanUpload(currentUserId, form.groupId))) return;
+    if (Platform.OS === 'web') {
+      eventFileInputRef.current?.click();
+      return;
+    }
+    if (fileBusy) return;
+    setFileBusy(true);
+    try {
+      const assets = await pickFilesFromDevice({ userId: currentUserId, groupId: form.groupId });
+      if (!assets.length) return;
+      setForm((p) => ({
+        ...p,
+        pendingFiles: [...p.pendingFiles, ...assets.map((asset) => ({ kind: 'native' as const, asset }))],
+      }));
+    } catch (e) {
+      if (!isCancelled(e)) {
+        Alert.alert('Upload', e instanceof Error ? e.message : 'Could not attach file');
+      }
+    } finally {
+      setFileBusy(false);
+    }
+  };
+
+  const onEventFileWebChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files ? Array.from(e.target.files) : [];
+    e.target.value = '';
+    if (!files.length || !currentUserId) return;
+    const kept = await keepWebFilesThatFit(currentUserId, form.groupId, files);
+    if (!kept.length) return;
+    setForm((p) => ({
+      ...p,
+      pendingFiles: [...p.pendingFiles, ...kept.map((file) => ({ kind: 'web' as const, file }))],
+    }));
+  };
+
+  const removePendingFileAt = (index: number) => {
+    confirmDestructive('Remove file?', 'This file will not be attached to the event.', () => {
+      setForm((p) => ({ ...p, pendingFiles: p.pendingFiles.filter((_, j) => j !== index) }));
+    });
+  };
+
   const timeRangeValid = useMemo(
     () =>
       isValidEventFormTimeRange({
@@ -557,6 +615,27 @@ export default function CreateEventScreen() {
         }
       }
 
+      const attachments: Array<{ url: string; fileName?: string }> = [];
+      if (form.pendingFiles.length > 0) {
+        try {
+          for (const pending of form.pendingFiles) {
+            if (pending.kind === 'native') {
+              const url = await uploadPickedFileAsset(currentUserId, pending.asset, {
+                groupId: form.groupId,
+              });
+              attachments.push({ url, fileName: pending.asset.fileName });
+            } else {
+              const url = await uploadWebFile(currentUserId, pending.file, { groupId: form.groupId });
+              attachments.push({ url, fileName: pending.file.name });
+            }
+          }
+        } catch (e) {
+          if (isCancelled(e)) return;
+          Alert.alert('Error', e instanceof Error ? e.message : 'Failed to upload files. Try again.');
+          return;
+        }
+      }
+
       if (isEditing && editId) {
         const inSeries = !!(editingEvent as { recurrenceSeriesId?: string } | undefined)
           ?.recurrenceSeriesId?.trim();
@@ -624,6 +703,7 @@ export default function CreateEventScreen() {
               ? form.locationAddress.trim() || null
               : null,
           coverPhotos,
+          attachments,
           start: finalStartIso,
           end: endIso,
           ...(eventHasStarted ? {} : { isAllDay: isAllDay || undefined }),
@@ -658,6 +738,7 @@ export default function CreateEventScreen() {
         name: form.name.trim(),
         description: form.description.trim() || undefined,
         coverPhotos,
+        attachments,
         start: startIso,
         end: endIso,
         isAllDay: isAllDay || undefined,
@@ -1631,6 +1712,66 @@ export default function CreateEventScreen() {
           </View>
         ) : null}
 
+        {!isEditing ? (
+          <View style={styles.photosSection}>
+            {Platform.OS === 'web' && (
+              <input
+                ref={(el) => {
+                  eventFileInputRef.current = el;
+                }}
+                type="file"
+                multiple
+                style={{ display: 'none' }}
+                onChange={(e) => void onEventFileWebChange(e)}
+              />
+            )}
+            <Text style={formSectionTitleStyle}>
+              Files{form.pendingFiles.length > 0 ? ` · ${form.pendingFiles.length}` : ''}
+            </Text>
+            <View style={styles.photosCard}>
+              {form.pendingFiles.length > 0 ? (
+                <View style={styles.pendingFilesList}>
+                  {form.pendingFiles.map((file, i) => (
+                    <View key={`${pendingEventFileName(file)}-${i}`} style={styles.pendingFileRow}>
+                      <FileExtensionIcon
+                        url={file.kind === 'native' ? file.asset.uri : file.file.name}
+                        fileName={pendingEventFileName(file)}
+                        size={14}
+                      />
+                      <Text style={styles.pendingFileName} numberOfLines={1}>
+                        {pendingEventFileName(file)}
+                      </Text>
+                      <TouchableOpacity
+                        onPress={() => removePendingFileAt(i)}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        accessibilityLabel="Remove file"
+                      >
+                        <Ionicons name="close" size={14} color={Colors.textSub} />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+              <View style={[styles.photosToolbar, form.pendingFiles.length === 0 && { borderTopWidth: 0 }]}>
+                <TouchableOpacity
+                  style={styles.attachFileBtn}
+                  onPress={() => void addEventFilesFromPicker()}
+                  disabled={fileBusy || !currentUserId}
+                  accessibilityRole="button"
+                  accessibilityLabel="Attach file"
+                >
+                  {fileBusy ? (
+                    <ActivityIndicator size="small" color={Colors.textSub} />
+                  ) : (
+                    <Ionicons name="attach-outline" size={16} color={Colors.textSub} />
+                  )}
+                  <Text style={styles.attachFileBtnText}>{fileBusy ? 'Adding…' : 'Attach file'}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        ) : null}
+
         <Field label="Settings">
           <View style={styles.settingsCard}>
             <Toggle value={form.allowMaybe} onChange={v => set('allowMaybe', v)} label="Allow 'Maybe' responses" />
@@ -2017,6 +2158,17 @@ const styles = StyleSheet.create({
   photosSection: { marginTop: 0, marginBottom: 18 },
   photosCard:    { backgroundColor: Colors.surface, borderRadius: 16, borderWidth: 1, borderColor: Colors.border, overflow: 'hidden' },
   photosToolbar: { flexDirection: 'row', alignItems: 'center', padding: 8, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: Colors.border },
+  pendingFilesList: { paddingHorizontal: 12, paddingVertical: 10, gap: 8 },
+  pendingFileRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  pendingFileName: { flex: 1, fontSize: 14, fontFamily: Fonts.medium, color: Colors.text },
+  attachFileBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  attachFileBtnText: { fontSize: 13, fontFamily: Fonts.semiBold, color: Colors.textSub },
   photosDeferHint: { fontSize: 11, color: Colors.textMuted, fontFamily: Fonts.regular, paddingHorizontal: 12, paddingBottom: 10, lineHeight: 16 },
   photoBtn:      { paddingHorizontal: 10, paddingVertical: 5, borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.bg },
   removeThumb:   { position: 'absolute', top: -5, right: -5, width: 18, height: 18, borderRadius: 9, backgroundColor: Colors.text, borderWidth: 2, borderColor: Colors.surface, alignItems: 'center', justifyContent: 'center' },

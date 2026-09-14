@@ -906,4 +906,15 @@ export async function uploadWebImageFile(userId: string, file: File, opts?: Uplo
   });
 }
 
+export async function uploadWebFile(userId: string, file: File, opts?: UploadOpts): Promise<string> {
+  if (!userId) throw new Error('You must be signed in to upload files.');
+  return presignAndPut({
+    userId,
+    contentType: file.type || 'application/octet-stream',
+    filename: file.name,
+    source: { kind: 'body', body: file, byteLength: file.size },
+    groupId: opts?.groupId,
+  });
+}
+
 export { isCancelled };
