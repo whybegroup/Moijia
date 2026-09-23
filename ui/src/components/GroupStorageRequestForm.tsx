@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -21,6 +21,12 @@ import { StoragePaywall } from './StoragePaywall';
 import { GroupDowngradeBanner } from './GroupDowngradeBanner';
 import { usePurchases } from '../contexts/PurchasesContext';
 import { sizeAddonByTier } from '../config/revenueCat';
+import {
+  listStoragePlanOptions,
+  monthlyRateLabel,
+  priceStringForTier,
+  type StoragePlanOption,
+} from '../services/revenueCat';
 import {
   addCalendarDays,
   formatPlanDate,
@@ -63,6 +69,7 @@ export function GroupStorageRequestForm({
   pendingSizeTier,
   graceEndsAt,
   sizeStartedAt,
+  onUpdated,
 }: {
   groupId: string;
   userId: string;
@@ -72,17 +79,31 @@ export function GroupStorageRequestForm({
   pendingSizeTier?: string | null;
   graceEndsAt?: Date | string | null;
   sizeStartedAt?: Date | string | null;
+  onUpdated?: () => void | Promise<void>;
 }) {
   const setLimit = useSetGroupStorageLimit(groupId, userId);
   const cancelSub = useCancelGroupStorageSubscription(groupId, userId);
-  const { customerInfo } = usePurchases();
+  const { customerInfo, refresh } = usePurchases();
   const currentTier = sizeTierFromGroup({ sizeTier, maxStorageBytes: currentMaxBytes });
-  const scheduledTier = pendingSizeTier ? parseSizeTier(pendingSizeTier) : currentTier;
   const spec = GROUP_TIERS[currentTier];
-  const scheduledSpec = GROUP_TIERS[scheduledTier];
   const [paywallOpen, setPaywallOpen] = useState(false);
+  const [planOptions, setPlanOptions] = useState<StoragePlanOption[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void listStoragePlanOptions()
+      .then((next) => {
+        if (!cancelled) setPlanOptions(next);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const addon = sizeAddonByTier(currentTier);
   const entitlement = addon ? customerInfo?.entitlements.active[addon.entitlementId] : null;
+  const scheduledTier = pendingSizeTier ? parseSizeTier(pendingSizeTier) : currentTier;
+  const scheduledSpec = GROUP_TIERS[scheduledTier];
   const pendingChange = scheduledTier !== currentTier;
   const { renewsAt, expiresAt } = useMemo(
     () =>
@@ -96,12 +117,14 @@ export function GroupStorageRequestForm({
   );
   const showExpire = pendingChange || entitlement?.willRenew === false;
   const periodDate = showExpire ? expiresAt : renewsAt;
-  const periodLabel =
-    currentTier === 'small' && !pendingChange
-      ? null
-      : periodDate
-        ? `${showExpire ? 'Expires' : 'Renews'} ${formatPlanDate(periodDate)}`
-        : null;
+  const monthlyRate = monthlyRateLabel(priceStringForTier(currentTier, planOptions));
+  const periodLabel = (() => {
+    if (currentTier === 'small' && !pendingChange) return null;
+    const when = periodDate ? `${showExpire ? 'Expires' : 'Renews'} ${formatPlanDate(periodDate)}` : '';
+    if (monthlyRate && when) return `${monthlyRate} · ${when}`;
+    return monthlyRate || when || null;
+  })();
+  const scheduledRate = monthlyRateLabel(priceStringForTier(scheduledTier, planOptions));
   const selectedEffectiveFrom = pendingChange
     ? expiresAt
       ? addCalendarDays(expiresAt, 1)
@@ -114,6 +137,8 @@ export function GroupStorageRequestForm({
   const applyLimit = async (tier: 'medium' | 'large') => {
     try {
       await setLimit.mutateAsync(tier);
+      await refresh();
+      await onUpdated?.();
     } catch (e) {
       const msg = apiErrorMessage(e, 'Could not update group size');
       if (Platform.OS === 'web') window.alert(msg);
@@ -125,7 +150,7 @@ export function GroupStorageRequestForm({
     <View style={styles.requestBlock}>
       <GroupDowngradeBanner
         compact
-        pendingSizeTier={pendingSizeTier}
+        pendingSizeTier={pendingChange ? pendingSizeTier : null}
         graceEndsAt={graceEndsAt ?? expiresAt}
       />
       <View style={styles.planCard}>
@@ -144,7 +169,11 @@ export function GroupStorageRequestForm({
           <Text style={styles.kicker}>Selected plan</Text>
           <Text style={styles.planName}>{scheduledSpec.label}</Text>
           <Text style={styles.planMeta}>{planSummary(scheduledTier)}</Text>
-          {effectiveLine ? <Text style={styles.period}>{effectiveLine}</Text> : null}
+          {scheduledRate || effectiveLine ? (
+            <Text style={styles.period}>
+              {[scheduledRate, effectiveLine].filter(Boolean).join(' · ')}
+            </Text>
+          ) : null}
         </View>
       ) : null}
       <TouchableOpacity
@@ -168,11 +197,11 @@ export function GroupStorageRequestForm({
         periodEndsAt={showExpire ? expiresAt : renewsAt}
         goingToSmall={showExpire}
         selectedEffectiveFrom={selectedEffectiveFrom}
-        onPurchased={(option) => {
-          void applyLimit(option.plan.tier);
-        }}
+        onPurchased={(option) => applyLimit(option.plan.tier)}
         onSwitchToSmall={async () => {
           await cancelSub.mutateAsync();
+          await refresh();
+          await onUpdated?.();
         }}
       />
     </View>

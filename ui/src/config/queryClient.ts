@@ -23,6 +23,7 @@ export const queryKeys = {
     all: ['users'] as const,
     detail: (id: string) => ['users', id] as const,
     quota: (id: string) => ['users', id, 'owned-group-quota'] as const,
+    purchases: (id: string) => ['users', id, 'purchase-history'] as const,
   },
   groups: {
     _base: ['groups'] as const,
@@ -34,6 +35,8 @@ export const queryKeys = {
     storageBreakdown: (groupId: string) => ['groups', groupId, 'storage-breakdown'] as const,
     storageFiles: (groupId: string, category: string) =>
       ['groups', groupId, 'storage-files', category] as const,
+    friendGroups: (groupId: string, userId: string) =>
+      ['groups', groupId, 'friend-groups', userId] as const,
     memberColor: (groupId: string, userId: string) => ['groups', groupId, 'members', userId, 'color'] as const,
     memberNotifPrefs: (groupId: string, userId: string) =>
       ['groups', groupId, 'members', userId, 'notification-preferences'] as const,

@@ -12,11 +12,12 @@ import {
   SuccessResponse,
   Response,
 } from 'tsoa';
-import { User, UserInput, UserUpdate, GroupOrderInput, GroupBillingSyncInput, OwnedGroupQuota } from '../models';
+import { User, UserInput, UserUpdate, GroupOrderInput, GroupBillingSyncInput, OwnedGroupQuota, PurchaseHistoryEntry } from '../models';
 import type { PushTokenInput } from '../models/PushToken';
 import { UserService } from '../services/UserService';
 import { PushTokenService } from '../services/PushTokenService';
 import { groupBilling } from '../services/GroupBillingService';
+import { listPurchases } from '../services/PurchaseHistoryService';
 
 @Route('users')
 @Tags('Users')
@@ -79,6 +80,14 @@ export class UserController extends Controller {
   }
 
   /**
+   * Purchase and plan-change history for this user.
+   */
+  @Get('{id}/purchase-history')
+  public async getPurchaseHistory(@Path() id: string): Promise<PurchaseHistoryEntry[]> {
+    return listPurchases(id);
+  }
+
+  /**
    * Record a purchased extra owned-group slot ($0.99).
    */
   @Post('{id}/extra-group-slots')
@@ -98,6 +107,8 @@ export class UserController extends Controller {
     await groupBilling.syncOwnerEntitlements(id, {
       mediumActive: !!body.mediumActive,
       largeActive: !!body.largeActive,
+      mediumRenewing: body.mediumRenewing !== false,
+      largeRenewing: body.largeRenewing !== false,
     });
     return groupBilling.getOwnedGroupQuota(id);
   }

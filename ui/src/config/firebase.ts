@@ -13,6 +13,7 @@ import {
   reauthenticateWithCredential,
   updatePassword,
   updateProfile,
+  deleteUser as firebaseDeleteUser,
   signOut as firebaseSignOut,
   onAuthStateChanged,
   browserLocalPersistence,
@@ -236,6 +237,12 @@ export const changePassword = async (currentPassword: string, newPassword: strin
 
 export const signOut = async () => {
   await firebaseSignOut(auth);
+};
+
+export const deleteCurrentUser = async () => {
+  const user = auth.currentUser;
+  if (!user) throw Object.assign(new Error('Not signed in'), { code: 'auth/no-current-user' });
+  await firebaseDeleteUser(user);
 };
 
 export const getCurrentUser = () => auth.currentUser;

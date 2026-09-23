@@ -32,8 +32,12 @@ import {
   GroupStorageBreakdown,
   GroupStorageFileList,
   GroupStorageFileDeleteInput,
+  FriendGroup,
+  FriendGroupInviteInput,
+  FriendGroupDecisionInput,
 } from '../models';
 import { GroupService } from '../services/GroupService';
+import { groupFriendships } from '../services/GroupFriendshipService';
 import { httpError } from '../utils/httpError';
 
 @Route('groups')
@@ -334,6 +338,82 @@ export class GroupController extends Controller {
       throw new Error('userId is required');
     }
     await this.groupService.deleteStorageFile(id, userId, body.url);
+  }
+
+  /**
+   * Friend groups linked to this group (accepted and pending).
+   */
+  @Get('{id}/friend-groups')
+  public async getFriendGroups(
+    @Path() id: string,
+    @Query() userId: string
+  ): Promise<FriendGroup[]> {
+    if (!userId) {
+      this.setStatus(400);
+      throw new Error('userId is required');
+    }
+    return groupFriendships.list(id, userId);
+  }
+
+  /**
+   * Request a friend-group link using the other group's invite code. Pending until they approve.
+   */
+  @Post('{id}/friend-groups')
+  @SuccessResponse('200', 'OK')
+  public async requestFriendGroup(
+    @Path() id: string,
+    @Body() body: FriendGroupInviteInput
+  ): Promise<FriendGroup> {
+    if (!body?.userId) {
+      this.setStatus(400);
+      throw new Error('userId is required');
+    }
+    if (!body?.inviteCode?.trim()) {
+      this.setStatus(400);
+      throw new Error('inviteCode is required');
+    }
+    const result = await groupFriendships.request(id, body.userId, body.inviteCode);
+    this.setStatus(200);
+    return result;
+  }
+
+  /**
+   * Approve or reject an incoming friend-group request.
+   */
+  @Post('{id}/friend-groups/{friendGroupId}')
+  @SuccessResponse('200', 'OK')
+  public async decideFriendGroup(
+    @Path() id: string,
+    @Path() friendGroupId: string,
+    @Body() body: FriendGroupDecisionInput
+  ): Promise<{ success: boolean }> {
+    if (!body?.userId) {
+      this.setStatus(400);
+      throw new Error('userId is required');
+    }
+    if (body.action !== 'approve' && body.action !== 'reject') {
+      this.setStatus(400);
+      throw new Error('action must be approve or reject');
+    }
+    await groupFriendships.decide(id, friendGroupId, body.userId, body.action);
+    this.setStatus(200);
+    return { success: true };
+  }
+
+  /**
+   * Remove a friend-group link or cancel an outgoing request.
+   */
+  @Delete('{id}/friend-groups/{friendGroupId}')
+  public async removeFriendGroup(
+    @Path() id: string,
+    @Path() friendGroupId: string,
+    @Query() userId: string
+  ): Promise<void> {
+    if (!userId) {
+      this.setStatus(400);
+      throw new Error('userId is required');
+    }
+    await groupFriendships.remove(id, friendGroupId, userId);
   }
 
   /**

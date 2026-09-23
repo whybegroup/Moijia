@@ -1,4 +1,5 @@
 export * from './User';
+export * from './PurchaseHistory';
 export * from './NotifPrefs';
 export * from './Group';
 export * from './GroupOrder';

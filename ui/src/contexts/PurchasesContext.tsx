@@ -24,6 +24,7 @@ import {
   type ProPaywallOutcome,
 } from '../services/revenueCatUi';
 import { UsersService } from '@moijia/client';
+import { queryClient, queryKeys } from '../config/queryClient';
 
 type PurchasesContextValue = {
   ready: boolean;
@@ -58,6 +59,8 @@ export const PurchasesProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (!user?.uid || !info) return;
       try {
         await UsersService.syncBilling(user.uid, billingSnapshot(info));
+        await queryClient.invalidateQueries({ queryKey: queryKeys.groups._base });
+        await queryClient.invalidateQueries({ queryKey: queryKeys.users.quota(user.uid) });
       } catch {
         /* quota/grace sync is best-effort */
       }
@@ -164,6 +167,8 @@ export const PurchasesProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setCustomerInfo(info);
     if (user?.uid) {
       await UsersService.addExtraGroupSlot(user.uid);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.users.purchases(user.uid) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.users.quota(user.uid) });
     }
   }, [user?.uid]);
 

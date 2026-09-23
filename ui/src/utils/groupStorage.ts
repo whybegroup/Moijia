@@ -90,3 +90,21 @@ export function sizeTierFromGroup(group: {
   if (max >= storageCapForTier('medium')) return 'medium';
   return 'small';
 }
+
+export function isGroupOwnedByUser(
+  group: { ownerId?: string | null },
+  userId: string
+): boolean {
+  return !!userId && group.ownerId === userId;
+}
+
+/** Medium/Large now, or a pending paid size still attached to the group. */
+export function groupHasSizeSubscription(group: {
+  sizeTier?: string | null;
+  pendingSizeTier?: string | null;
+}): boolean {
+  const current = parseSizeTier(group.sizeTier);
+  if (current === 'medium' || current === 'large') return true;
+  const pending = group.pendingSizeTier ? parseSizeTier(group.pendingSizeTier) : null;
+  return pending === 'medium' || pending === 'large';
+}

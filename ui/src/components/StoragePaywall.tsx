@@ -73,7 +73,7 @@ export function StoragePaywall({
 }: {
   visible: boolean;
   onClose: () => void;
-  onPurchased?: (option: StoragePlanOption) => void;
+  onPurchased?: (option: StoragePlanOption) => void | Promise<void>;
   onSwitchToSmall?: () => Promise<void>;
   initialTier?: GroupSizeTier | null;
   currentTier?: GroupSizeTier | null;
@@ -165,7 +165,7 @@ export function StoragePaywall({
         Toast.show({ type: 'info', text1: 'Purchase cancelled' });
         return;
       }
-      onPurchased?.(option);
+      await onPurchased?.(option);
       onClose();
       if (activeTier === 'large' && selected === 'medium') {
         Toast.show({ type: 'success', text1: 'Medium starts at the end of this period' });

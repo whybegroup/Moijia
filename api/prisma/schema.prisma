@@ -24,7 +24,9 @@ model User {
   notifPrefsJson String?
   /// JSON: ordered group ids for list / switcher UI (user preference)
   groupOrderJson String?
-  /// Purchased extra owned-group slots beyond the 5 free Small groups.
+  /// Max groups this user may own. Default 5; raise per user to extend capacity.
+  ownedGroupLimit Int @default(5)
+  /// Purchased extra owned-group slots beyond ownedGroupLimit.
   extraGroupSlots Int @default(0)
   /// Email from the auth provider, used for billing notices.
   email      String?
@@ -50,8 +52,27 @@ model User {
   groupPostComments       GroupPostComment[]
   groupPostCommentReactions GroupPostCommentReaction[]
   pushTokens              PushToken[]
+  purchases               UserPurchase[]
 
   @@map("users")
+}
+
+model UserPurchase {
+  id        String   @id @default(uuid())
+  userId    String
+  /// size_addon | extra_group | cancel
+  kind      String
+  productId String?
+  title     String
+  detail    String?
+  groupId   String?
+  groupName String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("user_purchases")
 }
 
 // ============================================
@@ -93,8 +114,30 @@ model Group {
   coverPhotos GroupPhoto[]
   polls       Poll[]
   posts       GroupPost[]
+  friendRequestsFrom GroupFriendship[] @relation("FriendRequestsFrom")
+  friendRequestsTo   GroupFriendship[] @relation("FriendRequestsTo")
 
   @@map("groups")
+}
+
+/// Bidirectional group-to-group link. Pending until the target group approves.
+model GroupFriendship {
+  id          String   @id @default(uuid())
+  fromGroupId String
+  toGroupId   String
+  /// pending | accepted | rejected
+  status      String   @default("pending")
+  requestedBy String
+  decidedBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  fromGroup Group @relation("FriendRequestsFrom", fields: [fromGroupId], references: [id], onDelete: Cascade)
+  toGroup   Group @relation("FriendRequestsTo", fields: [toGroupId], references: [id], onDelete: Cascade)
+
+  @@unique([fromGroupId, toGroupId])
+  @@index([toGroupId, status])
+  @@map("group_friendships")
 }
 
 /// Tracks managed S3 uploads billed against a group's storage quota.
