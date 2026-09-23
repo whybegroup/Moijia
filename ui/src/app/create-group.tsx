@@ -24,9 +24,8 @@ import { EventFormPopoverChrome } from '../components/EventFormPopoverChrome';
 import { KeyboardSafeScrollView } from '../components/KeyboardSafeScrollView';
 import { useCreateGroup, useGroup, useUpdateGroup } from '../hooks/api/useGroups';
 import { useOwnedGroupQuota } from '../hooks/api/useUsers';
-import { usePurchases } from '../contexts/PurchasesContext';
-import { isPurchaseCancelled } from '../services/revenueCat';
 import { useAuth } from '../contexts/AuthContext';
+import { FREE_OWNED_GROUP_LIMIT } from '../utils/groupTiers';
 import { useCurrentUserContext } from '../contexts/CurrentUserContext';
 import { GroupAvatar } from '../components/GroupAvatar';
 import { AvatarPickerModal } from '../components/AvatarPickerModal';
@@ -75,7 +74,6 @@ export default function CreateGroupScreen() {
   const { userId: currentUserId, user: currentUser } = useCurrentUserContext();
   const createGroup = useCreateGroup();
   const updateGroup = useUpdateGroup(editId ?? '', currentUserId ?? '');
-  const { purchaseExtraGroupSlot } = usePurchases();
   const actorIdForQuota = (currentUserId ?? user?.uid ?? '').trim();
   const { data: groupQuota, refetch: refetchQuota } = useOwnedGroupQuota(
     isEditing ? '' : actorIdForQuota
@@ -265,33 +263,16 @@ export default function CreateGroupScreen() {
 
       const quota = groupQuota ?? (await refetchQuota()).data;
       if (quota && !quota.canCreateGroup) {
-        const extra = quota.ownedGroupCount - quota.freeGroupLimit + 1;
-        const ok =
-          Platform.OS === 'web'
-            ? window.confirm(
-                `Your first ${quota.freeGroupLimit} groups are free. Extra group #${extra} is $0.99. Continue to purchase?`
-              )
-            : await new Promise<boolean>((resolve) => {
-                Alert.alert(
-                  'Extra group',
-                  `Your first ${quota.freeGroupLimit} groups are free. Another group is $0.99.`,
-                  [
-                    { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-                    { text: 'Buy $0.99', onPress: () => resolve(true) },
-                  ]
-                );
-              });
-        if (!ok) return;
-        try {
-          await purchaseExtraGroupSlot();
-        } catch (e) {
-          if (isPurchaseCancelled(e)) {
-            Toast.show({ type: 'info', text1: 'Purchase cancelled' });
-            return;
-          }
-          throw e;
-        }
-        await refetchQuota();
+        const cap =
+          quota.groupCapacity ??
+          quota.ownedGroupLimit ??
+          quota.freeGroupLimit ??
+          FREE_OWNED_GROUP_LIMIT;
+        Alert.alert(
+          'Group limit reached',
+          `You cannot create more than ${cap} groups. If you need more, contact an administrator.`
+        );
+        return;
       }
 
       await createGroup.mutateAsync({
@@ -310,10 +291,6 @@ export default function CreateGroupScreen() {
 
       handleBack();
     } catch (e) {
-      if (isPurchaseCancelled(e)) {
-        Toast.show({ type: 'info', text1: 'Purchase cancelled' });
-        return;
-      }
       let message = isEditing
         ? 'Failed to update group. Please try again.'
         : 'Failed to create group. Please try again.';

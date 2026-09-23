@@ -225,10 +225,17 @@ export interface GroupStorageLimitInput {
 export interface GroupBillingSyncInput {
   mediumActive: boolean;
   largeActive: boolean;
+  /** False when the store add-on is cancelled but still in the paid period. */
+  mediumRenewing?: boolean;
+  largeRenewing?: boolean;
 }
 
 export interface OwnedGroupQuota {
   ownedGroupCount: number;
+  /** Stored per-user owned-group cap (default 5). */
+  ownedGroupLimit: number;
+  /** ownedGroupLimit + extraGroupSlots */
+  groupCapacity: number;
   freeGroupLimit: number;
   extraGroupSlots: number;
   canCreateGroup: boolean;
@@ -269,5 +276,27 @@ export interface GroupStorageFileList {
 
 export interface GroupStorageFileDeleteInput {
   url: string;
+}
+
+export type FriendGroupLinkStatus = 'pending_outgoing' | 'pending_incoming' | 'accepted';
+
+export interface FriendGroup {
+  groupId: string;
+  name: string;
+  thumbnail?: string | null;
+  avatarSeed?: string | null;
+  status: FriendGroupLinkStatus;
+  membershipStatus: MembershipStatus;
+  memberCount: number;
+}
+
+export interface FriendGroupInviteInput {
+  inviteCode: string;
+  userId: string;
+}
+
+export interface FriendGroupDecisionInput {
+  userId: string;
+  action: 'approve' | 'reject';
 }
 

@@ -4,6 +4,7 @@ import { NotificationService } from './NotificationService';
 import { sendOwnerEmail } from './EmailService';
 import { httpError } from '../utils/httpError';
 import { monthPeriodExpiresAt } from '../utils/groupPlanPeriod';
+import { recordPurchase } from './PurchaseHistoryService';
 import {
   FREE_OWNED_GROUP_LIMIT,
   GROUP_TIERS,
@@ -27,6 +28,8 @@ export type PaidSizeTier = 'medium' | 'large';
 export interface BillingEntitlementSnapshot {
   mediumActive: boolean;
   largeActive: boolean;
+  mediumRenewing?: boolean;
+  largeRenewing?: boolean;
 }
 
 function productIdForTier(tier: PaidSizeTier): string {
@@ -47,20 +50,29 @@ export class GroupBillingService {
 
   public async getOwnedGroupQuota(userId: string): Promise<{
     ownedGroupCount: number;
+    ownedGroupLimit: number;
+    groupCapacity: number;
     freeGroupLimit: number;
     extraGroupSlots: number;
     canCreateGroup: boolean;
   }> {
     const [ownedGroupCount, user] = await Promise.all([
       this.ownedGroupCount(userId),
-      prisma.user.findUnique({ where: { id: userId }, select: { extraGroupSlots: true } }),
+      prisma.user.findUnique({
+        where: { id: userId },
+        select: { ownedGroupLimit: true, extraGroupSlots: true },
+      }),
     ]);
+    const ownedGroupLimit = Math.max(1, user?.ownedGroupLimit ?? FREE_OWNED_GROUP_LIMIT);
     const extraGroupSlots = Math.max(0, user?.extraGroupSlots ?? 0);
+    const groupCapacity = ownedGroupLimit + extraGroupSlots;
     return {
       ownedGroupCount,
-      freeGroupLimit: FREE_OWNED_GROUP_LIMIT,
+      ownedGroupLimit,
+      groupCapacity,
+      freeGroupLimit: ownedGroupLimit,
       extraGroupSlots,
-      canCreateGroup: ownedGroupCount < FREE_OWNED_GROUP_LIMIT + extraGroupSlots,
+      canCreateGroup: ownedGroupCount < groupCapacity,
     };
   }
 
@@ -68,9 +80,9 @@ export class GroupBillingService {
     const quota = await this.getOwnedGroupQuota(userId);
     if (quota.canCreateGroup) return;
     throw httpError(
-      402,
-      `You can create ${quota.freeGroupLimit} groups on the free plan. Buy an extra group slot to create another.`,
-      { code: 'extra_group_required' }
+      403,
+      `You cannot create more than ${quota.groupCapacity} groups. If you need more, contact an administrator.`,
+      { code: 'owned_group_limit' }
     );
   }
 
@@ -81,6 +93,13 @@ export class GroupBillingService {
       where: { id: userId },
       data: { extraGroupSlots: { increment: 1 } },
       select: { extraGroupSlots: true },
+    });
+    await recordPurchase({
+      userId,
+      kind: 'extra_group',
+      title: 'Extra group slot',
+      detail: '$0.99',
+      productId: 'product_extra_group',
     });
     return { extraGroupSlots: updated.extraGroupSlots };
   }
@@ -154,6 +173,15 @@ export class GroupBillingService {
       'Group size updated',
       `${group.name} is now a ${GROUP_TIERS[input.sizeTier].label} group (${formatStorageBytes(cap)}).`
     );
+    await recordPurchase({
+      userId: input.userId,
+      kind: 'size_addon',
+      title: `${GROUP_TIERS[input.sizeTier].label} group`,
+      detail: group.name,
+      productId: productIdForTier(input.sizeTier),
+      groupId: group.id,
+      groupName: group.name,
+    });
     return { maxStorageBytes: cap, sizeTier: input.sizeTier };
   }
 
@@ -203,6 +231,13 @@ export class GroupBillingService {
           : entitlements.mediumActive && !claimed.has('medium');
       if (covered) {
         claimed.add(tier);
+        const renewing = tier === 'large' ? entitlements.largeRenewing !== false : entitlements.mediumRenewing !== false;
+        // Keep an owner-scheduled Small/Medium downgrade even while the store
+        // period is still paid. Only start grace here when the store add-on
+        // itself has been cancelled (willRenew = false).
+        if (!renewing && parseSizeTier(group.pendingSizeTier) !== 'small') {
+          await this.startGrace(group.id, group.name, userId, 'small', group.graceNotifiedAt);
+        }
         continue;
       }
 
@@ -222,7 +257,13 @@ export class GroupBillingService {
   ): Promise<void> {
     const existing = await prisma.group.findUnique({
       where: { id: groupId },
-      select: { graceEndsAt: true, graceNotifiedAt: true, sizeTier: true, sizeStartedAt: true },
+      select: {
+        graceEndsAt: true,
+        graceNotifiedAt: true,
+        sizeTier: true,
+        sizeStartedAt: true,
+        pendingSizeTier: true,
+      },
     });
     if (!existing) return;
     if (parseSizeTier(existing.sizeTier) === pendingSizeTier) {
@@ -233,12 +274,25 @@ export class GroupBillingService {
       return;
     }
 
+    const alreadyPending = existing.pendingSizeTier === pendingSizeTier;
     const periodEnd = monthPeriodExpiresAt(existing.sizeStartedAt ?? new Date());
     const graceEndsAt = existing.graceEndsAt ?? periodEnd;
     await prisma.group.update({
       where: { id: groupId },
       data: { pendingSizeTier, graceEndsAt },
     });
+    if (!alreadyPending) {
+      const from = GROUP_TIERS[parseSizeTier(existing.sizeTier)].label;
+      const to = GROUP_TIERS[pendingSizeTier].label;
+      await recordPurchase({
+        userId: ownerId,
+        kind: 'cancel',
+        title: `Switched to ${to}`,
+        detail: `${groupName} · was ${from}`,
+        groupId,
+        groupName,
+      });
+    }
 
     if (alreadyNotifiedAt ?? existing.graceNotifiedAt) return;
     await prisma.group.update({

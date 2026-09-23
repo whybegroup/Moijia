@@ -3,8 +3,12 @@ import { User, UserInput, UserUpdate } from '../models';
 import { mergeNotifPrefs, parseNotifPrefsJson } from '../utils/notifPrefsCore';
 import { parseGroupOrderJson, serializeGroupOrderJson } from '../utils/groupOrder';
 import type { GroupOrderInput } from '../models/GroupOrder';
+import { groupStorage } from './GroupStorageService';
+import { S3UploadService } from './S3UploadService';
+import { deleteRevenueCatSubscriber } from './RevenueCatService';
 
 const prisma = new PrismaClient();
+const objectStore = new S3UploadService();
 
 export class UserService {
   private mapUser(row: any): User {
@@ -136,11 +140,89 @@ export class UserService {
   }
 
   /**
-   * Delete a user
+   * Delete a user and all owned groups, leftover content that would block
+   * the FK, and RevenueCat subscriber state so a re-created account starts clean.
    */
   public async delete(id: string): Promise<void> {
-    await prisma.user.delete({
+    const existing = await prisma.user.findUnique({
       where: { id },
+      select: { id: true, thumbnail: true },
     });
+    if (!existing) return;
+
+    await this.purgeOwnedGroups(id);
+    await this.purgeLeftoverContent(id, existing.thumbnail);
+
+    await prisma.notification.deleteMany({ where: { userId: id } });
+    await prisma.user.delete({ where: { id } });
+    await deleteRevenueCatSubscriber(id);
+  }
+
+  /** Groups this user currently owns (or orphan groups they created). */
+  private async purgeOwnedGroups(userId: string): Promise<void> {
+    const groups = await prisma.group.findMany({
+      where: {
+        OR: [
+          { members: { some: { userId, role: 'owner' } } },
+          { createdBy: userId, members: { none: { role: 'owner' } } },
+        ],
+      },
+      select: { id: true },
+    });
+
+    for (const group of groups) {
+      const urls = await groupStorage.collectAllManagedUrlsForPurge(group.id);
+      await prisma.group.delete({ where: { id: group.id } });
+      await Promise.all(urls.map((u) => objectStore.deleteManagedUploadBestEffort(u)));
+      await groupStorage.deleteTrackingForGroup(group.id);
+    }
+  }
+
+  /**
+   * Event.createdBy, Poll.createdBy/closedBy, and Comment.user do not cascade.
+   * Remove that leftover content (and its files) so the user row can be deleted.
+   */
+  private async purgeLeftoverContent(userId: string, thumbnail: string | null): Promise<void> {
+    const [events, polls, comments] = await Promise.all([
+      prisma.event.findMany({
+        where: { createdBy: userId },
+        select: {
+          coverPhotos: { select: { photoUrl: true } },
+          attachments: { select: { fileUrl: true } },
+        },
+      }),
+      prisma.poll.findMany({
+        where: { createdBy: userId },
+        select: { photos: { select: { photoUrl: true } } },
+      }),
+      prisma.comment.findMany({
+        where: { userId },
+        select: { photos: { select: { photoUrl: true } } },
+      }),
+    ]);
+
+    const urls = new Set<string>();
+    if (thumbnail) urls.add(thumbnail);
+    for (const event of events) {
+      for (const photo of event.coverPhotos) if (photo.photoUrl) urls.add(photo.photoUrl);
+      for (const file of event.attachments) if (file.fileUrl) urls.add(file.fileUrl);
+    }
+    for (const poll of polls) {
+      for (const photo of poll.photos) if (photo.photoUrl) urls.add(photo.photoUrl);
+    }
+    for (const comment of comments) {
+      for (const photo of comment.photos) if (photo.photoUrl) urls.add(photo.photoUrl);
+    }
+
+    if (urls.size > 0) {
+      const list = [...urls];
+      await Promise.all(list.map((u) => objectStore.deleteManagedUploadBestEffort(u)));
+      await prisma.groupStorageFile.deleteMany({ where: { publicUrl: { in: list } } });
+    }
+
+    await prisma.poll.updateMany({ where: { closedBy: userId }, data: { closedBy: null } });
+    await prisma.comment.deleteMany({ where: { userId } });
+    await prisma.event.deleteMany({ where: { createdBy: userId } });
+    await prisma.poll.deleteMany({ where: { createdBy: userId } });
   }
 }

@@ -175,10 +175,13 @@ export function useSetGroupStorageLimit(groupId: string, userId: string) {
             ? GroupStorageLimitInput.sizeTier.LARGE
             : GroupStorageLimitInput.sizeTier.MEDIUM,
       }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.groups.storageBreakdown(groupId) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.groups.detail(groupId, userId) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.groups._base });
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.groups.storageBreakdown(groupId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.groups.detail(groupId, userId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.groups._base }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.users.purchases(userId) }),
+      ]);
     },
   });
 }
@@ -187,10 +190,13 @@ export function useCancelGroupStorageSubscription(groupId: string, userId: strin
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => GroupsService.cancelStorageSubscription(groupId, userId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.groups.storageBreakdown(groupId) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.groups.detail(groupId, userId) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.groups._base });
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.groups.storageBreakdown(groupId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.groups.detail(groupId, userId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.groups._base }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.users.purchases(userId) }),
+      ]);
     },
   });
 }
@@ -311,6 +317,53 @@ export function useJoinGroup() {
       queryClient.invalidateQueries({ queryKey: queryKeys.groups._base });
       queryClient.invalidateQueries({ queryKey: ['events'] });
       queryClient.invalidateQueries({ queryKey: ['polls'] });
+    },
+  });
+}
+
+export function useFriendGroups(groupId: string, userId: string, opts?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: queryKeys.groups.friendGroups(groupId, userId),
+    queryFn: () => GroupsService.getFriendGroups(groupId, userId),
+    enabled: (opts?.enabled ?? true) && !!groupId && !!userId,
+    retry: retryUnlessNotFound,
+  });
+}
+
+export function useRequestFriendGroup(groupId: string, userId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (inviteCode: string) =>
+      GroupsService.requestFriendGroup(groupId, { inviteCode, userId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.groups._base });
+    },
+  });
+}
+
+export function useDecideFriendGroup(groupId: string, userId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      friendGroupId,
+      action,
+    }: {
+      friendGroupId: string;
+      action: 'approve' | 'reject';
+    }) => GroupsService.decideFriendGroup(groupId, friendGroupId, { userId, action }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.groups._base });
+    },
+  });
+}
+
+export function useRemoveFriendGroup(groupId: string, userId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (friendGroupId: string) =>
+      GroupsService.removeFriendGroup(groupId, friendGroupId, userId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.groups._base });
     },
   });
 }

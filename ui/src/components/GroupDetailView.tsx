@@ -35,6 +35,7 @@ import {
   useRecoverGroup,
   useEvents,
   useGroupStorageBreakdown,
+  useFriendGroups,
 } from '../hooks/api';
 import { useCurrentUserContext } from '../contexts/CurrentUserContext';
 import { usePullToRefresh } from '../hooks/usePullToRefresh';
@@ -52,6 +53,7 @@ import { ImageLightboxModal } from './ImageLightboxModal';
 import { dropLightboxItem } from './ForumPostMarkdownBody';
 import { GroupStorageUsageBar } from './GroupStorageUsageBar';
 import { GroupStorageRequestForm } from './GroupStorageRequestForm';
+import { GroupFriendGroupsSection } from './GroupFriendGroupsSection';
 import { resolveGroupMaxStorageBytes } from '../utils/groupStorage';
 import { groupSubpageFromPathname } from './groupScope/useGroupSubpage';
 import { groupsTabParentHref, navigateGroupsTabTo } from '../utils/tabBreadcrumbNav';
@@ -235,6 +237,11 @@ export function GroupDetailView({ groupId }: GroupDetailViewProps) {
     !!currentUserId &&
       (group?.membershipStatus === 'member' || group?.membershipStatus === 'admin')
   );
+  const { refetch: refetchFriendGroups } = useFriendGroups(groupId, currentUserId ?? '', {
+    enabled:
+      !!currentUserId &&
+      (group?.membershipStatus === 'member' || group?.membershipStatus === 'admin'),
+  });
   const updateGroup = useUpdateGroup(groupId, currentUserId ?? '');
   const regenerateInviteCodeMutation = useRegenerateInviteCode(groupId, currentUserId ?? '');
   const leaveGroupMutation = useLeaveGroup();
@@ -290,6 +297,7 @@ export function GroupDetailView({ groupId }: GroupDetailViewProps) {
     refetchGroupEvents,
     refetchMemberColor,
     refetchStorageBreakdown,
+    refetchFriendGroups,
   ]);
     const groupEventsSummaryButtonLine = useMemo(() => {
     const { inProgressCount, upcomingCount } = groupEventsSummary;
@@ -973,6 +981,12 @@ export function GroupDetailView({ groupId }: GroupDetailViewProps) {
 
           </View>
         </View>
+
+        {!isPending &&
+        currentUserId &&
+        (group.membershipStatus === 'member' || group.membershipStatus === 'admin') ? (
+          <GroupFriendGroupsSection groupId={groupId} userId={currentUserId} isAdmin={isAdmin} />
+        ) : null}
 
         {isOwner && currentUserId && !isPending ? (
           <View style={styles.planSection}>

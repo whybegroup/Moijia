@@ -15,6 +15,7 @@ import {
   getRevenueCatApiKey,
   type SizeAddon,
 } from '../config/revenueCat';
+import type { GroupSizeTier } from '../utils/groupTiers';
 
 let configureLock: Promise<void> | null = null;
 
@@ -64,13 +65,30 @@ export function getActiveSizeAddon(customerInfo: CustomerInfo | null | undefined
   return null;
 }
 
+function sizePlanActive(customerInfo: CustomerInfo | null | undefined, plan: SizeAddon): boolean {
+  if (!customerInfo) return false;
+  return entitlementActive(customerInfo, plan.entitlementId) || customerInfo.activeSubscriptions.includes(plan.productId);
+}
+
+function sizePlanRenewing(customerInfo: CustomerInfo | null | undefined, plan: SizeAddon): boolean {
+  if (!sizePlanActive(customerInfo, plan)) return false;
+  const entitlement = customerInfo?.entitlements.active[plan.entitlementId];
+  return entitlement?.willRenew !== false;
+}
+
 export function billingSnapshot(customerInfo: CustomerInfo | null | undefined): {
   mediumActive: boolean;
   largeActive: boolean;
+  mediumRenewing: boolean;
+  largeRenewing: boolean;
 } {
+  const medium = SIZE_ADDONS.find((plan) => plan.tier === 'medium')!;
+  const large = SIZE_ADDONS.find((plan) => plan.tier === 'large')!;
   return {
-    mediumActive: entitlementActive(customerInfo, 'entitlement_medium_group'),
-    largeActive: entitlementActive(customerInfo, 'entitlement_large_group'),
+    mediumActive: sizePlanActive(customerInfo, medium),
+    largeActive: sizePlanActive(customerInfo, large),
+    mediumRenewing: sizePlanRenewing(customerInfo, medium),
+    largeRenewing: sizePlanRenewing(customerInfo, large),
   };
 }
 
@@ -164,7 +182,35 @@ export type StoragePlanOption = {
   pkg: PurchasesPackage;
 };
 
+export function monthlyRateLabel(priceString: string | null | undefined): string {
+  const raw = priceString?.trim() ?? '';
+  if (!raw) return '';
+  if (/\/\s*mo\b/i.test(raw)) return raw;
+  if (/per month/i.test(raw)) return raw.replace(/per month/i, '/mo');
+  if (/\/\s*month/i.test(raw)) return raw.replace(/\/\s*month/i, '/mo');
+  return `${raw}/mo`;
+}
+
+export function priceStringForTier(tier: GroupSizeTier, options: StoragePlanOption[]): string | null {
+  if (tier === 'small') return null;
+  const option = options.find((item) => item.plan.tier === tier);
+  return option?.pkg.product.priceString ?? null;
+}
+
+let planOptionsLock: Promise<StoragePlanOption[]> | null = null;
+
 export async function listStoragePlanOptions(): Promise<StoragePlanOption[]> {
+  if (planOptionsLock) return planOptionsLock;
+  planOptionsLock = loadStoragePlanOptions();
+  try {
+    return await planOptionsLock;
+  } catch (error) {
+    planOptionsLock = null;
+    throw error;
+  }
+}
+
+async function loadStoragePlanOptions(): Promise<StoragePlanOption[]> {
   const offering = await getStorageOffering();
   if (!offering) {
     throw new Error(

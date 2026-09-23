@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { type Href } from 'expo-router';
 import { Colors, Fonts, Layout, Radius } from '../../constants/theme';
-import { useUpdateUser, useUser } from '../../hooks/api';
+import { useDeleteUser, useUpdateUser, useUser } from '../../hooks/api';
 import { usePullToRefresh } from '../../hooks/usePullToRefresh';
 import { useAuth } from '../../contexts/AuthContext';
 import { useCurrentUserContext } from '../../contexts/CurrentUserContext';
@@ -18,10 +18,13 @@ import { Toggle } from '../../components/ui';
 import { deleteManagedUploadFireAndForget } from '../../services/managedUploadDelete';
 import {
   changePassword,
+  deleteCurrentUser,
   hasPasswordProvider,
   oauthPasswordHint,
   signInProviderLabels,
 } from '../../config/firebase';
+import { apiErrorMessage } from '../../utils/apiErrors';
+import { logOutRevenueCat } from '../../services/revenueCat';
 
 function alertMessage(title: string, message: string) {
   if (Platform.OS === 'web') window.alert(message);
@@ -173,6 +176,7 @@ export default function ProfileScreen() {
   const { refetch: refetchUser } = useUser(userId || '');
   const { refreshControl } = usePullToRefresh(refetchUser);
   const updateUser = useUpdateUser(userId || '');
+  const deleteUser = useDeleteUser();
 
   const [draftDisplayName, setDraftDisplayName] = useState('');
   const [editingDisplayName, setEditingDisplayName] = useState(false);
@@ -297,6 +301,42 @@ export default function ProfileScreen() {
     }
   };
 
+  const performDeleteAccount = async () => {
+    try {
+      if (userId) {
+        await deleteUser.mutateAsync(userId);
+      }
+      await logOutRevenueCat().catch(() => undefined);
+      try {
+        await deleteCurrentUser();
+      } catch {
+        await signOut();
+      }
+    } catch (e) {
+      const msg = apiErrorMessage(e, 'Failed to delete account');
+      if (Platform.OS === 'web') window.alert(msg);
+      else Alert.alert('Error', msg);
+    }
+  };
+
+  const handleDeleteAccount = () => {
+    const title = 'Delete Account';
+    const message =
+      'This permanently deletes your account, groups you own, and subscription records. Signing up again will not restore previous plans. This cannot be undone.';
+    if (Platform.OS === 'web') {
+      if (window.confirm(message)) void performDeleteAccount();
+      return;
+    }
+    Alert.alert(title, message, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete Account',
+        style: 'destructive',
+        onPress: () => void performDeleteAccount(),
+      },
+    ]);
+  };
+
   const openSupport = () => router.push(SUPPORT_PATH as Href);
 
   if (loading) {
@@ -324,6 +364,15 @@ export default function ProfileScreen() {
           </Text>
           <TouchableOpacity style={styles.signOutBtn} onPress={handleSignOut}>
             <Text style={styles.signOutText}>Sign Out</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.deleteAccountBtn, deleteUser.isPending && styles.deleteAccountBtnDisabled]}
+            onPress={handleDeleteAccount}
+            disabled={deleteUser.isPending}
+          >
+            <Text style={styles.deleteAccountText}>
+              {deleteUser.isPending ? 'Deleting…' : 'Delete Account'}
+            </Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -668,6 +717,19 @@ export default function ProfileScreen() {
         <TouchableOpacity style={styles.signOutBtn} onPress={handleSignOut}>
           <Text style={styles.signOutText}>Sign Out</Text>
         </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.deleteAccountBtn, deleteUser.isPending && styles.deleteAccountBtnDisabled]}
+          onPress={handleDeleteAccount}
+          disabled={deleteUser.isPending}
+          accessibilityRole="button"
+          accessibilityLabel="Delete account"
+        >
+          {deleteUser.isPending ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.deleteAccountText}>Delete Account</Text>
+          )}
+        </TouchableOpacity>
       </KeyboardSafeScrollView>
 
       <AvatarPickerModal
@@ -772,4 +834,13 @@ const styles = StyleSheet.create({
   emptyStateText:    { fontSize: 14, color: Colors.textMuted, fontFamily: Fonts.regular, textAlign: 'center', lineHeight: 20 },
   signOutBtn:       { marginTop: 20, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: '#FCA5A5', backgroundColor: '#FEF2F2', alignItems: 'center' },
   signOutText:      { fontSize: 14, color: '#DC2626', fontFamily: Fonts.semiBold },
+  deleteAccountBtn: {
+    marginTop: 10,
+    padding: 14,
+    borderRadius: 12,
+    backgroundColor: '#DC2626',
+    alignItems: 'center',
+  },
+  deleteAccountBtnDisabled: { opacity: 0.6 },
+  deleteAccountText: { fontSize: 14, color: '#fff', fontFamily: Fonts.semiBold },
 });
