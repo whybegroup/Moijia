@@ -166,9 +166,10 @@ export class GroupBillingService {
   }
 
   /**
-   * Store billing: Apple/Google keep paid access until period end.
-   * Owner-scheduled downgrades stay pending even while the current entitlement is still active.
-   * When the current add-on is gone, schedule the next smaller tier they still pay for (or Small).
+   * Store Medium/Large add-ons are shared across owned groups of that tier.
+   * Owner-scheduled downgrades stay pending even while the entitlement is still active.
+   * Only a lapsed store entitlement starts billing grace, and only on groups the owner
+   * did not already schedule.
    */
   public async syncOwnerEntitlements(
     userId: string,
@@ -196,33 +197,19 @@ export class GroupBillingService {
       },
     });
 
-    const claimed = new Set<PaidSizeTier>();
-    const paid = groups
-      .filter((g) => isPaidSizeTier(parseSizeTier(g.sizeTier)))
-      .sort((a, b) => {
-        const rank = (t: string) => (t === 'large' ? 2 : t === 'medium' ? 1 : 0);
-        return rank(b.sizeTier) - rank(a.sizeTier);
-      });
+    for (const group of groups) {
+      const tier = parseSizeTier(group.sizeTier);
+      if (!isPaidSizeTier(tier)) continue;
+      if (group.pendingSource === 'owner') continue;
 
-    for (const group of paid) {
-      const tier = parseSizeTier(group.sizeTier) as PaidSizeTier;
-      const covered =
-        tier === 'large'
-          ? entitlements.largeActive && !claimed.has('large')
-          : entitlements.mediumActive && !claimed.has('medium');
+      const covered = tier === 'large' ? entitlements.largeActive : entitlements.mediumActive;
       if (covered) {
-        claimed.add(tier);
-        // Keep an in-app Small/Medium schedule. Do not treat store willRenew=false
-        // as a cancel — sandbox/test entitlements often report that while still paid.
-        if (group.pendingSource !== 'owner') {
-          await this.clearGrace(group.id);
-        }
+        await this.clearGrace(group.id);
         continue;
       }
 
       const fallback: GroupSizeTier =
-        tier === 'large' && entitlements.mediumActive && !claimed.has('medium') ? 'medium' : 'small';
-      if (fallback === 'medium') claimed.add('medium');
+        tier === 'large' && entitlements.mediumActive ? 'medium' : 'small';
       await this.startGrace(group.id, group.name, userId, fallback, group.graceNotifiedAt, 'billing');
     }
   }
