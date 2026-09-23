@@ -28,6 +28,21 @@ function isPurchasesError(error: unknown): error is PurchasesError {
   );
 }
 
+export function isAlreadyPurchased(error: unknown): boolean {
+  if (isPurchasesError(error)) {
+    return error.code === PURCHASES_ERROR_CODE.PRODUCT_ALREADY_PURCHASED_ERROR;
+  }
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'object' && error !== null && 'message' in error
+        ? String((error as { message: unknown }).message)
+        : '';
+  return /already (been )?purchased|already subscribed|already owned|product_already_purchased/i.test(
+    message
+  );
+}
+
 export function isPurchaseCancelled(error: unknown): boolean {
   if (isPurchasesError(error)) {
     return (

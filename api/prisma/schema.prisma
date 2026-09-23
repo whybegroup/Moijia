@@ -98,6 +98,8 @@ model Group {
   sizeTier String @default("small")
   /// Target tier after a cancelled/lapsed add-on (applied when graceEndsAt passes).
   pendingSizeTier String?
+  /// owner = in-app cancel/downgrade; billing = store lapse. Sync must not clear owner.
+  pendingSource String?
   /// When the current paid size add-on started (billing day-of-month).
   sizeStartedAt DateTime?
   graceEndsAt DateTime?

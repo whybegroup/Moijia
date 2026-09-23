@@ -17,6 +17,9 @@ const TYPE_TO_ICON: Record<string, IonName> = {
   mention: 'at-outline',
   group_approval: 'person-add-outline',
   group_join_request: 'person-add-outline',
+  friend_group_request: 'people-outline',
+  friend_group_accepted: 'people-circle-outline',
+  group_membership: 'people-outline',
   time_suggestion: 'time-outline',
   event_time_changed: 'time-outline',
   location_changed: 'location-outline',
@@ -68,8 +71,26 @@ type Props = {
   color?: string;
 };
 
+const ION_FROM_ICON = new Set<string>(Object.values(TYPE_TO_ICON));
+
+function ionForStoredIcon(icon: string | undefined | null): IonName | null {
+  const raw = icon?.trim();
+  if (!raw) return null;
+  if (ION_FROM_ICON.has(raw)) return raw as IonName;
+  const fromType = ionForType(raw);
+  if (fromType) return fromType;
+  if (
+    raw === 'people-outline' ||
+    raw === 'people-circle-outline' ||
+    raw === 'person-add-outline'
+  ) {
+    return raw;
+  }
+  return null;
+}
+
 export function NotificationListIcon({ type, icon, color = Colors.text }: Props) {
-  const name = ionForType(type);
+  const name = ionForType(type) ?? ionForStoredIcon(icon);
   if (name) {
     return <Ionicons name={name} size={20} color={color} />;
   }

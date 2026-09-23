@@ -5,9 +5,8 @@ import { Colors, Fonts } from '../constants/theme';
 import { useCurrentUserContext } from '../contexts/CurrentUserContext';
 import { useGroups } from '../hooks/api/useGroups';
 import { useOwnedGroupQuota } from '../hooks/api/useUsers';
-import { groupHasSizeSubscription, isGroupOwnedByUser } from '../utils/groupStorage';
+import { isGroupOwnedByUser } from '../utils/groupStorage';
 import { FREE_OWNED_GROUP_LIMIT } from '../utils/groupTiers';
-import { GroupSubscriptionsModal } from './GroupSubscriptionsModal';
 import { OwnedGroupsModal } from './OwnedGroupsModal';
 import { PurchaseHistoryModal } from './PurchaseHistoryModal';
 
@@ -15,7 +14,6 @@ export function SubscriptionSettingsCard() {
   const { userId } = useCurrentUserContext();
   const { data: groups = [] } = useGroups(userId ?? '');
   const { data: quota } = useOwnedGroupQuota(userId ?? '');
-  const [subsModalOpen, setSubsModalOpen] = useState(false);
   const [ownedModalOpen, setOwnedModalOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
 
@@ -23,16 +21,11 @@ export function SubscriptionSettingsCard() {
     () => groups.filter((group) => isGroupOwnedByUser(group, userId ?? '')),
     [groups, userId]
   );
-  const subscribedGroups = useMemo(
-    () => ownedGroups.filter(groupHasSizeSubscription),
-    [ownedGroups]
-  );
   const ownedCount = quota?.ownedGroupCount ?? ownedGroups.length;
   const groupCapacity =
     quota?.groupCapacity ??
     (quota?.freeGroupLimit ?? FREE_OWNED_GROUP_LIMIT) + (quota?.extraGroupSlots ?? 0);
-  const subscribedCount = subscribedGroups.length;
-  const canOpenSubs = ownedCount > 0;
+  const canOpenOwned = ownedCount > 0;
 
   const ownedValue = `${ownedCount}/${groupCapacity}`;
   const ownedRow = (
@@ -40,16 +33,7 @@ export function SubscriptionSettingsCard() {
       <Text style={styles.infoLabel}>Groups you own</Text>
       <View style={styles.countHit}>
         <Text style={styles.infoValue}>{ownedValue}</Text>
-        {canOpenSubs ? <Ionicons name="chevron-forward" size={16} color={Colors.text} /> : null}
-      </View>
-    </>
-  );
-  const subscribedRow = (
-    <>
-      <Text style={styles.infoLabel}>Groups with subscriptions</Text>
-      <View style={styles.countHit}>
-        <Text style={styles.infoValue}>{subscribedCount}</Text>
-        {canOpenSubs ? <Ionicons name="chevron-forward" size={16} color={Colors.text} /> : null}
+        {canOpenOwned ? <Ionicons name="chevron-forward" size={16} color={Colors.text} /> : null}
       </View>
     </>
   );
@@ -58,7 +42,7 @@ export function SubscriptionSettingsCard() {
     <>
       <Text style={styles.sectionLabel}>SUBSCRIPTION</Text>
       <View style={[styles.card, styles.cardGap]}>
-        {canOpenSubs ? (
+        {canOpenOwned ? (
           <TouchableOpacity
             style={styles.infoRow}
             onPress={() => setOwnedModalOpen(true)}
@@ -70,18 +54,6 @@ export function SubscriptionSettingsCard() {
         ) : (
           <View style={styles.infoRow}>{ownedRow}</View>
         )}
-        {canOpenSubs ? (
-          <TouchableOpacity
-            style={[styles.infoRow, styles.rowBorder]}
-            onPress={() => setSubsModalOpen(true)}
-            accessibilityRole="button"
-            accessibilityLabel={`Groups with subscriptions, ${subscribedCount}. Show details`}
-          >
-            {subscribedRow}
-          </TouchableOpacity>
-        ) : (
-          <View style={[styles.infoRow, styles.rowBorder]}>{subscribedRow}</View>
-        )}
         <TouchableOpacity
           style={[styles.historyRow, styles.rowBorder]}
           onPress={() => setHistoryOpen(true)}
@@ -91,17 +63,12 @@ export function SubscriptionSettingsCard() {
           <Text style={styles.historyText}>Purchase history</Text>
         </TouchableOpacity>
       </View>
-      <OwnedGroupsModal
-        visible={ownedModalOpen}
-        onClose={() => setOwnedModalOpen(false)}
-        groups={ownedGroups}
-      />
       {userId ? (
-        <GroupSubscriptionsModal
-          visible={subsModalOpen}
-          onClose={() => setSubsModalOpen(false)}
+        <OwnedGroupsModal
+          visible={ownedModalOpen}
+          onClose={() => setOwnedModalOpen(false)}
           userId={userId}
-          groups={subscribedGroups}
+          groups={ownedGroups}
         />
       ) : null}
       {userId ? (

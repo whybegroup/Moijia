@@ -121,10 +121,14 @@ export class GroupBillingService {
 
     const currentTier = parseSizeTier(group.sizeTier);
     const cap = storageCapForTier(input.sizeTier);
+    if (input.sizeTier === currentTier) {
+      await this.clearGrace(input.groupId);
+      return { maxStorageBytes: cap, sizeTier: currentTier };
+    }
     const isDowngrade = sizeTierRank(input.sizeTier) < sizeTierRank(currentTier);
 
     if (isDowngrade) {
-      await this.startGrace(group.id, group.name, input.userId, input.sizeTier, null);
+      await this.startGrace(group.id, group.name, input.userId, input.sizeTier, null, 'owner');
       return {
         maxStorageBytes: storageCapForTier(currentTier),
         sizeTier: currentTier,
@@ -136,6 +140,7 @@ export class GroupBillingService {
       data: {
         sizeTier: input.sizeTier,
         pendingSizeTier: null,
+        pendingSource: null,
         graceEndsAt: null,
         graceNotifiedAt: null,
         sizeProductId: productIdForTier(input.sizeTier),
@@ -185,6 +190,7 @@ export class GroupBillingService {
         name: true,
         sizeTier: true,
         pendingSizeTier: true,
+        pendingSource: true,
         graceEndsAt: true,
         graceNotifiedAt: true,
       },
@@ -206,12 +212,10 @@ export class GroupBillingService {
           : entitlements.mediumActive && !claimed.has('medium');
       if (covered) {
         claimed.add(tier);
-        const renewing = tier === 'large' ? entitlements.largeRenewing !== false : entitlements.mediumRenewing !== false;
-        // Keep an owner-scheduled Small/Medium downgrade even while the store
-        // period is still paid. Only start grace here when the store add-on
-        // itself has been cancelled (willRenew = false).
-        if (!renewing && parseSizeTier(group.pendingSizeTier) !== 'small') {
-          await this.startGrace(group.id, group.name, userId, 'small', group.graceNotifiedAt);
+        // Keep an in-app Small/Medium schedule. Do not treat store willRenew=false
+        // as a cancel — sandbox/test entitlements often report that while still paid.
+        if (group.pendingSource !== 'owner') {
+          await this.clearGrace(group.id);
         }
         continue;
       }
@@ -219,8 +223,20 @@ export class GroupBillingService {
       const fallback: GroupSizeTier =
         tier === 'large' && entitlements.mediumActive && !claimed.has('medium') ? 'medium' : 'small';
       if (fallback === 'medium') claimed.add('medium');
-      await this.startGrace(group.id, group.name, userId, fallback, group.graceNotifiedAt);
+      await this.startGrace(group.id, group.name, userId, fallback, group.graceNotifiedAt, 'billing');
     }
+  }
+
+  public async clearGrace(groupId: string): Promise<void> {
+    await prisma.group.update({
+      where: { id: groupId },
+      data: {
+        pendingSizeTier: null,
+        pendingSource: null,
+        graceEndsAt: null,
+        graceNotifiedAt: null,
+      },
+    });
   }
 
   public async startGrace(
@@ -228,7 +244,8 @@ export class GroupBillingService {
     groupName: string,
     ownerId: string,
     pendingSizeTier: GroupSizeTier,
-    alreadyNotifiedAt: Date | null | undefined
+    alreadyNotifiedAt: Date | null | undefined,
+    source: 'owner' | 'billing' = 'billing'
   ): Promise<void> {
     const existing = await prisma.group.findUnique({
       where: { id: groupId },
@@ -238,23 +255,23 @@ export class GroupBillingService {
         sizeTier: true,
         sizeStartedAt: true,
         pendingSizeTier: true,
+        pendingSource: true,
       },
     });
     if (!existing) return;
     if (parseSizeTier(existing.sizeTier) === pendingSizeTier) {
-      await prisma.group.update({
-        where: { id: groupId },
-        data: { pendingSizeTier: null, graceEndsAt: null, graceNotifiedAt: null },
-      });
+      await this.clearGrace(groupId);
       return;
     }
 
     const alreadyPending = existing.pendingSizeTier === pendingSizeTier;
     const periodEnd = monthPeriodExpiresAt(existing.sizeStartedAt ?? new Date());
     const graceEndsAt = existing.graceEndsAt ?? periodEnd;
+    const pendingSource =
+      existing.pendingSource === 'owner' || source === 'owner' ? 'owner' : 'billing';
     await prisma.group.update({
       where: { id: groupId },
-      data: { pendingSizeTier, graceEndsAt },
+      data: { pendingSizeTier, pendingSource, graceEndsAt },
     });
     if (!alreadyPending) {
       const from = GROUP_TIERS[parseSizeTier(existing.sizeTier)].label;
@@ -324,6 +341,7 @@ export class GroupBillingService {
       data: {
         sizeTier: pending,
         pendingSizeTier: null,
+        pendingSource: null,
         graceEndsAt: null,
         graceNotifiedAt: null,
         sizeProductId: isPaidSizeTier(pending) ? productIdForTier(pending as PaidSizeTier) : null,

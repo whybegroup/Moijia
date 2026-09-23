@@ -165,6 +165,24 @@ export function useUpdateGroup(id: string, userId: string) {
   });
 }
 
+function patchGroupInCaches(
+  queryClient: QueryClient,
+  userId: string,
+  groupId: string,
+  patch: Partial<GroupScoped>
+) {
+  queryClient.setQueryData(queryKeys.groups.detail(groupId, userId), (prev: GroupScoped | undefined) =>
+    prev && prev.id === groupId ? { ...prev, ...patch } : prev
+  );
+  for (const includeDeleted of [false, true] as const) {
+    queryClient.setQueryData(
+      queryKeys.groups.all(userId, includeDeleted),
+      (list: GroupScoped[] | undefined) =>
+        list?.map((group) => (group.id === groupId ? { ...group, ...patch } : group))
+    );
+  }
+}
+
 export function useSetGroupStorageLimit(groupId: string, userId: string) {
   const queryClient = useQueryClient();
   return useMutation({
@@ -175,7 +193,15 @@ export function useSetGroupStorageLimit(groupId: string, userId: string) {
             ? GroupStorageLimitInput.sizeTier.LARGE
             : GroupStorageLimitInput.sizeTier.MEDIUM,
       }),
-    onSuccess: async () => {
+    onSuccess: async (result, sizeTier) => {
+      const nextTier = (result?.sizeTier ?? sizeTier) as GroupScoped['sizeTier'];
+      const pending = nextTier === sizeTier ? null : sizeTier;
+      patchGroupInCaches(queryClient, userId, groupId, {
+        sizeTier: nextTier,
+        maxStorageBytes: result?.maxStorageBytes ?? undefined,
+        pendingSizeTier: pending,
+        ...(pending ? {} : { graceEndsAt: null }),
+      });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.groups.storageBreakdown(groupId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.groups.detail(groupId, userId) }),

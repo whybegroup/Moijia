@@ -175,7 +175,7 @@ export class GroupFriendshipService {
     const admins = (await groupAdmins(to.id)).filter((id) => id !== userId);
     await notificationService
       .createForUsers(admins, 'Friend group request', `${from.name} wants to be friends with ${to.name}.`, {
-        type: 'group_membership',
+        type: 'friend_group_request',
         icon: 'people-outline',
         groupId: to.id,
         dest: 'group',
@@ -212,8 +212,8 @@ export class GroupFriendshipService {
       const admins = (await groupAdmins(friendGroupId)).filter((id) => id !== userId);
       await notificationService
         .createForUsers(admins, 'Friend group accepted', `${currentName} accepted a friend request from ${otherName}.`, {
-          type: 'group_membership',
-          icon: 'people-outline',
+          type: 'friend_group_accepted',
+          icon: 'people-circle-outline',
           groupId: friendGroupId,
           dest: 'group',
         })
