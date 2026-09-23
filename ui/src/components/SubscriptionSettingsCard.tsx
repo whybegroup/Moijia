@@ -67,7 +67,6 @@ export function SubscriptionSettingsCard() {
         <OwnedGroupsModal
           visible={ownedModalOpen}
           onClose={() => setOwnedModalOpen(false)}
-          userId={userId}
           groups={ownedGroups}
         />
       ) : null}
