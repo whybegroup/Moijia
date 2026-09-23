@@ -2096,7 +2096,7 @@ export class EventService {
     await this.assertActiveMemberForEventEventRow(event, input.createdBy);
     const assigneeId = input.assigneeId?.trim() || null;
     await this.assertAssigneeIsActiveMember(event.groupId, assigneeId);
-    const eventIds = await this.eventIdsForSeriesTaskScope(event, input.seriesUpdateScope, input.createdBy);
+    const eventIds = await this.eventIdsForSeriesTaskScope(event, input.seriesUpdateScope);
     const seriesTaskKey = eventIds.length > 1 ? randomUUID() : null;
     let createdForRequest: Awaited<ReturnType<typeof prisma.eventTask.create>> | null = null;
     for (const eid of eventIds) {
@@ -2187,7 +2187,7 @@ export class EventService {
     if (!existing) {
       throw Object.assign(new Error('Task not found'), { status: 404 });
     }
-    const eventIds = await this.eventIdsForSeriesTaskScope(event, seriesUpdateScope, actorId);
+    const eventIds = await this.eventIdsForSeriesTaskScope(event, seriesUpdateScope);
     if (existing.seriesTaskKey) {
       await prisma.eventTask.deleteMany({
         where: { seriesTaskKey: existing.seriesTaskKey, eventId: { in: eventIds } },
@@ -2198,13 +2198,11 @@ export class EventService {
   }
 
   /**
-   * Event ids that should receive a task add/delete.
-   * This date only stays on the series. Future dates split onto a new series id, same as an event edit.
+   * Event ids that should receive a task add/delete. Series membership is never changed.
    */
   private async eventIdsForSeriesTaskScope(
     event: { id: string; start: Date; recurrenceSeriesId: string | null },
     seriesUpdateScope: EventUpdate['seriesUpdateScope'] | undefined,
-    actorId: string,
   ): Promise<string[]> {
     const seriesId = event.recurrenceSeriesId?.trim() || null;
     if (!seriesId || !seriesUpdateScope || seriesUpdateScope === 'this_occurrence') return [event.id];
@@ -2223,12 +2221,7 @@ export class EventService {
       select: { id: true },
     });
     const ids = rows.map((r) => r.id);
-    if (ids.length === 0) return [event.id];
-    await prisma.event.updateMany({
-      where: { id: { in: ids } },
-      data: { recurrenceSeriesId: randomUUID(), updatedBy: actorId },
-    });
-    return ids;
+    return ids.length > 0 ? ids : [event.id];
   }
 
   private async assertAssigneeIsActiveMember(groupId: string, assigneeId: string | null): Promise<void> {

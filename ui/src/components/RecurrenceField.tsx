@@ -414,10 +414,7 @@ export function RecurrenceField({ anchorDate, value, onChange }: Props) {
             accessibilityRole="button"
             accessibilityLabel="Dismiss"
           />
-          <Pressable
-            style={[styles.dialog, { maxHeight: dialogMaxHeight }]}
-            onPress={(e) => e.stopPropagation()}
-          >
+          <View style={[styles.dialog, { maxHeight: dialogMaxHeight }]}>
             <View style={styles.dialogHeader}>
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={styles.dialogTitle}>Repeat event</Text>
@@ -629,7 +626,7 @@ export function RecurrenceField({ anchorDate, value, onChange }: Props) {
                 <Text style={styles.doneBtnText}>Done</Text>
               </TouchableOpacity>
             </View>
-          </Pressable>
+          </View>
         </View>
       </Modal>
     </View>

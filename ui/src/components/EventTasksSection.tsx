@@ -32,6 +32,17 @@ function errorMessage(err: unknown, fallback: string): string {
   return e?.body?.message || e?.message || fallback;
 }
 
+function taskScopeSub(scope: SeriesUpdateScope, deleting: boolean): string {
+  const verb = deleting ? 'Remove the task from' : 'Add the task to';
+  if (scope === EventUpdate.seriesUpdateScope.THIS_AND_FOLLOWING) {
+    return `${verb} this date and later ones. Earlier dates stay as they are.`;
+  }
+  if (scope === EventUpdate.seriesUpdateScope.ALL_OCCURRENCES) {
+    return `${verb} every date in the series.`;
+  }
+  return `${verb} this date only.`;
+}
+
 export function EventTasksSection({
   eventId,
   tasks,
@@ -403,13 +414,7 @@ export function EventTasksSection({
                     </View>
                     <View style={styles.scopeTextCol}>
                       <Text style={styles.scopeOptTitle}>{opt.title}</Text>
-                      <Text style={styles.scopeOptSub}>
-                        {opt.key === EventUpdate.seriesUpdateScope.THIS_OCCURRENCE
-                          ? seriesPrompt?.action === 'delete'
-                            ? 'Remove the task from this date only. The event stays on the series.'
-                            : 'Add the task to this date only. The event stays on the series.'
-                          : opt.sub}
-                      </Text>
+                      <Text style={styles.scopeOptSub}>{taskScopeSub(opt.key, seriesPrompt?.action === 'delete')}</Text>
                     </View>
                   </TouchableOpacity>
                 );
