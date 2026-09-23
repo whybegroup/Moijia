@@ -31,8 +31,8 @@ import { formatPlanDate } from '../utils/groupPlanPeriod';
 
 const PLAN_BLURB: Record<GroupSizeTier, string> = {
   small: 'Free forever, for small groups',
-  medium: 'Store more files and more members',
-  large: 'Even more files and unlimited members',
+  medium: 'More storage for photos, videos, and files',
+  large: 'The most storage for photos, videos, and files',
 };
 
 const ALL_TIERS: GroupSizeTier[] = ['small', 'medium', 'large'];
@@ -45,8 +45,7 @@ const PERKS = [
 
 function planTitle(tier: GroupSizeTier): string {
   const spec = GROUP_TIERS[tier];
-  if (spec.maxMembers == null) return `${spec.label} (${spec.gb}GB + unlimited members)`;
-  return `${spec.label} (${spec.gb}GB + ${spec.maxMembers} members)`;
+  return `${spec.gb} GB`;
 }
 
 function monthlyPrice(priceString: string): string {
@@ -391,7 +390,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingTop: 8,
+    paddingTop: 20,
     paddingBottom: 8,
   },
   heroIcon: {

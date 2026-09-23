@@ -9,9 +9,6 @@ import {
   GROUP_TIERS,
   formatStorageBytes,
   isPaidSizeTier,
-  maxMembersForTier,
-  memberAddsBlocked,
-  memberLimitTier,
   parseSizeTier,
   sizeTierRank,
   storageBytesToDb,
@@ -83,28 +80,6 @@ export class GroupBillingService {
       select: { extraGroupSlots: true },
     });
     return { extraGroupSlots: updated.extraGroupSlots };
-  }
-
-  public async assertCanAddMember(groupId: string): Promise<void> {
-    const group = await prisma.group.findUnique({
-      where: { id: groupId },
-      select: { sizeTier: true, pendingSizeTier: true, deletedAt: true, name: true },
-    });
-    if (!group || group.deletedAt) throw httpError(404, 'Group not found');
-    const activeCount = await prisma.groupMember.count({
-      where: { groupId, status: 'active' },
-    });
-    const tier = memberLimitTier(
-      parseSizeTier(group.sizeTier),
-      group.pendingSizeTier ? parseSizeTier(group.pendingSizeTier) : null
-    );
-    if (!memberAddsBlocked(tier, activeCount)) return;
-    const max = maxMembersForTier(tier);
-    throw httpError(
-      403,
-      `This ${tier} group is full (${activeCount}/${max} members). Upgrade the group size to add more people.`,
-      { code: 'member_limit' }
-    );
   }
 
   public async applyPaidSizeTier(input: {
@@ -248,15 +223,10 @@ export class GroupBillingService {
 
     const ends = graceEndsAt.toLocaleDateString();
     const cap = storageCapForTier(pendingSizeTier);
-    const memberLine =
-      maxMembersForTier(pendingSizeTier) == null
-        ? ''
-        : ` Member limit will be ${maxMembersForTier(pendingSizeTier)}.`;
     const body =
       `${groupName} is scheduled to become a ${GROUP_TIERS[pendingSizeTier].label} group on ${ends}. ` +
       `Until then, storage stays as-is so you can fix billing or download files. ` +
-      `After that, older files will be deleted until usage is under ${formatStorageBytes(cap)}.` +
-      memberLine;
+      `After that, older files will be deleted until usage is under ${formatStorageBytes(cap)}.`;
 
     await this.notifyOwnerAndAdmins(groupId, 'Group size grace period', body, {
       icon: 'warning-outline',

@@ -14,7 +14,7 @@ import {
   resolveGroupMaxStorageBytes,
   sizeTierFromGroup,
 } from '../utils/groupStorage';
-import { GROUP_TIERS, formatMemberLimit, parseSizeTier, type GroupSizeTier } from '../utils/groupTiers';
+import { GROUP_TIERS, parseSizeTier, storageCapForTier, type GroupSizeTier } from '../utils/groupTiers';
 import { useSetGroupStorageLimit, useCancelGroupStorageSubscription } from '../hooks/api/useGroups';
 import { apiErrorMessage } from '../utils/apiErrors';
 import { StoragePaywall } from './StoragePaywall';
@@ -51,7 +51,7 @@ function resolvePeriodDates(input: {
 }
 
 function planSummary(tier: GroupSizeTier): string {
-  return `${formatStorageBytes(GROUP_TIERS[tier].maxStorageBytes)} · ${formatMemberLimit(tier)}`;
+  return formatStorageBytes(storageCapForTier(tier));
 }
 
 export function GroupStorageRequestForm({
@@ -132,8 +132,7 @@ export function GroupStorageRequestForm({
         <Text style={styles.kicker}>Active plan</Text>
         <Text style={styles.planName}>{spec.label}</Text>
         <Text style={styles.planMeta}>
-          {formatStorageBytes(resolveGroupMaxStorageBytes(currentMaxBytes, currentTier))} ·{' '}
-          {formatMemberLimit(currentTier)}
+          {formatStorageBytes(resolveGroupMaxStorageBytes(currentMaxBytes, currentTier))}
         </Text>
         {usedBytes > 0 ? (
           <Text style={styles.used}>{formatStorageBytes(usedBytes)} used</Text>

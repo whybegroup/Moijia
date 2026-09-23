@@ -1,6 +1,5 @@
 import {
   DEFAULT_GROUP_MAX_STORAGE_BYTES,
-  GROUP_TIERS,
   parseSizeTier,
   storageCapForTier,
   type GroupSizeTier,
@@ -87,7 +86,7 @@ export function sizeTierFromGroup(group: {
 }): GroupSizeTier {
   if (group.sizeTier) return parseSizeTier(group.sizeTier);
   const max = group.maxStorageBytes ?? 0;
-  if (max >= GROUP_TIERS.large.maxStorageBytes) return 'large';
-  if (max >= GROUP_TIERS.medium.maxStorageBytes) return 'medium';
+  if (max >= storageCapForTier('large')) return 'large';
+  if (max >= storageCapForTier('medium')) return 'medium';
   return 'small';
 }

@@ -30,9 +30,6 @@ import { UserService } from './UserService';
 import { sortByGroupOrder } from '../utils/groupOrder';
 import {
   groupMaxStorageBytes,
-  maxMembersForTier,
-  memberAddsBlocked,
-  memberLimitTier,
   parseSizeTier,
   storageBytesToDb,
 } from '../utils/groupStorageLimits';
@@ -262,7 +259,7 @@ export class GroupService {
     return group.coverPhotos.map((p) => p.photoUrl);
   }
 
-  private groupSizeFields(group: any, memberCount: number) {
+  private groupSizeFields(group: any) {
     const sizeTier = parseSizeTier(group.sizeTier);
     const pendingSizeTier = group.pendingSizeTier ? parseSizeTier(group.pendingSizeTier) : null;
     return {
@@ -270,8 +267,6 @@ export class GroupService {
       pendingSizeTier,
       sizeStartedAt: group.sizeStartedAt ?? null,
       graceEndsAt: group.graceEndsAt ?? null,
-      maxMemberCount: maxMembersForTier(sizeTier),
-      memberAddsBlocked: memberAddsBlocked(memberLimitTier(sizeTier, pendingSizeTier), memberCount),
       maxStorageBytes: groupMaxStorageBytes(group.maxStorageBytes, group.sizeTier),
     };
   }
@@ -305,7 +300,7 @@ export class GroupService {
       coverPhotos: this.mapGroupCoverUrls(group),
       avatarSeed: group.avatarSeed,
       requireApprovalToJoin: group.requireApprovalToJoin ?? true,
-      ...this.groupSizeFields(group, memberCount),
+      ...this.groupSizeFields(group),
       memberCount,
       membershipStatus,
       deletedAt: group.deletedAt ?? undefined,
@@ -1427,7 +1422,6 @@ export class GroupService {
       }
       if (existing.status === 'rejected') {
         const status = group.requireApprovalToJoin ? 'pending' : 'active';
-        if (status === 'active') await groupBilling.assertCanAddMember(groupId);
         await prisma.groupMember.update({
           where: { groupId_userId: { groupId, userId } },
           data: { status },
@@ -1444,7 +1438,6 @@ export class GroupService {
     }
 
     const status = group.requireApprovalToJoin ? 'pending' : 'active';
-    if (status === 'active') await groupBilling.assertCanAddMember(groupId);
     await prisma.groupMember.create({
       data: {
         groupId,
@@ -1653,7 +1646,6 @@ export class GroupService {
     const { userId, action: requestAction } = action;
 
     if (requestAction === 'approve') {
-      await groupBilling.assertCanAddMember(groupId);
       await prisma.groupMember.update({
         where: {
           groupId_userId: {
@@ -1860,7 +1852,7 @@ export class GroupService {
       avatarSeed: group.avatarSeed,
       inviteCode: group.inviteCode,
       requireApprovalToJoin: group.requireApprovalToJoin ?? true,
-      ...this.groupSizeFields(group, activeMembers.length),
+      ...this.groupSizeFields(group),
       ownerId: owner ? owner.userId : '',
       adminIds: admins.map((m: any) => m.userId),
       memberIds: activeMembers.map((m: any) => m.userId),

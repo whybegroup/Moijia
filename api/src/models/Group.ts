@@ -30,8 +30,6 @@ export interface Group {
   /** When the current paid size add-on started (billing day-of-month). */
   sizeStartedAt?: Date | null;
   graceEndsAt?: Date | null;
-  maxMemberCount?: number | null;
-  memberAddsBlocked?: boolean;
   /** Bytes used by this group's images and file attachments. */
   usedStorageBytes?: number;
   /** ID of the group's owner */
@@ -71,8 +69,6 @@ export interface GroupScoped {
   /** When the current paid size add-on started (billing day-of-month). */
   sizeStartedAt?: Date | null;
   graceEndsAt?: Date | null;
-  maxMemberCount?: number | null;
-  memberAddsBlocked?: boolean;
   /** Bytes used by this group's images and file attachments. Present on group detail. */
   usedStorageBytes?: number;
   memberCount: number;

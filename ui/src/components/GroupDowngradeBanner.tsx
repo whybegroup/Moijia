@@ -22,10 +22,7 @@ export function GroupDowngradeBanner({
       <Text style={styles.title}>Size change on {ends.toLocaleDateString()}</Text>
       <Text style={styles.body}>
         This group stays at its current size until then. After that it becomes {spec.label} (
-        {spec.gb} GB
-        {spec.maxMembers != null ? `, ${spec.maxMembers} members` : ', unlimited members'}). Older
-        files over the new storage cap will be deleted first. New members are blocked if the group
-        is still over the member cap.
+        {spec.gb} GB). Older files over the new storage cap will be deleted first.
       </Text>
     </View>
   );
