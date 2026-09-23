@@ -8,13 +8,17 @@ import {
   Platform,
   ActivityIndicator,
   Alert,
+  Modal,
+  TouchableOpacity,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import type { EventTask, User } from '@moijia/client';
-import { Colors, Fonts } from '../constants/theme';
+import { EventUpdate, type EventTask, type EventTaskInput, type User } from '@moijia/client';
+import { Colors, Fonts, Radius, Shadows } from '../constants/theme';
 import { Sheet } from './ui';
 import { UserAvatar } from './UserAvatar';
+import { edgeToEdgeModalProps } from './edgeToEdgeModalProps';
 import { confirmDestructive } from '../utils/confirmDestructive';
+import { SERIES_SCOPE_OPTIONS, type SeriesUpdateScope } from '../utils/seriesUpdateScopeOptions';
 import {
   useCreateEventTask,
   useDeleteEventTask,
@@ -34,6 +38,7 @@ export function EventTasksSection({
   memberIds,
   currentUserId,
   canEdit,
+  repeating,
   getUser,
 }: {
   eventId: string;
@@ -41,6 +46,8 @@ export function EventTasksSection({
   memberIds: string[];
   currentUserId: string;
   canEdit: boolean;
+  /** True when this date is one of several occurrences in a series. */
+  repeating?: boolean;
   getUser: (userId: string) => User;
 }) {
   const createTask = useCreateEventTask(eventId, currentUserId);
@@ -50,6 +57,12 @@ export function EventTasksSection({
   const [draft, setDraft] = useState('');
   const [draftAssigneeId, setDraftAssigneeId] = useState<string | null>(null);
   const [assignTarget, setAssignTarget] = useState<AssignTarget>(null);
+  const [seriesPrompt, setSeriesPrompt] = useState<{ action: 'add' } | { action: 'delete'; task: EventTask } | null>(
+    null,
+  );
+  const [seriesScope, setSeriesScope] = useState<SeriesUpdateScope>(
+    EventUpdate.seriesUpdateScope.THIS_OCCURRENCE,
+  );
 
   const members = useMemo(() => {
     return memberIds
@@ -76,7 +89,7 @@ export function EventTasksSection({
         ? (tasks.find((t) => t.id === assignTarget.taskId)?.assigneeId ?? null)
         : null;
 
-  const submitDraft = async () => {
+  const createTaskNow = async (seriesUpdateScope?: SeriesUpdateScope) => {
     const title = draft.trim();
     if (!title || !canEdit || createTask.isPending) return;
     try {
@@ -84,12 +97,27 @@ export function EventTasksSection({
         title,
         assigneeId: draftAssigneeId,
         createdBy: currentUserId,
+        ...(seriesUpdateScope
+          ? { seriesUpdateScope: seriesUpdateScope as EventTaskInput.seriesUpdateScope }
+          : {}),
       });
       setDraft('');
       setDraftAssigneeId(null);
+      setSeriesPrompt(null);
     } catch (err) {
       Alert.alert('Could not add task', errorMessage(err, 'Try again.'));
     }
+  };
+
+  const submitDraft = () => {
+    const title = draft.trim();
+    if (!title || !canEdit || createTask.isPending) return;
+    if (repeating) {
+      setSeriesScope(EventUpdate.seriesUpdateScope.THIS_OCCURRENCE);
+      setSeriesPrompt({ action: 'add' });
+      return;
+    }
+    void createTaskNow();
   };
 
   const toggle = (task: EventTask) => {
@@ -119,13 +147,35 @@ export function EventTasksSection({
     );
   };
 
-  const remove = (task: EventTask) => {
-    confirmDestructive('Delete task', `Remove “${task.title}”?`, () => {
-      deleteTask.mutate(task.id, {
+  const deleteTaskNow = (task: EventTask, seriesUpdateScope?: SeriesUpdateScope) => {
+    deleteTask.mutate(
+      { taskId: task.id, seriesUpdateScope },
+      {
+        onSuccess: () => setSeriesPrompt(null),
         onError: (err) => Alert.alert('Could not delete task', errorMessage(err, 'Try again.')),
-      });
-    });
+      },
+    );
   };
+
+  const remove = (task: EventTask) => {
+    if (repeating) {
+      setSeriesScope(EventUpdate.seriesUpdateScope.THIS_OCCURRENCE);
+      setSeriesPrompt({ action: 'delete', task });
+      return;
+    }
+    confirmDestructive('Delete task', `Remove “${task.title}”?`, () => deleteTaskNow(task));
+  };
+
+  const confirmSeriesPrompt = () => {
+    if (!seriesPrompt || createTask.isPending || deleteTask.isPending) return;
+    if (seriesPrompt.action === 'add') {
+      void createTaskNow(seriesScope);
+      return;
+    }
+    deleteTaskNow(seriesPrompt.task, seriesScope);
+  };
+
+  const seriesPromptBusy = createTask.isPending || deleteTask.isPending;
 
   const assigneeLabel = (userId: string | null | undefined) => {
     if (!userId) return canEdit ? 'Assign' : 'Unassigned';
@@ -159,9 +209,7 @@ export function EventTasksSection({
               />
             </View>
           </View>
-        ) : (
-          <Text style={styles.empty}>No tasks yet</Text>
-        )}
+        ) : null}
 
         {tasks.map((task) => {
           const assigneeId = task.assigneeId || null;
@@ -223,7 +271,9 @@ export function EventTasksSection({
         })}
 
         {canEdit ? (
-          <View style={[styles.addRow, total > 0 ? styles.rowBorder : null]}>
+          <>
+            {total > 0 ? <View style={styles.addDivider} /> : null}
+            <View style={styles.addRow}>
             <TextInput
               value={draft}
               onChangeText={setDraft}
@@ -269,10 +319,11 @@ export function EventTasksSection({
               )}
             </Pressable>
           </View>
+          </>
         ) : null}
       </View>
 
-      <Sheet visible={assignTarget != null} onClose={() => setAssignTarget(null)}>
+      <Sheet visible={assignTarget != null} onClose={() => setAssignTarget(null)} variant="dark" dimBackdrop={false}>
         <Text style={styles.sheetTitle}>Assign to</Text>
         <Pressable
           onPress={() => assign(null)}
@@ -280,10 +331,10 @@ export function EventTasksSection({
           accessibilityRole="button"
           accessibilityState={{ selected: !selectedAssigneeId }}
         >
-          <Ionicons name="person-outline" size={18} color={Colors.textSub} />
+          <Ionicons name="person-outline" size={18} color="rgba(245,245,247,0.7)" />
           <Text style={styles.memberName}>Unassigned</Text>
           {!selectedAssigneeId ? (
-            <Ionicons name="checkmark" size={18} color={Colors.text} />
+            <Ionicons name="checkmark" size={18} color="#f5f5f7" />
           ) : (
             <View style={styles.checkSpacer} />
           )}
@@ -308,7 +359,7 @@ export function EventTasksSection({
                 {m.id === currentUserId ? `${m.displayName} (you)` : m.displayName}
               </Text>
               {selected ? (
-                <Ionicons name="checkmark" size={18} color={Colors.text} />
+                <Ionicons name="checkmark" size={18} color="#f5f5f7" />
               ) : (
                 <View style={styles.checkSpacer} />
               )}
@@ -316,6 +367,73 @@ export function EventTasksSection({
           );
         })}
       </Sheet>
+
+      <Modal
+        visible={seriesPrompt != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (seriesPromptBusy) return;
+          setSeriesPrompt(null);
+        }}
+        {...edgeToEdgeModalProps}
+      >
+        <View style={styles.scopeOverlay}>
+          <View style={styles.scopeBox}>
+            <Text style={styles.scopeTitle}>
+              {seriesPrompt?.action === 'delete' ? 'Delete task' : 'Add task'}
+            </Text>
+            <Text style={styles.scopeMessage}>
+              Choose how to apply this to the repeating event.
+            </Text>
+            <View style={styles.scopeCard}>
+              {SERIES_SCOPE_OPTIONS.map((opt, i) => {
+                const sel = seriesScope === opt.key;
+                return (
+                  <TouchableOpacity
+                    key={opt.key}
+                    onPress={() => !seriesPromptBusy && setSeriesScope(opt.key)}
+                    style={[styles.scopeRow, i > 0 && styles.scopeRowBorder, sel && styles.scopeRowSelected]}
+                    activeOpacity={0.85}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: sel }}
+                  >
+                    <View style={[styles.scopeRadioOuter, sel && styles.scopeRadioOuterOn]}>
+                      {sel ? <View style={styles.scopeRadioInner} /> : null}
+                    </View>
+                    <View style={styles.scopeTextCol}>
+                      <Text style={styles.scopeOptTitle}>{opt.title}</Text>
+                      <Text style={styles.scopeOptSub}>{opt.sub}</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <View style={styles.scopeActions}>
+              <TouchableOpacity
+                onPress={() => setSeriesPrompt(null)}
+                style={styles.scopeCancelBtn}
+                disabled={seriesPromptBusy}
+              >
+                <Text style={styles.scopeCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={confirmSeriesPrompt}
+                style={[styles.scopeSaveBtn, seriesPromptBusy && styles.scopeSaveBtnDisabled]}
+                disabled={seriesPromptBusy}
+              >
+                {seriesPromptBusy ? (
+                  <ActivityIndicator size="small" color={Colors.accentFg} />
+                ) : (
+                  <Text style={styles.scopeSaveText}>
+                    {seriesPrompt?.action === 'delete' ? 'Delete' : 'Add'}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -370,14 +488,6 @@ const styles = StyleSheet.create({
   },
   fillDone: {
     backgroundColor: Colors.going,
-  },
-  empty: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 4,
-    fontSize: 14,
-    fontFamily: Fonts.regular,
-    color: Colors.textMuted,
   },
   row: {
     flexDirection: 'row',
@@ -451,6 +561,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
+  addDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: Colors.borderStrong,
+  },
   input: {
     flex: 1,
     minWidth: 0,
@@ -475,25 +589,125 @@ const styles = StyleSheet.create({
   sheetTitle: {
     fontSize: 17,
     fontFamily: Fonts.semiBold,
-    color: Colors.text,
-    paddingHorizontal: 20,
-    paddingBottom: 8,
+    color: '#f5f5f7',
+    marginBottom: 16,
+    lineHeight: 24,
   },
   memberRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    paddingHorizontal: 20,
-    paddingVertical: 12,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
   },
   memberName: {
     flex: 1,
     minWidth: 0,
-    fontSize: 15,
+    fontSize: 14,
     fontFamily: Fonts.medium,
-    color: Colors.text,
+    color: '#f5f5f7',
   },
   checkSpacer: {
     width: 18,
   },
+  scopeOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  scopeBox: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius['2xl'],
+    padding: 24,
+    width: '100%',
+    maxWidth: 400,
+    ...Shadows.lg,
+  },
+  scopeTitle: {
+    fontSize: 18,
+    fontFamily: Fonts.bold,
+    color: Colors.text,
+    marginBottom: 8,
+  },
+  scopeMessage: {
+    fontSize: 14,
+    color: Colors.textSub,
+    fontFamily: Fonts.regular,
+    lineHeight: 20,
+    marginBottom: 12,
+  },
+  scopeCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.xl,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    overflow: 'hidden',
+  },
+  scopeRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+  },
+  scopeRowBorder: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.border,
+  },
+  scopeRowSelected: { backgroundColor: Colors.bg },
+  scopeRadioOuter: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: Colors.border,
+    marginTop: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scopeRadioOuterOn: { borderColor: Colors.accent },
+  scopeRadioInner: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: Colors.accent,
+  },
+  scopeTextCol: { flex: 1, minWidth: 0 },
+  scopeOptTitle: { fontSize: 15, fontFamily: Fonts.semiBold, color: Colors.text },
+  scopeOptSub: {
+    fontSize: 13,
+    fontFamily: Fonts.regular,
+    color: Colors.textMuted,
+    marginTop: 4,
+    lineHeight: 18,
+  },
+  scopeActions: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'stretch',
+    marginTop: 18,
+  },
+  scopeCancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scopeCancelText: { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.textSub },
+  scopeSaveBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: Radius.lg,
+    backgroundColor: Colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scopeSaveBtnDisabled: { opacity: 0.45 },
+  scopeSaveText: { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.accentFg },
 });

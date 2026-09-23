@@ -6,6 +6,7 @@ import {
   type EventTaskInput,
   type EventTaskUpdate,
 } from '@moijia/client';
+import type { SeriesUpdateScope } from '../../utils/seriesUpdateScopeOptions';
 import { queryKeys } from '../../config/queryClient';
 
 function detailKey(eventId: string, userId: string) {
@@ -80,8 +81,14 @@ export function useUpdateEventTask(eventId: string, userId: string) {
 export function useDeleteEventTask(eventId: string, userId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (taskId: string) => EventsService.deleteTask(eventId, taskId, userId),
-    onMutate: async (taskId) => {
+    mutationFn: ({
+      taskId,
+      seriesUpdateScope,
+    }: {
+      taskId: string;
+      seriesUpdateScope?: SeriesUpdateScope;
+    }) => EventsService.deleteTask(eventId, taskId, userId, seriesUpdateScope),
+    onMutate: async ({ taskId }) => {
       const key = detailKey(eventId, userId);
       await queryClient.cancelQueries({ queryKey: key });
       const previous = queryClient.getQueryData<EventDetailed | null>(key);

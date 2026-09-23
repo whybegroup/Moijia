@@ -332,6 +332,8 @@ model EventTask {
   completedBy String?
   completedAt DateTime?
   createdBy   String
+  /// Shared id for copies of this task on other occurrences in the series.
+  seriesTaskKey String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -341,6 +343,7 @@ model EventTask {
   completer User? @relation("EventTaskCompleter", fields: [completedBy], references: [id], onDelete: SetNull)
 
   @@index([eventId])
+  @@index([seriesTaskKey])
   @@map("event_tasks")
 }
 

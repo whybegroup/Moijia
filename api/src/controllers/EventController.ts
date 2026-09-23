@@ -341,12 +341,13 @@ export class EventController extends Controller {
     @Path() id: string,
     @Path() taskId: string,
     @Query() actorId: string,
+    @Query() seriesUpdateScope?: 'this_occurrence' | 'this_and_following' | 'all_occurrences',
   ): Promise<void> {
     if (!actorId) {
       this.setStatus(400);
       throw new Error('actorId is required');
     }
-    await this.eventService.deleteTask(id, taskId, actorId);
+    await this.eventService.deleteTask(id, taskId, actorId, seriesUpdateScope);
     this.setStatus(204);
   }
 }

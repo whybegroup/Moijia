@@ -1511,9 +1511,11 @@ export function EventDetailScreen({
         return;
       }
       try {
+        const inSeries = !!(ev as EventDetailed).recurrenceSeriesId?.trim();
         await updateEventMutation.mutateAsync({
           description: draftDesc.trim(),
           updatedBy: currentUserId,
+          ...(inSeries && seriesScope ? { seriesUpdateScope: seriesScope } : {}),
         });
         Toast.show({ type: 'success', text1: 'Changes saved' });
         setShowDetailSaveScopeModal(false);
@@ -1645,9 +1647,7 @@ export function EventDetailScreen({
         rsvpDeadline: rsvpDeadlineOut,
         updatedBy: currentUserId,
         viewerTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        ...(inSeries && (timeFieldsDirty || rsvpDeadlineDirty) && seriesScope
-          ? { seriesUpdateScope: seriesScope }
-          : {}),
+        ...(inSeries && seriesScope ? { seriesUpdateScope: seriesScope } : {}),
       });
       Toast.show({ type: 'success', text1: 'Changes saved' });
       setShowDetailSaveScopeModal(false);
@@ -1667,27 +1667,26 @@ export function EventDetailScreen({
         clearPendingAfterSuccessfulSave();
         return;
       }
-      void executeDetailSave();
-      return;
-    }
-    if (!draftName.trim()) {
-      clearPendingAfterSuccessfulSave();
-      if (Platform.OS === 'web') window.alert('Event name is required');
-      else Alert.alert('Error', 'Event name is required');
-      return;
-    }
-    if (!detailTimeRangeValid) {
-      clearPendingAfterSuccessfulSave();
-      if (Platform.OS === 'web') window.alert('End must be after start');
-      else Alert.alert('Error', 'End must be after start');
-      return;
-    }
-    if (!currentUserId) {
-      clearPendingAfterSuccessfulSave();
-      return;
+    } else {
+      if (!draftName.trim()) {
+        clearPendingAfterSuccessfulSave();
+        if (Platform.OS === 'web') window.alert('Event name is required');
+        else Alert.alert('Error', 'Event name is required');
+        return;
+      }
+      if (!detailTimeRangeValid) {
+        clearPendingAfterSuccessfulSave();
+        if (Platform.OS === 'web') window.alert('End must be after start');
+        else Alert.alert('Error', 'End must be after start');
+        return;
+      }
+      if (!currentUserId) {
+        clearPendingAfterSuccessfulSave();
+        return;
+      }
     }
     const inSeries = !!(ev as EventDetailed).recurrenceSeriesId?.trim();
-    if (inSeries && (timeFieldsDirty || rsvpDeadlineDirty)) {
+    if (inSeries && detailsDirty) {
       setDetailSeriesUpdateScope(EventUpdate.seriesUpdateScope.THIS_OCCURRENCE);
       setShowDetailSaveScopeModal(true);
       return;
@@ -3235,6 +3234,7 @@ export function EventDetailScreen({
             memberIds={group.memberIds ?? []}
             currentUserId={currentUserId ?? ''}
             canEdit={canCollaborateActivities && !!currentUserId}
+            repeating={displayTiming.isRecurring}
             getUser={getUserSafe}
           />
         </View>

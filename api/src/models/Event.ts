@@ -100,6 +100,11 @@ export interface EventTaskInput {
   /** Omit or null to leave the task unassigned. */
   assigneeId?: string | null;
   createdBy: string;
+  /**
+   * When this event is part of a series, how far the new task applies.
+   * Omit to add it only on this event without changing series membership.
+   */
+  seriesUpdateScope?: 'this_occurrence' | 'this_and_following' | 'all_occurrences';
 }
 
 /** Update a task title, assignee, or completion. */

@@ -639,24 +639,9 @@ export default function CreateEventScreen() {
       if (isEditing && editId) {
         const inSeries = !!(editingEvent as { recurrenceSeriesId?: string } | undefined)
           ?.recurrenceSeriesId?.trim();
-        const baseline = createFormBaselineSerialized
-          ? (JSON.parse(createFormBaselineSerialized) as {
-              startDate: string;
-              startTime: string;
-              endDate: string;
-              endTime: string;
-              allDay: boolean;
-            })
-          : null;
-        const timeFieldsDirty =
-          !!baseline &&
-          (form.startDate !== baseline.startDate ||
-            form.startTime !== baseline.startTime ||
-            form.endDate !== baseline.endDate ||
-            form.endTime !== baseline.endTime ||
-            form.allDay !== baseline.allDay);
+        const seriesEditDirty = createFormDirty || form.pendingFiles.length > 0;
 
-        if (inSeries && timeFieldsDirty && !seriesScope) {
+        if (inSeries && seriesEditDirty && !seriesScope) {
           setSeriesUpdateScope(EventUpdate.seriesUpdateScope.THIS_OCCURRENCE);
           setShowSaveScopeModal(true);
           return;
@@ -713,9 +698,7 @@ export default function CreateEventScreen() {
           allowMaybe: form.allowMaybe,
           updatedBy: currentUserId,
           viewerTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          ...(inSeries && timeFieldsDirty && seriesScope
-            ? { seriesUpdateScope: seriesScope }
-            : {}),
+          ...(inSeries && seriesScope ? { seriesUpdateScope: seriesScope } : {}),
         });
         Toast.show({ type: 'success', text1: 'Changes saved' });
         setShowSaveScopeModal(false);

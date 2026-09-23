@@ -2096,15 +2096,25 @@ export class EventService {
     await this.assertActiveMemberForEventEventRow(event, input.createdBy);
     const assigneeId = input.assigneeId?.trim() || null;
     await this.assertAssigneeIsActiveMember(event.groupId, assigneeId);
-    const row = await prisma.eventTask.create({
-      data: {
-        eventId,
-        title,
-        assigneeId,
-        createdBy: input.createdBy,
-      },
-    });
-    return this.mapEventTask(row);
+    const eventIds = await this.eventIdsForSeriesTaskScope(event, input.seriesUpdateScope, input.createdBy);
+    const seriesTaskKey = eventIds.length > 1 ? randomUUID() : null;
+    let createdForRequest: Awaited<ReturnType<typeof prisma.eventTask.create>> | null = null;
+    for (const eid of eventIds) {
+      const row = await prisma.eventTask.create({
+        data: {
+          eventId: eid,
+          title,
+          assigneeId,
+          createdBy: input.createdBy,
+          seriesTaskKey,
+        },
+      });
+      if (eid === eventId) createdForRequest = row;
+    }
+    if (!createdForRequest) {
+      throw Object.assign(new Error('Task not found'), { status: 500 });
+    }
+    return this.mapEventTask(createdForRequest);
   }
 
   public async updateTask(eventId: string, taskId: string, input: EventTaskUpdate): Promise<EventTask> {
@@ -2162,7 +2172,12 @@ export class EventService {
     return this.mapEventTask(row);
   }
 
-  public async deleteTask(eventId: string, taskId: string, actorId: string): Promise<void> {
+  public async deleteTask(
+    eventId: string,
+    taskId: string,
+    actorId: string,
+    seriesUpdateScope?: EventUpdate['seriesUpdateScope'],
+  ): Promise<void> {
     const event = await prisma.event.findUnique({ where: { id: eventId } });
     if (!event) {
       throw Object.assign(new Error('Event not found'), { status: 404 });
@@ -2172,7 +2187,56 @@ export class EventService {
     if (!existing) {
       throw Object.assign(new Error('Task not found'), { status: 404 });
     }
+    const eventIds = await this.eventIdsForSeriesTaskScope(event, seriesUpdateScope, actorId);
+    if (existing.seriesTaskKey) {
+      await prisma.eventTask.deleteMany({
+        where: { seriesTaskKey: existing.seriesTaskKey, eventId: { in: eventIds } },
+      });
+      return;
+    }
     await prisma.eventTask.delete({ where: { id: taskId } });
+  }
+
+  /**
+   * Event ids that should receive a task add/delete, applying the same series split
+   * as an event edit: this date only (and leave the series), this date and later, or all.
+   */
+  private async eventIdsForSeriesTaskScope(
+    event: { id: string; start: Date; recurrenceSeriesId: string | null },
+    seriesUpdateScope: EventUpdate['seriesUpdateScope'] | undefined,
+    actorId: string,
+  ): Promise<string[]> {
+    const seriesId = event.recurrenceSeriesId?.trim() || null;
+    if (!seriesId || !seriesUpdateScope) return [event.id];
+
+    if (seriesUpdateScope === 'this_occurrence') {
+      await prisma.event.update({
+        where: { id: event.id },
+        data: { recurrenceSeriesId: null, recurrenceRule: null, updatedBy: actorId },
+      });
+      return [event.id];
+    }
+
+    if (seriesUpdateScope === 'all_occurrences') {
+      const rows = await prisma.event.findMany({
+        where: { recurrenceSeriesId: seriesId },
+        select: { id: true },
+      });
+      const ids = rows.map((r) => r.id);
+      return ids.length > 0 ? ids : [event.id];
+    }
+
+    const rows = await prisma.event.findMany({
+      where: seriesThisAndFollowingWhere(seriesId, event.id, event.start) as any,
+      select: { id: true },
+    });
+    const ids = rows.map((r) => r.id);
+    if (ids.length === 0) return [event.id];
+    await prisma.event.updateMany({
+      where: { id: { in: ids } },
+      data: { recurrenceSeriesId: randomUUID(), updatedBy: actorId },
+    });
+    return ids;
   }
 
   private async assertAssigneeIsActiveMember(groupId: string, assigneeId: string | null): Promise<void> {
