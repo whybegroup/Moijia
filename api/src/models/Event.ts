@@ -92,6 +92,8 @@ export interface EventTask {
   createdBy: string;
   createdAt: Date;
   updatedAt: Date;
+  /** True when this task was also added to other dates in the series. */
+  repeated?: boolean;
 }
 
 /** Create a task on an event. */
@@ -102,7 +104,7 @@ export interface EventTaskInput {
   createdBy: string;
   /**
    * When this event is part of a series, how far the new task applies.
-   * Omit to add it only on this event without changing series membership.
+   * `this_occurrence` adds it only on this date and leaves the series intact.
    */
   seriesUpdateScope?: 'this_occurrence' | 'this_and_following' | 'all_occurrences';
 }

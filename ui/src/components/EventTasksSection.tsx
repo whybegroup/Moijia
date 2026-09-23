@@ -158,7 +158,7 @@ export function EventTasksSection({
   };
 
   const remove = (task: EventTask) => {
-    if (repeating) {
+    if (repeating && task.repeated) {
       setSeriesScope(EventUpdate.seriesUpdateScope.THIS_OCCURRENCE);
       setSeriesPrompt({ action: 'delete', task });
       return;
@@ -403,7 +403,13 @@ export function EventTasksSection({
                     </View>
                     <View style={styles.scopeTextCol}>
                       <Text style={styles.scopeOptTitle}>{opt.title}</Text>
-                      <Text style={styles.scopeOptSub}>{opt.sub}</Text>
+                      <Text style={styles.scopeOptSub}>
+                        {opt.key === EventUpdate.seriesUpdateScope.THIS_OCCURRENCE
+                          ? seriesPrompt?.action === 'delete'
+                            ? 'Remove the task from this date only. The event stays on the series.'
+                            : 'Add the task to this date only. The event stays on the series.'
+                          : opt.sub}
+                      </Text>
                     </View>
                   </TouchableOpacity>
                 );

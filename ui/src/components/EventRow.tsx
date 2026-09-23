@@ -28,6 +28,10 @@ export function EventRow({ ev, group, groupColorHex, onPress, onGroupPress, isLa
   const going  = rsvps.filter(r => r.status === 'going');
   const myRsvp = meId ? rsvps.find(r => r.userId === meId) : undefined;
   const cc     = ev.comments?.length || 0;
+  const tasks = ev.tasks ?? [];
+  const taskTotal = tasks.length;
+  const taskDone = tasks.filter((t) => t.completed).length;
+  const taskPct = taskTotal === 0 ? 0 : Math.round((taskDone / taskTotal) * 100);
   const minN = ev.minAttendees || 0;
   const maxN = ev.maxAttendees || 0;
   const needsMore = minN > 0 && going.length < minN && !isPast;
@@ -108,6 +112,28 @@ export function EventRow({ ev, group, groupColorHex, onPress, onGroupPress, isLa
             </View>
           ) : null}
         </View>
+        {taskTotal > 0 ? (
+          <View
+            style={styles.taskProgress}
+            accessibilityRole="progressbar"
+            accessibilityValue={{ min: 0, max: 100, now: taskPct }}
+            accessibilityLabel={`${taskPct}% (${taskDone} of ${taskTotal}) tasks complete`}
+          >
+            <Ionicons name="hammer-outline" size={13} color={Colors.textMuted} />
+            <View style={styles.taskTrack}>
+              <View
+                style={[
+                  styles.taskFill,
+                  { width: `${taskPct}%` },
+                  taskPct === 100 ? styles.taskFillDone : null,
+                ]}
+              />
+            </View>
+            <Text style={styles.taskProgressLabel}>
+              {taskPct}% ({taskDone} of {taskTotal})
+            </Text>
+          </View>
+        ) : null}
         <View style={styles.metaRow}>
           <Ionicons name="time-outline" size={14} color={Colors.textMuted} style={styles.metaIcon} />
           <Text style={styles.meta} numberOfLines={2}>
@@ -275,6 +301,35 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: Fonts.regular,
     color: Colors.textMuted,
+  },
+  taskProgress: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    marginTop: 4,
+    marginBottom: 2,
+    maxWidth: '100%',
+  },
+  taskTrack: {
+    width: 72,
+    height: 4,
+    borderRadius: 99,
+    backgroundColor: Colors.border,
+    overflow: 'hidden',
+  },
+  taskFill: {
+    height: 4,
+    borderRadius: 99,
+    backgroundColor: Colors.accent,
+  },
+  taskFillDone: {
+    backgroundColor: Colors.going,
+  },
+  taskProgressLabel: {
+    fontSize: 11,
+    fontFamily: Fonts.medium,
+    color: Colors.textSub,
   },
   locationRow: {
     flexDirection: 'row',

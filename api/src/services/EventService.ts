@@ -2198,8 +2198,8 @@ export class EventService {
   }
 
   /**
-   * Event ids that should receive a task add/delete, applying the same series split
-   * as an event edit: this date only (and leave the series), this date and later, or all.
+   * Event ids that should receive a task add/delete.
+   * This date only stays on the series. Future dates split onto a new series id, same as an event edit.
    */
   private async eventIdsForSeriesTaskScope(
     event: { id: string; start: Date; recurrenceSeriesId: string | null },
@@ -2207,15 +2207,7 @@ export class EventService {
     actorId: string,
   ): Promise<string[]> {
     const seriesId = event.recurrenceSeriesId?.trim() || null;
-    if (!seriesId || !seriesUpdateScope) return [event.id];
-
-    if (seriesUpdateScope === 'this_occurrence') {
-      await prisma.event.update({
-        where: { id: event.id },
-        data: { recurrenceSeriesId: null, recurrenceRule: null, updatedBy: actorId },
-      });
-      return [event.id];
-    }
+    if (!seriesId || !seriesUpdateScope || seriesUpdateScope === 'this_occurrence') return [event.id];
 
     if (seriesUpdateScope === 'all_occurrences') {
       const rows = await prisma.event.findMany({
@@ -2257,6 +2249,7 @@ export class EventService {
     createdBy: string;
     createdAt: Date;
     updatedAt: Date;
+    seriesTaskKey?: string | null;
   }): EventTask {
     return {
       id: row.id,
@@ -2268,6 +2261,7 @@ export class EventService {
       createdBy: row.createdBy,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
+      repeated: !!row.seriesTaskKey,
     };
   }
 
