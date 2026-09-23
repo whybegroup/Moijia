@@ -78,7 +78,41 @@ export interface EventTimeSuggestion {
 }
 
 /**
- * Event with RSVPs and comments (detailed view)
+ * Checklist item on an event.
+ */
+export interface EventTask {
+  id: string;
+  title: string;
+  /** Group member responsible for this task. Null when unassigned. */
+  assigneeId?: string | null;
+  completed: boolean;
+  /** User who most recently checked this task off. */
+  completedBy?: string | null;
+  completedAt?: Date | null;
+  createdBy: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/** Create a task on an event. */
+export interface EventTaskInput {
+  title: string;
+  /** Omit or null to leave the task unassigned. */
+  assigneeId?: string | null;
+  createdBy: string;
+}
+
+/** Update a task title, assignee, or completion. */
+export interface EventTaskUpdate {
+  actorId: string;
+  title?: string;
+  /** Pass null to clear the assignee. Omit to leave unchanged. */
+  assigneeId?: string | null;
+  completed?: boolean;
+}
+
+/**
+ * Event with RSVPs, tasks, and comments (detailed view)
  */
 export interface EventDetailed extends Event {
   /** Number of DB rows sharing `recurrenceSeriesId` (1 for non-series). Only on GET /events/:id. */
@@ -87,6 +121,8 @@ export interface EventDetailed extends Event {
   rsvps: RSVP[];
   /** Array of comments on this event */
   comments: Comment[];
+  /** Checklist for group members */
+  tasks: EventTask[];
   /** Suggested time changes */
   timeSuggestions: EventTimeSuggestion[];
   /**

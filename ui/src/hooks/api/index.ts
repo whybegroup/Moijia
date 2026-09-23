@@ -3,6 +3,7 @@ export * from './useGroups';
 export * from './useEvents';
 export * from './useRSVPs';
 export * from './useComments';
+export * from './useEventTasks';
 export * from './useNotifications';
 export * from './usePolls';
 export * from './useGroupPosts';

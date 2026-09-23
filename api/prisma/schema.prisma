@@ -40,6 +40,9 @@ model User {
   comments                Comment[]
   commentReactions        CommentReaction[]
   eventWatches            EventWatch[]
+  createdEventTasks       EventTask[] @relation("EventTaskCreator")
+  assignedEventTasks      EventTask[] @relation("EventTaskAssignee")
+  completedEventTasks     EventTask[] @relation("EventTaskCompleter")
   authoredTimeSuggestions EventTimeSuggestion[] @relation("TimeSuggestionAuthor")
   createdPolls            Poll[]               @relation("PollCreator")
   closedPolls             Poll[]               @relation("PollCloser")
@@ -296,6 +299,7 @@ model Event {
   comments          Comment[]
   watches           EventWatch[]
   timeSuggestions   EventTimeSuggestion[]
+  tasks             EventTask[]
 
   @@index([recurrenceSeriesId])
   @@map("events")
@@ -316,6 +320,28 @@ model EventTimeSuggestion {
   suggester User  @relation("TimeSuggestionAuthor", fields: [suggestedBy], references: [id], onDelete: Cascade)
 
   @@map("event_time_suggestions")
+}
+
+/// Checklist item on an event, optionally assigned to one group member.
+model EventTask {
+  id          String    @id @default(uuid())
+  eventId     String
+  title       String
+  assigneeId  String?
+  completed   Boolean   @default(false)
+  completedBy String?
+  completedAt DateTime?
+  createdBy   String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  event     Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  creator   User  @relation("EventTaskCreator", fields: [createdBy], references: [id])
+  assignee  User? @relation("EventTaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  completer User? @relation("EventTaskCompleter", fields: [completedBy], references: [id], onDelete: SetNull)
+
+  @@index([eventId])
+  @@map("event_tasks")
 }
 
 model EventPhoto {

@@ -144,6 +144,7 @@ import { SERIES_SCOPE_OPTIONS, type SeriesUpdateScope } from '../utils/seriesUpd
 import { formatRecurrenceRepeatsLabel } from '../utils/recurrence';
 import { ChromeHeaderTrailingRow, DetailActionIcon, RegisterChromeHeader } from './chromeHeaderSlot';
 import { EventShareSheet } from './EventShareSheet';
+import { EventTasksSection } from './EventTasksSection';
 
 /** Must match API soft-delete text when an admin removes someone else's comment */
 const COMMENT_DELETED_BY_ADMIN_MSG = 'This message was deleted by admin';
@@ -3225,6 +3226,17 @@ export function EventDetailScreen({
               <Text style={{ color: Colors.textMuted, fontSize: 16 }}>›</Text>
             </TouchableOpacity>
           </View>
+        </View>
+
+        <View style={[styles.eventScrollInset, styles.eventSectionGap]}>
+          <EventTasksSection
+            eventId={eventId}
+            tasks={ev.tasks ?? []}
+            memberIds={group.memberIds ?? []}
+            currentUserId={currentUserId ?? ''}
+            canEdit={canCollaborateActivities && !!currentUserId}
+            getUser={getUserSafe}
+          />
         </View>
 
         {/* Comments — matches group forum ThreadedCommentsSection */}

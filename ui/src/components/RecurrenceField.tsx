@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, type ReactNode } from 'react';
+import { useMemo, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,8 @@ import {
   TextInput,
   Pressable,
   Platform,
+  Keyboard,
+  Dimensions,
   useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -262,6 +264,9 @@ function MonthlyPatternSection({
 export function RecurrenceField({ anchorDate, value, onChange }: Props) {
   const { height: winH } = useWindowDimensions();
   const [open, setOpen] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const scrollRef = useRef<ScrollView>(null);
+  const scrollOffsetYRef = useRef(0);
   const [untilViewMonth, setUntilViewMonth] = useState(() => ({
     y: anchorDate.getFullYear(),
     m: anchorDate.getMonth(),
@@ -285,6 +290,69 @@ export function RecurrenceField({ anchorDate, value, onChange }: Props) {
     const r = untilPickerValue;
     setUntilViewMonth({ y: r.getFullYear(), m: r.getMonth() });
   }, [open, value.endType, untilPickerValue]);
+
+  useEffect(() => {
+    if (!open) setKeyboardHeight(0);
+  }, [open]);
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      setKeyboardHeight(e.endCoordinates?.height ?? 0);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  const keyboardOverlap = useMemo(() => {
+    if (keyboardHeight <= 0 || Platform.OS === 'web') return 0;
+    if (Platform.OS === 'android') {
+      const occluded = Dimensions.get('screen').height - winH;
+      if (occluded >= keyboardHeight * 0.5) return 0;
+    }
+    return keyboardHeight;
+  }, [keyboardHeight, winH]);
+
+  const spaceAboveKeyboard = winH - (keyboardOverlap > 0 ? keyboardOverlap + 36 : 48);
+  const dialogMaxHeight =
+    Platform.OS === 'web' ? ('92vh' as unknown as number) : Math.min(winH * 0.9, Math.max(0, spaceAboveKeyboard));
+  const scrollMaxHeight =
+    keyboardHeight > 0 ? Math.max(72, dialogMaxHeight - 168) : winH * 0.55;
+
+  const scrollFocusedIntoView = useCallback(() => {
+    if (Platform.OS === 'web') return;
+    const focused = TextInput.State.currentlyFocusedInput?.() as {
+      measureInWindow?: (cb: (x: number, y: number, w: number, h: number) => void) => void;
+    } | null;
+    const scroll = scrollRef.current;
+    if (!focused?.measureInWindow || !scroll?.measureInWindow) return;
+    scroll.measureInWindow((_sx, sy, _sw, sh) => {
+      focused.measureInWindow?.((_x, y, _w, h) => {
+        const margin = 8;
+        const top = sy + margin;
+        const bottom = sy + sh - margin;
+        let delta = 0;
+        if (y + h > bottom) delta = y + h - bottom;
+        else if (y < top) delta = y - top;
+        if (Math.abs(delta) < 1) return;
+        scroll.scrollTo({
+          y: Math.max(0, scrollOffsetYRef.current + delta),
+          animated: true,
+        });
+      });
+    });
+  }, []);
+
+  useEffect(() => {
+    if (keyboardHeight <= 0) return;
+    const timers = [80, 280].map((ms) => setTimeout(scrollFocusedIntoView, ms));
+    return () => timers.forEach(clearTimeout);
+  }, [keyboardHeight, keyboardOverlap, winH, scrollFocusedIntoView]);
 
   const applyPreset = (preset: RecurrencePreset) => {
     if (preset === 'none') {
@@ -330,7 +398,16 @@ export function RecurrenceField({ anchorDate, value, onChange }: Props) {
         onRequestClose={() => setOpen(false)}
         {...edgeToEdgeModalProps}
       >
-        <View style={styles.modalRoot} pointerEvents="box-none">
+        <View
+          style={[
+            styles.modalRoot,
+            keyboardOverlap > 0 && {
+              justifyContent: 'flex-end',
+              paddingBottom: keyboardOverlap + 12,
+            },
+          ]}
+          pointerEvents="box-none"
+        >
           <Pressable
             style={styles.modalDismiss}
             onPress={() => setOpen(false)}
@@ -338,10 +415,7 @@ export function RecurrenceField({ anchorDate, value, onChange }: Props) {
             accessibilityLabel="Dismiss"
           />
           <Pressable
-            style={[
-              styles.dialog,
-              { maxHeight: Platform.OS === 'web' ? ('92vh' as any) : winH * 0.9 },
-            ]}
+            style={[styles.dialog, { maxHeight: dialogMaxHeight }]}
             onPress={(e) => e.stopPropagation()}
           >
             <View style={styles.dialogHeader}>
@@ -361,10 +435,15 @@ export function RecurrenceField({ anchorDate, value, onChange }: Props) {
             </View>
 
             <ScrollView
-              style={[styles.dialogScroll, { maxHeight: winH * 0.55 }]}
+              ref={scrollRef}
+              style={[styles.dialogScroll, { maxHeight: scrollMaxHeight }]}
               contentContainerStyle={styles.dialogScrollContent}
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
+              onScroll={(e) => {
+                scrollOffsetYRef.current = e.nativeEvent.contentOffset.y;
+              }}
+              scrollEventThrottle={16}
             >
               <ChoiceCard>
                 {PRESET_ROWS.map(({ preset, label }, i) => (
@@ -395,6 +474,7 @@ export function RecurrenceField({ anchorDate, value, onChange }: Props) {
                       style={styles.intervalInput}
                       keyboardType="number-pad"
                       value={String(value.customInterval)}
+                      onFocus={scrollFocusedIntoView}
                       onChangeText={(t) => {
                         const n = parseInt(t.replace(/\D/g, ''), 10);
                         onChange({
@@ -526,6 +606,7 @@ export function RecurrenceField({ anchorDate, value, onChange }: Props) {
                         style={styles.countInput}
                         keyboardType="number-pad"
                         value={value.count}
+                        onFocus={scrollFocusedIntoView}
                         onChangeText={(t) => onChange({ ...value, count: t.replace(/\D/g, '') })}
                         onBlur={() => {
                           const raw = value.count.replace(/\D/g, '');

@@ -6,6 +6,9 @@ import {
   EventUpdate,
   EventDetailed,
   EventTimeSuggestion,
+  EventTask,
+  EventTaskInput,
+  EventTaskUpdate,
   RSVP,
   RSVPInput,
   Comment,
@@ -230,6 +233,9 @@ export class EventService {
         timeSuggestions: {
           orderBy: { createdAt: 'desc' },
         },
+        tasks: {
+          orderBy: { createdAt: 'asc' },
+        },
       },
       orderBy: {
         start: 'asc',
@@ -355,6 +361,9 @@ export class EventService {
         },
         timeSuggestions: {
           orderBy: { createdAt: 'desc' },
+        },
+        tasks: {
+          orderBy: { createdAt: 'asc' },
         },
       },
     });
@@ -2072,6 +2081,132 @@ export class EventService {
     };
   }
 
+  public async createTask(eventId: string, input: EventTaskInput): Promise<EventTask> {
+    const title = (input.title ?? '').trim();
+    if (!title) {
+      throw Object.assign(new Error('Task title is required'), { status: 400 });
+    }
+    if (title.length > 200) {
+      throw Object.assign(new Error('Task title is too long'), { status: 400 });
+    }
+    const event = await prisma.event.findUnique({ where: { id: eventId } });
+    if (!event) {
+      throw Object.assign(new Error('Event not found'), { status: 404 });
+    }
+    await this.assertActiveMemberForEventEventRow(event, input.createdBy);
+    const assigneeId = input.assigneeId?.trim() || null;
+    await this.assertAssigneeIsActiveMember(event.groupId, assigneeId);
+    const row = await prisma.eventTask.create({
+      data: {
+        eventId,
+        title,
+        assigneeId,
+        createdBy: input.createdBy,
+      },
+    });
+    return this.mapEventTask(row);
+  }
+
+  public async updateTask(eventId: string, taskId: string, input: EventTaskUpdate): Promise<EventTask> {
+    const event = await prisma.event.findUnique({ where: { id: eventId } });
+    if (!event) {
+      throw Object.assign(new Error('Event not found'), { status: 404 });
+    }
+    await this.assertActiveMemberForEventEventRow(event, input.actorId);
+    const existing = await prisma.eventTask.findFirst({ where: { id: taskId, eventId } });
+    if (!existing) {
+      throw Object.assign(new Error('Task not found'), { status: 404 });
+    }
+
+    const data: {
+      title?: string;
+      assigneeId?: string | null;
+      completed?: boolean;
+      completedBy?: string | null;
+      completedAt?: Date | null;
+    } = {};
+
+    if (input.title !== undefined) {
+      const title = input.title.trim();
+      if (!title) {
+        throw Object.assign(new Error('Task title is required'), { status: 400 });
+      }
+      if (title.length > 200) {
+        throw Object.assign(new Error('Task title is too long'), { status: 400 });
+      }
+      data.title = title;
+    }
+
+    if (input.assigneeId !== undefined) {
+      const assigneeId = input.assigneeId?.trim() || null;
+      await this.assertAssigneeIsActiveMember(event.groupId, assigneeId);
+      data.assigneeId = assigneeId;
+    }
+
+    if (input.completed !== undefined) {
+      data.completed = input.completed;
+      if (input.completed) {
+        data.completedBy = input.actorId;
+        data.completedAt = new Date();
+      } else {
+        data.completedBy = null;
+        data.completedAt = null;
+      }
+    }
+
+    if (Object.keys(data).length === 0) {
+      return this.mapEventTask(existing);
+    }
+
+    const row = await prisma.eventTask.update({ where: { id: taskId }, data });
+    return this.mapEventTask(row);
+  }
+
+  public async deleteTask(eventId: string, taskId: string, actorId: string): Promise<void> {
+    const event = await prisma.event.findUnique({ where: { id: eventId } });
+    if (!event) {
+      throw Object.assign(new Error('Event not found'), { status: 404 });
+    }
+    await this.assertActiveMemberForEventEventRow(event, actorId);
+    const existing = await prisma.eventTask.findFirst({ where: { id: taskId, eventId } });
+    if (!existing) {
+      throw Object.assign(new Error('Task not found'), { status: 404 });
+    }
+    await prisma.eventTask.delete({ where: { id: taskId } });
+  }
+
+  private async assertAssigneeIsActiveMember(groupId: string, assigneeId: string | null): Promise<void> {
+    if (!assigneeId) return;
+    const role = await this.getActiveMemberRole(groupId, assigneeId);
+    if (!role) {
+      throw Object.assign(new Error('Assignee must be an active group member'), { status: 400 });
+    }
+  }
+
+  private mapEventTask(row: {
+    id: string;
+    title: string;
+    assigneeId: string | null;
+    completed: boolean;
+    completedBy: string | null;
+    completedAt: Date | null;
+    createdBy: string;
+    createdAt: Date;
+    updatedAt: Date;
+  }): EventTask {
+    return {
+      id: row.id,
+      title: row.title,
+      assigneeId: row.assigneeId,
+      completed: row.completed,
+      completedBy: row.completedBy,
+      completedAt: row.completedAt,
+      createdBy: row.createdBy,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  }
+
   /**
    * Map Prisma event with photos to Event model
    */
@@ -2136,6 +2271,7 @@ export class EventService {
         updatedAt: r.updatedAt,
       })),
       comments: event.comments.map((c: any) => this.mapCommentWithPhotos(c, extras?.viewerUserId)),
+      tasks: (event.tasks ?? []).map((t: any) => this.mapEventTask(t)),
       timeSuggestions,
     };
   }

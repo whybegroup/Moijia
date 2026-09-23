@@ -17,6 +17,9 @@ import {
   EventUpdate,
   EventDetailed,
   EventTimeSuggestion,
+  EventTask,
+  EventTaskInput,
+  EventTaskUpdate,
   RSVPInput,
   RSVP,
   Comment,
@@ -302,6 +305,49 @@ export class EventController extends Controller {
       throw new Error('userId is required');
     }
     return this.eventService.rejectTimeSuggestion(id, suggestionId, userId);
+  }
+
+  /**
+   * Add a checklist task to an event.
+   */
+  @Post('{id}/tasks')
+  @SuccessResponse('201', 'Created')
+  public async createTask(
+    @Path() id: string,
+    @Body() body: EventTaskInput,
+  ): Promise<EventTask> {
+    this.setStatus(201);
+    return this.eventService.createTask(id, body);
+  }
+
+  /**
+   * Update a task title, assignee, or completion.
+   */
+  @Put('{id}/tasks/{taskId}')
+  public async updateTask(
+    @Path() id: string,
+    @Path() taskId: string,
+    @Body() body: EventTaskUpdate,
+  ): Promise<EventTask> {
+    return this.eventService.updateTask(id, taskId, body);
+  }
+
+  /**
+   * Remove a task from an event.
+   */
+  @Delete('{id}/tasks/{taskId}')
+  @SuccessResponse('204', 'No Content')
+  public async deleteTask(
+    @Path() id: string,
+    @Path() taskId: string,
+    @Query() actorId: string,
+  ): Promise<void> {
+    if (!actorId) {
+      this.setStatus(400);
+      throw new Error('actorId is required');
+    }
+    await this.eventService.deleteTask(id, taskId, actorId);
+    this.setStatus(204);
   }
 }
 
