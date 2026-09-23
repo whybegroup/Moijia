@@ -10,6 +10,7 @@ import {
   getActiveSizeAddon,
   getCustomerInfo,
   identifyRevenueCatUser,
+  isAlreadyPurchased,
   isPurchaseCancelled,
   logOutRevenueCat,
   purchaseExtraGroupSlot as purchaseExtraGroupSlotRc,
@@ -158,6 +159,14 @@ export const PurchasesProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       return info;
     } catch (error) {
       if (isPurchaseCancelled(error)) return null;
+      if (isAlreadyPurchased(error)) {
+        const info = await getCustomerInfo().catch(() => null);
+        if (info) {
+          setCustomerInfo(info);
+          await syncBilling(info);
+        }
+        return info;
+      }
       throw new Error(purchasesErrorMessage(error, 'Could not complete purchase.'));
     }
   }, [syncBilling]);

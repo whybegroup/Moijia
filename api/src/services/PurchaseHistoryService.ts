@@ -78,6 +78,7 @@ export async function listPurchases(userId: string): Promise<PurchaseHistoryEntr
   const rows = await prisma.userPurchase.findMany({
     where: { userId },
     orderBy: { createdAt: 'desc' },
+    take: 20,
   });
   return rows.map((row) => ({
     id: row.id,

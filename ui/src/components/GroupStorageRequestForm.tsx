@@ -70,6 +70,9 @@ export function GroupStorageRequestForm({
   graceEndsAt,
   sizeStartedAt,
   onUpdated,
+  embedPaywall = false,
+  paywallOpen: paywallOpenProp,
+  onPaywallVisibilityChange,
 }: {
   groupId: string;
   userId: string;
@@ -80,13 +83,17 @@ export function GroupStorageRequestForm({
   graceEndsAt?: Date | string | null;
   sizeStartedAt?: Date | string | null;
   onUpdated?: () => void | Promise<void>;
+  embedPaywall?: boolean;
+  paywallOpen?: boolean;
+  onPaywallVisibilityChange?: (open: boolean) => void;
 }) {
   const setLimit = useSetGroupStorageLimit(groupId, userId);
   const cancelSub = useCancelGroupStorageSubscription(groupId, userId);
   const { customerInfo, refresh } = usePurchases();
   const currentTier = sizeTierFromGroup({ sizeTier, maxStorageBytes: currentMaxBytes });
   const spec = GROUP_TIERS[currentTier];
-  const [paywallOpen, setPaywallOpen] = useState(false);
+  const [paywallOpenState, setPaywallOpenState] = useState(false);
+  const paywallOpen = paywallOpenProp ?? paywallOpenState;
   const [planOptions, setPlanOptions] = useState<StoragePlanOption[]>([]);
 
   useEffect(() => {
@@ -115,7 +122,7 @@ export function GroupStorageRequestForm({
       }),
     [sizeStartedAt, graceEndsAt, entitlement?.expirationDate, entitlement?.originalPurchaseDate]
   );
-  const showExpire = pendingChange || entitlement?.willRenew === false;
+  const showExpire = pendingChange;
   const periodDate = showExpire ? expiresAt : renewsAt;
   const monthlyRate = monthlyRateLabel(priceStringForTier(currentTier, planOptions));
   const periodLabel = (() => {
@@ -134,17 +141,54 @@ export function GroupStorageRequestForm({
     ? `Effective from ${formatPlanDate(selectedEffectiveFrom)}`
     : null;
 
+  const setPaywall = (open: boolean) => {
+    setPaywallOpenState(open);
+    onPaywallVisibilityChange?.(open);
+  };
+
   const applyLimit = async (tier: 'medium' | 'large') => {
     try {
       await setLimit.mutateAsync(tier);
-      await refresh();
       await onUpdated?.();
     } catch (e) {
       const msg = apiErrorMessage(e, 'Could not update group size');
       if (Platform.OS === 'web') window.alert(msg);
       else Alert.alert('Error', msg);
+      throw e;
     }
   };
+
+  const paywall = (
+    <StoragePaywall
+      visible={paywallOpen}
+      embedded={embedPaywall}
+      onClose={() => setPaywall(false)}
+      currentTier={currentTier}
+      scheduledTier={scheduledTier}
+      periodEndsAt={showExpire ? expiresAt : renewsAt}
+      goingToSmall={showExpire}
+      selectedEffectiveFrom={selectedEffectiveFrom}
+      onApplyPaidTier={applyLimit}
+      onPurchased={(option) => applyLimit(option.plan.tier)}
+      onKeepCurrent={async () => {
+        if (currentTier === 'medium' || currentTier === 'large') {
+          await applyLimit(currentTier);
+          return;
+        }
+        await refresh();
+        await onUpdated?.();
+      }}
+      onSwitchToSmall={async () => {
+        await cancelSub.mutateAsync();
+        await refresh();
+        await onUpdated?.();
+      }}
+    />
+  );
+
+  if (embedPaywall && paywallOpen) {
+    return <View style={styles.embedPaywallFill}>{paywall}</View>;
+  }
 
   return (
     <View style={styles.requestBlock}>
@@ -177,7 +221,7 @@ export function GroupStorageRequestForm({
         </View>
       ) : null}
       <TouchableOpacity
-        onPress={() => setPaywallOpen(true)}
+        onPress={() => setPaywall(true)}
         disabled={setLimit.isPending}
         style={styles.submit}
         accessibilityRole="button"
@@ -189,27 +233,14 @@ export function GroupStorageRequestForm({
           <Text style={styles.submitText}>Modify storage plan</Text>
         )}
       </TouchableOpacity>
-      <StoragePaywall
-        visible={paywallOpen}
-        onClose={() => setPaywallOpen(false)}
-        currentTier={currentTier}
-        scheduledTier={scheduledTier}
-        periodEndsAt={showExpire ? expiresAt : renewsAt}
-        goingToSmall={showExpire}
-        selectedEffectiveFrom={selectedEffectiveFrom}
-        onPurchased={(option) => applyLimit(option.plan.tier)}
-        onSwitchToSmall={async () => {
-          await cancelSub.mutateAsync();
-          await refresh();
-          await onUpdated?.();
-        }}
-      />
+      {embedPaywall ? null : paywall}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   requestBlock: { marginTop: 4 },
+  embedPaywallFill: { flex: 1, minHeight: 0 },
   planCard: {
     backgroundColor: Colors.surface,
     borderRadius: Radius['2xl'],

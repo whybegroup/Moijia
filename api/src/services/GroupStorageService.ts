@@ -549,7 +549,7 @@ export class GroupStorageService {
       return { maxStorageBytes: groupMaxStorageBytes(group.maxStorageBytes, group.sizeTier) };
     }
     const { groupBilling } = await import('./GroupBillingService');
-    await groupBilling.startGrace(group.id, group.name, input.userId, 'small', group.graceNotifiedAt);
+    await groupBilling.startGrace(group.id, group.name, input.userId, 'small', group.graceNotifiedAt, 'owner');
     return { maxStorageBytes: groupMaxStorageBytes(group.maxStorageBytes, group.sizeTier) };
   }
 
@@ -572,6 +572,7 @@ export class GroupStorageService {
         maxStorageBytes: storageBytesToDb(cap),
         sizeTier: paidSizeTierFromBytes(cap) ?? 'small',
         pendingSizeTier: null,
+        pendingSource: null,
         graceEndsAt: null,
         graceNotifiedAt: null,
       },

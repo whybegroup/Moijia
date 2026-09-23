@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Fonts, Radius } from '../constants/theme';
 import { WEB_APP_MAX_WIDTH } from '../constants/webAppMaxWidth';
 import { KeyboardSafeScrollView } from './KeyboardSafeScrollView';
@@ -18,7 +18,10 @@ import { edgeToEdgeModalProps } from './edgeToEdgeModalProps';
 import { AppToastMount } from './AppToastMount';
 import { usePurchases } from '../contexts/PurchasesContext';
 import {
+  billingSnapshot,
   getActiveSizeAddon,
+  getCustomerInfo,
+  isAlreadyPurchased,
   isPurchaseCancelled,
   listStoragePlanOptions,
   planLabelForStorage,
@@ -64,16 +67,21 @@ export function StoragePaywall({
   visible,
   onClose,
   onPurchased,
+  onApplyPaidTier,
+  onKeepCurrent,
   onSwitchToSmall,
   currentTier,
   scheduledTier,
   periodEndsAt,
   goingToSmall,
   selectedEffectiveFrom,
+  embedded = false,
 }: {
   visible: boolean;
   onClose: () => void;
   onPurchased?: (option: StoragePlanOption) => void | Promise<void>;
+  onApplyPaidTier?: (tier: 'medium' | 'large') => void | Promise<void>;
+  onKeepCurrent?: () => Promise<void>;
   onSwitchToSmall?: () => Promise<void>;
   initialTier?: GroupSizeTier | null;
   currentTier?: GroupSizeTier | null;
@@ -81,8 +89,12 @@ export function StoragePaywall({
   periodEndsAt?: Date | string | null;
   goingToSmall?: boolean;
   selectedEffectiveFrom?: Date | string | null;
+  /** Render inside an existing modal/page instead of opening another Modal. */
+  embedded?: boolean;
 }) {
-  const { sizeAddon, purchasePackage, restorePurchases, presentCustomerCenter } = usePurchases();
+  const { customerInfo, sizeAddon, purchasePackage, restorePurchases, presentCustomerCenter } =
+    usePurchases();
+  const insets = useSafeAreaInsets();
   const [options, setOptions] = useState<StoragePlanOption[]>([]);
   const [selected, setSelected] = useState<GroupSizeTier | null>(null);
   const [loading, setLoading] = useState(false);
@@ -127,26 +139,39 @@ export function StoragePaywall({
     };
   }, [visible, nextTier]);
 
-  const selectedIsScheduled = selected != null && selected === nextTier;
+  const snapshot = billingSnapshot(customerInfo);
+  const alreadyOwnsSelected =
+    selected === 'large' ? snapshot.largeActive : selected === 'medium' ? snapshot.mediumActive : false;
+  const selectedIsScheduled = selected != null && selected === nextTier && nextTier !== activeTier;
+  const selectedKeepsActive = selected != null && selected === activeTier && nextTier !== activeTier;
   const selectedPaidMissing =
     selected != null &&
     selected !== 'small' &&
+    !selectedKeepsActive &&
+    !alreadyOwnsSelected &&
     !options.some((item) => item.plan.tier === selected);
   const ctaLabel = useMemo(() => {
     if (!selected) return 'Choose a plan';
     if (selectedIsScheduled) return 'Selected plan';
     const name = GROUP_TIERS[selected].label;
+    if (selectedKeepsActive) return `Keep ${name}`;
     if (selected === 'small') return `Switch to ${name} — Free`;
     const option = options.find((item) => item.plan.tier === selected);
     const price = option ? monthlyPrice(option.pkg.product.priceString) : '';
     const verb = activeTier === 'small' ? 'Upgrade' : 'Switch';
     return price ? `${verb} to ${name} — ${price}` : `${verb} to ${name}`;
-  }, [selected, selectedIsScheduled, activeTier, options]);
+  }, [selected, selectedIsScheduled, selectedKeepsActive, activeTier, options]);
 
   const confirm = async () => {
     if (!selected || selectedIsScheduled || purchasing) return;
     setPurchasing(true);
     try {
+      if (selectedKeepsActive) {
+        if (onKeepCurrent) await onKeepCurrent();
+        onClose();
+        Toast.show({ type: 'success', text1: `Kept ${GROUP_TIERS[activeTier].label}` });
+        return;
+      }
       if (selected === 'small') {
         if (onSwitchToSmall) {
           await onSwitchToSmall();
@@ -158,21 +183,46 @@ export function StoragePaywall({
         }
         return;
       }
-      const option = options.find((item) => item.plan.tier === selected);
-      if (!option) return;
-      const info = await purchasePackage(option.pkg);
-      if (!info) {
-        Toast.show({ type: 'info', text1: 'Purchase cancelled' });
-        return;
+      if (selected !== 'medium' && selected !== 'large') return;
+      const latest = await getCustomerInfo().catch(() => customerInfo);
+      const latestSnap = billingSnapshot(latest);
+      const ownsSelected =
+        selected === 'large' ? latestSnap.largeActive : latestSnap.mediumActive;
+      if (!ownsSelected) {
+        const option = options.find((item) => item.plan.tier === selected);
+        if (!option) {
+          Toast.show({ type: 'error', text1: 'This plan is not available right now.' });
+          return;
+        }
+        const info = await purchasePackage(option.pkg);
+        if (!info) {
+          Toast.show({ type: 'info', text1: 'Purchase cancelled' });
+          return;
+        }
       }
-      await onPurchased?.(option);
+      if (onApplyPaidTier) await onApplyPaidTier(selected);
+      else {
+        const option = options.find((item) => item.plan.tier === selected);
+        if (option) await onPurchased?.(option);
+      }
       onClose();
       if (activeTier === 'large' && selected === 'medium') {
         Toast.show({ type: 'success', text1: 'Medium starts at the end of this period' });
+      } else {
+        Toast.show({ type: 'success', text1: `${GROUP_TIERS[selected].label} is now active` });
       }
     } catch (e) {
       if (isPurchaseCancelled(e)) {
         Toast.show({ type: 'info', text1: 'Purchase cancelled' });
+        return;
+      }
+      if (
+        isAlreadyPurchased(e) &&
+        (selected === 'medium' || selected === 'large')
+      ) {
+        if (onApplyPaidTier) await onApplyPaidTier(selected);
+        onClose();
+        Toast.show({ type: 'success', text1: `${GROUP_TIERS[selected].label} is now active` });
         return;
       }
       Toast.show({
@@ -213,15 +263,137 @@ export function StoragePaywall({
     }
   };
 
-  return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'}
-      onRequestClose={onClose}
-      {...edgeToEdgeModalProps}
-    >
-      <View style={styles.frame}>
+  const planList = loading ? (
+    <View style={styles.center}>
+      <ActivityIndicator color={Colors.accent} />
+    </View>
+  ) : error ? (
+    <Text style={styles.error}>{error}</Text>
+  ) : (
+    <View style={styles.plans}>
+      {ALL_TIERS.map((tier) => {
+        const isActive = activeTier === tier;
+        const isScheduled = nextTier === tier;
+        const split = nextTier !== activeTier;
+        const isPicked = selected === tier;
+        const priceLabel = priceForTier(tier, options);
+        const locked = isScheduled;
+        return (
+          <TouchableOpacity
+            key={tier}
+            onPress={() => setSelected(tier)}
+            disabled={locked}
+            style={[
+              styles.plan,
+              locked && styles.planLocked,
+              isPicked && !locked && styles.planSelected,
+            ]}
+            accessibilityRole="button"
+            accessibilityState={{ selected: isPicked || locked, disabled: locked }}
+            accessibilityLabel={`${planTitle(tier)}${isActive ? ', active plan' : ''}${split && isScheduled ? ', selected plan' : ''}`}
+          >
+            {isActive || (split && isScheduled) ? (
+              <View style={styles.pillRow}>
+                {isActive ? (
+                  <View style={styles.planPill}>
+                    <Text style={styles.planPillText}>Active plan</Text>
+                  </View>
+                ) : null}
+                {split && isScheduled ? (
+                  <View style={styles.planPill}>
+                    <Text style={styles.planPillText}>Selected plan</Text>
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
+            <Text style={styles.planTitle}>{planTitle(tier)}</Text>
+            <Text style={styles.planBlurb}>{PLAN_BLURB[tier]}</Text>
+            <Text style={styles.planPrice}>{priceLabel}</Text>
+            {isActive && activeDateLine ? (
+              <Text style={styles.planDate}>{activeDateLine}</Text>
+            ) : null}
+            {split && isScheduled && selectedDateLine ? (
+              <Text style={styles.planDate}>{selectedDateLine}</Text>
+            ) : null}
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+
+  const actions = (
+    <>
+      <TouchableOpacity
+        onPress={() => void confirm()}
+        disabled={
+          !selected ||
+          selectedIsScheduled ||
+          selectedPaidMissing ||
+          purchasing ||
+          loading ||
+          restoring
+        }
+        style={[
+          styles.cta,
+          (!selected ||
+            selectedIsScheduled ||
+            selectedPaidMissing ||
+            purchasing ||
+            loading ||
+            restoring) &&
+            styles.ctaDisabled,
+        ]}
+        accessibilityRole="button"
+        accessibilityLabel={ctaLabel}
+      >
+        {purchasing ? (
+          <ActivityIndicator color={Colors.accentFg} />
+        ) : (
+          <Text style={styles.ctaText}>{ctaLabel}</Text>
+        )}
+      </TouchableOpacity>
+      {Platform.OS !== 'web' ? (
+        <TouchableOpacity
+          onPress={() => void restore()}
+          disabled={purchasing || restoring}
+          style={styles.restore}
+          accessibilityRole="button"
+          accessibilityLabel="Restore purchases"
+        >
+          {restoring ? (
+            <ActivityIndicator color={Colors.textSub} />
+          ) : (
+            <Text style={styles.restoreText}>Restore purchases</Text>
+          )}
+        </TouchableOpacity>
+      ) : null}
+      <Text style={styles.legal}>
+        {Platform.OS === 'web'
+          ? 'Billed monthly. Cancel anytime from the customer portal.'
+          : 'Payment is charged to your Apple or Google account. The subscription renews each month until you cancel in the store settings or Customer Center.'}
+      </Text>
+    </>
+  );
+
+  if (embedded) {
+    if (!visible) return null;
+    return (
+      <View style={styles.embedded}>
+        <KeyboardSafeScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContentEmbedded}
+          showsVerticalScrollIndicator={false}
+        >
+          {planList}
+        </KeyboardSafeScrollView>
+        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+          {actions}
+        </View>
+      </View>
+    );
+  }
+
+  const body = (
         <SafeAreaView style={styles.page} edges={['top', 'left', 'right']}>
           <View style={styles.topRow}>
             <View style={styles.heroIcon}>
@@ -256,117 +428,25 @@ export function StoragePaywall({
               ))}
             </View>
 
-            {loading ? (
-              <View style={styles.center}>
-                <ActivityIndicator color={Colors.accent} />
-              </View>
-            ) : error ? (
-              <Text style={styles.error}>{error}</Text>
-            ) : (
-              <View style={styles.plans}>
-                {ALL_TIERS.map((tier) => {
-                  const isActive = activeTier === tier;
-                  const isScheduled = nextTier === tier;
-                  const split = nextTier !== activeTier;
-                  const isPicked = selected === tier;
-                  const priceLabel = priceForTier(tier, options);
-                  const locked = isScheduled;
-                  return (
-                    <TouchableOpacity
-                      key={tier}
-                      onPress={() => setSelected(tier)}
-                      disabled={locked}
-                      style={[
-                        styles.plan,
-                        locked && styles.planLocked,
-                        isPicked && !locked && styles.planSelected,
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: isPicked || locked, disabled: locked }}
-                      accessibilityLabel={`${planTitle(tier)}${isActive ? ', active plan' : ''}${split && isScheduled ? ', selected plan' : ''}`}
-                    >
-                      {isActive || (split && isScheduled) ? (
-                        <View style={styles.pillRow}>
-                          {isActive ? (
-                            <View style={styles.planPill}>
-                              <Text style={styles.planPillText}>Active plan</Text>
-                            </View>
-                          ) : null}
-                          {split && isScheduled ? (
-                            <View style={styles.planPill}>
-                              <Text style={styles.planPillText}>Selected plan</Text>
-                            </View>
-                          ) : null}
-                        </View>
-                      ) : null}
-                      <Text style={styles.planTitle}>{planTitle(tier)}</Text>
-                      <Text style={styles.planBlurb}>{PLAN_BLURB[tier]}</Text>
-                      <Text style={styles.planPrice}>{priceLabel}</Text>
-                      {isActive && activeDateLine ? (
-                        <Text style={styles.planDate}>{activeDateLine}</Text>
-                      ) : null}
-                      {split && isScheduled && selectedDateLine ? (
-                        <Text style={styles.planDate}>{selectedDateLine}</Text>
-                      ) : null}
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            )}
+            {planList}
           </KeyboardSafeScrollView>
 
           <SafeAreaView edges={['bottom']} style={styles.footer}>
-            <TouchableOpacity
-              onPress={() => void confirm()}
-              disabled={
-                !selected ||
-                selectedIsScheduled ||
-                selectedPaidMissing ||
-                purchasing ||
-                loading ||
-                restoring
-              }
-              style={[
-                styles.cta,
-                (!selected ||
-                  selectedIsScheduled ||
-                  selectedPaidMissing ||
-                  purchasing ||
-                  loading ||
-                  restoring) &&
-                  styles.ctaDisabled,
-              ]}
-              accessibilityRole="button"
-              accessibilityLabel={ctaLabel}
-            >
-              {purchasing ? (
-                <ActivityIndicator color={Colors.accentFg} />
-              ) : (
-                <Text style={styles.ctaText}>{ctaLabel}</Text>
-              )}
-            </TouchableOpacity>
-            {Platform.OS !== 'web' ? (
-              <TouchableOpacity
-                onPress={() => void restore()}
-                disabled={purchasing || restoring}
-                style={styles.restore}
-                accessibilityRole="button"
-                accessibilityLabel="Restore purchases"
-              >
-                {restoring ? (
-                  <ActivityIndicator color={Colors.textSub} />
-                ) : (
-                  <Text style={styles.restoreText}>Restore purchases</Text>
-                )}
-              </TouchableOpacity>
-            ) : null}
-            <Text style={styles.legal}>
-              {Platform.OS === 'web'
-                ? 'Billed monthly. Cancel anytime from the customer portal.'
-                : 'Payment is charged to your Apple or Google account. The subscription renews each month until you cancel in the store settings or Customer Center.'}
-            </Text>
+            {actions}
           </SafeAreaView>
         </SafeAreaView>
+  );
+
+  return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'}
+      onRequestClose={onClose}
+      {...edgeToEdgeModalProps}
+    >
+      <View style={styles.frame}>
+        {body}
         <AppToastMount />
       </View>
     </Modal>
@@ -378,6 +458,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Platform.OS === 'web' ? '#E4E4E7' : Colors.bg,
   },
+  embedded: { flex: 1, minHeight: 0, backgroundColor: Colors.bg },
   page: {
     flex: 1,
     backgroundColor: Colors.bg,
@@ -401,8 +482,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  scroll: { flex: 1 },
+  scroll: { flex: 1, minHeight: 0 },
   scrollContent: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 28 },
+  scrollContentEmbedded: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 16 },
   headline: {
     fontSize: 26,
     lineHeight: 32,
