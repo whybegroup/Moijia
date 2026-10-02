@@ -10,8 +10,6 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
-  Alert,
-  Platform,
   Pressable,
   ScrollView,
 } from 'react-native';
@@ -27,7 +25,7 @@ import ReorderableList, {
 } from 'react-native-reorderable-list';
 import { Colors, Fonts, Radius, Shadows } from '../../../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName, groupAvatarBorderRadius } from '../../../utils/helpers';
-import { useEvents, useAllGroupMemberColors, useRecoverGroup, useUpdateGroupOrder } from '../../../hooks/api';
+import { useEvents, useAllGroupMemberColors, useUpdateGroupOrder } from '../../../hooks/api';
 import { useCurrentUserContext } from '../../../contexts/CurrentUserContext';
 import { GroupAvatar } from '../../../components/GroupAvatar';
 import { useListGroups } from '../../../hooks/useListGroups';
@@ -129,8 +127,7 @@ export default function GroupsScreen() {
   const { userId: currentUserId } = useCurrentUserContext();
   const [isDragging, setIsDragging] = useState(false);
 
-  const { listGroups, refetch: refetchGroups } = useListGroups(currentUserId ?? '', true);
-  const recoverGroup = useRecoverGroup(currentUserId ?? '');
+  const { listGroups, refetch: refetchGroups } = useListGroups(currentUserId ?? '', false);
   const updateGroupOrder = useUpdateGroupOrder(currentUserId ?? '');
   const { data: events = [], refetch: refetchEvents } = useEvents({
     userId: currentUserId ?? '',
@@ -145,7 +142,6 @@ export default function GroupsScreen() {
   );
 
   const activeGroups = useMemo(() => listGroups.filter((g) => !g.deletedAt), [listGroups]);
-  const deletedGroups = useMemo(() => listGroups.filter((g) => g.deletedAt), [listGroups]);
   const [orderedActiveGroups, setOrderedActiveGroups] = useState<GroupScoped[]>([]);
 
   useEffect(() => {
@@ -162,16 +158,6 @@ export default function GroupsScreen() {
     'worklet';
     runOnJS(setIsDragging)(false);
   }, []);
-
-  const handleRecover = async (groupId: string) => {
-    try {
-      await recoverGroup.mutateAsync(groupId);
-    } catch (e: any) {
-      const msg = e?.body?.error ?? e?.response?.data?.error ?? e?.message ?? 'Failed to recover group';
-      if (Platform.OS === 'web') window.alert(msg);
-      else Alert.alert('Error', msg);
-    }
-  };
 
   const handleReorder = useCallback(
     ({ from, to }: { from: number; to: number }) => {
@@ -211,54 +197,7 @@ export default function GroupsScreen() {
     [groupColors, events, now, upcomingWeekEnd, currentUserId, openGroup]
   );
 
-  const deletedSection =
-    deletedGroups.length > 0 ? (
-      <View style={styles.footerSection}>
-        <Text style={styles.sectionLabel}>Deactivated</Text>
-        {deletedGroups.map((g) => {
-            const userColorHex = groupColors[g.id] || getDefaultGroupThemeFromName(g.name);
-            const p = getGroupColor(userColorHex);
-            return (
-              <TouchableOpacity
-                key={g.id}
-                onPress={() => openGroup(g.id)}
-                style={[styles.groupItemCard, styles.deletedRow]}
-                activeOpacity={0.7}
-              >
-              <View style={styles.row}>
-                <View style={styles.dragHandleSpacer} />
-                <View style={[styles.groupIconOuter, { backgroundColor: p.cal, opacity: 0.7 }]}>
-                  <View style={styles.groupIconInner}>
-                    <GroupAvatar seed={g.avatarSeed} thumbnail={g.thumbnail} name={g.name} size={44} />
-                  </View>
-                </View>
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={[styles.groupName, { color: Colors.textMuted }]}>{g.name}</Text>
-                  <Text style={styles.groupMeta}>Deactivated</Text>
-                </View>
-                <TouchableOpacity
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    handleRecover(g.id);
-                  }}
-                  style={styles.recoverBtn}
-                  disabled={recoverGroup.isPending}
-                >
-                  <Text style={styles.recoverBtnText}>Recover</Text>
-                </TouchableOpacity>
-              </View>
-              </TouchableOpacity>
-            );
-          })}
-      </View>
-    ) : null;
-
-  const listFooter = (
-    <>
-      {deletedSection}
-      <View style={styles.listBottomPad} />
-    </>
-  );
+  const listFooter = <View style={styles.listBottomPad} />;
 
   return (
     <View style={styles.page}>
@@ -307,7 +246,6 @@ const styles = StyleSheet.create({
   listContainer: { flex: 1 },
   listContent: { paddingHorizontal: 16, flexGrow: 1 },
   listBottomPad: { height: 100 },
-  footerSection: { marginTop: 8, gap: 6 },
   groupItemCard: {
     backgroundColor: Colors.surface,
     borderRadius: 16,
@@ -367,14 +305,6 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
   },
   adminBadgeText: { fontSize: 11, fontFamily: Fonts.semiBold, color: Colors.textSub },
-  sectionLabel: {
-    fontSize: 11,
-    fontFamily: Fonts.semiBold,
-    color: Colors.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    marginBottom: 10,
-  },
   myEmpty: { alignItems: 'center', paddingTop: 24, paddingHorizontal: 24, paddingBottom: 8 },
   emptyGlyph: { marginBottom: 12 },
   emptyTitle: { fontSize: 18, fontFamily: Fonts.bold, color: Colors.text, marginBottom: 6 },
@@ -386,7 +316,4 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     lineHeight: 20,
   },
-  deletedRow: { backgroundColor: 'rgba(0,0,0,0.03)' },
-  recoverBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: Radius.lg, backgroundColor: Colors.going },
-  recoverBtnText: { fontSize: 12, fontFamily: Fonts.semiBold, color: '#fff' },
 });

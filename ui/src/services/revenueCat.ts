@@ -251,6 +251,28 @@ export async function purchaseProPackage(pkg: PurchasesPackage): Promise<Custome
   return customerInfo;
 }
 
+/** Fresh StoreKit product so Apple’s subscription sheet is presented. */
+export async function purchaseStorageTier(tier: 'medium' | 'large'): Promise<CustomerInfo> {
+  const addon = SIZE_ADDONS.find((plan) => plan.tier === tier);
+  if (!addon) {
+    throw new Error('This plan is not available right now.');
+  }
+  const products = await Purchases.getProducts([addon.productId]);
+  const product = products[0];
+  if (product) {
+    const { customerInfo } = await Purchases.purchaseStoreProduct(product);
+    return customerInfo;
+  }
+  planOptionsLock = null;
+  const options = await listStoragePlanOptions();
+  const option = options.find((item) => item.plan.tier === tier);
+  if (!option) {
+    throw new Error('This plan is not available right now.');
+  }
+  const { customerInfo } = await Purchases.purchasePackage(option.pkg);
+  return customerInfo;
+}
+
 export async function purchaseExtraGroupSlot(): Promise<CustomerInfo> {
   const offerings = await getOfferings();
   for (const offering of Object.values(offerings.all)) {

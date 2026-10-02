@@ -20,7 +20,6 @@ import { apiErrorMessage } from '../utils/apiErrors';
 import { StoragePaywall } from './StoragePaywall';
 import { GroupDowngradeBanner } from './GroupDowngradeBanner';
 import { usePurchases } from '../contexts/PurchasesContext';
-import { sizeAddonByTier } from '../config/revenueCat';
 import {
   listStoragePlanOptions,
   monthlyRateLabel,
@@ -89,7 +88,7 @@ export function GroupStorageRequestForm({
 }) {
   const setLimit = useSetGroupStorageLimit(groupId, userId);
   const cancelSub = useCancelGroupStorageSubscription(groupId, userId);
-  const { customerInfo, refresh } = usePurchases();
+  const { refresh } = usePurchases();
   const currentTier = sizeTierFromGroup({ sizeTier, maxStorageBytes: currentMaxBytes });
   const spec = GROUP_TIERS[currentTier];
   const [paywallOpenState, setPaywallOpenState] = useState(false);
@@ -107,8 +106,6 @@ export function GroupStorageRequestForm({
       cancelled = true;
     };
   }, []);
-  const addon = sizeAddonByTier(currentTier);
-  const entitlement = addon ? customerInfo?.entitlements.active[addon.entitlementId] : null;
   const scheduledTier = pendingSizeTier ? parseSizeTier(pendingSizeTier) : currentTier;
   const scheduledSpec = GROUP_TIERS[scheduledTier];
   const pendingChange = scheduledTier !== currentTier;
@@ -117,10 +114,8 @@ export function GroupStorageRequestForm({
       resolvePeriodDates({
         sizeStartedAt,
         graceEndsAt,
-        expirationDate: entitlement?.expirationDate,
-        originalPurchaseDate: entitlement?.originalPurchaseDate,
       }),
-    [sizeStartedAt, graceEndsAt, entitlement?.expirationDate, entitlement?.originalPurchaseDate]
+    [sizeStartedAt, graceEndsAt]
   );
   const showExpire = pendingChange;
   const periodDate = showExpire ? expiresAt : renewsAt;

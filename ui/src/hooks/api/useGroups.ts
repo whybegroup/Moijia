@@ -273,6 +273,7 @@ export function useDeleteGroup(userId: string) {
     mutationFn: (id: string) => GroupsService.deleteGroup(id, userId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.groups._base });
+      queryClient.invalidateQueries({ queryKey: queryKeys.users.purchases(userId) });
     },
   });
 }

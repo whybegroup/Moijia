@@ -9,7 +9,7 @@ export function isListMembershipGroup(g: GroupScoped): boolean {
 }
 
 export function filterListGroups(allGroups: GroupScoped[]): GroupScoped[] {
-  return allGroups.filter(isListMembershipGroup);
+  return allGroups.filter((g) => !g.deletedAt && isListMembershipGroup(g));
 }
 
 /** Reorder groups in a full list using a new order for active (non-deleted) ids. */

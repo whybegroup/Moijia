@@ -30,9 +30,7 @@ import {
   useUpdateGroup,
   useRegenerateInviteCode,
   useLeaveGroup,
-  useSoftDeleteGroup,
   useDeleteGroup,
-  useRecoverGroup,
   useEvents,
   useGroupStorageBreakdown,
   useFriendGroups,
@@ -245,9 +243,7 @@ export function GroupDetailView({ groupId }: GroupDetailViewProps) {
   const updateGroup = useUpdateGroup(groupId, currentUserId ?? '');
   const regenerateInviteCodeMutation = useRegenerateInviteCode(groupId, currentUserId ?? '');
   const leaveGroupMutation = useLeaveGroup();
-  const softDeleteMutation = useSoftDeleteGroup(currentUserId ?? '');
   const hardDeleteMutation = useDeleteGroup(currentUserId ?? '');
-  const recoverMutation = useRecoverGroup(currentUserId ?? '');
 
   /** Events starting up to 14d ago (ongoing) through 7d ahead (upcoming). */
   const groupEventsFetchWindow = useMemo(() => {
@@ -356,7 +352,6 @@ export function GroupDetailView({ groupId }: GroupDetailViewProps) {
 
   useMissingGroupRedirect(isError, groupError, group?.membershipStatus, '/(tabs)/groups');
   const [showLeave,   setShowLeave]   = useState(false);
-  const [showDeactivateConfirm, setShowDeactivateConfirm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [descExpanded, setDescExpanded] = useState(false);
   const [inviteSheetOpen, setInviteSheetOpen] = useState(false);
@@ -446,7 +441,6 @@ export function GroupDetailView({ groupId }: GroupDetailViewProps) {
   const isOwner = ownerId === currentUserId;
   const isAdmin = group.membershipStatus === 'admin';
   const isPending = group.membershipStatus === 'pending';
-  const isSoftDeleted = !!group.deletedAt;
   const canEditMain = isAdmin && !isPending;
   const canOpenGroupSettings =
     !isPending &&
@@ -471,18 +465,6 @@ export function GroupDetailView({ groupId }: GroupDetailViewProps) {
     }
   };
 
-  const doSoftDelete = async () => {
-    setShowDeactivateConfirm(false);
-    try {
-      await softDeleteMutation.mutateAsync(groupId);
-      dismiss();
-    } catch (e: any) {
-      const msg = e?.body?.error ?? e?.response?.data?.error ?? e?.message ?? 'Failed to deactivate';
-      if (Platform.OS === 'web') window.alert(msg);
-      else Alert.alert('Error', msg);
-    }
-  };
-
   const doHardDelete = async () => {
     setShowDeleteConfirm(false);
     try {
@@ -490,16 +472,6 @@ export function GroupDetailView({ groupId }: GroupDetailViewProps) {
       dismiss();
     } catch (e: any) {
       const msg = e?.body?.error ?? e?.response?.data?.error ?? e?.message ?? 'Failed to delete';
-      if (Platform.OS === 'web') window.alert(msg);
-      else Alert.alert('Error', msg);
-    }
-  };
-
-  const doRecover = async () => {
-    try {
-      await recoverMutation.mutateAsync(groupId);
-    } catch (e: any) {
-      const msg = e?.body?.error ?? e?.response?.data?.error ?? e?.message ?? 'Failed to recover';
       if (Platform.OS === 'web') window.alert(msg);
       else Alert.alert('Error', msg);
     }
@@ -1122,37 +1094,14 @@ export function GroupDetailView({ groupId }: GroupDetailViewProps) {
             <Text style={[styles.sectionLabel, styles.sectionLabelSpaced]}>DANGER ZONE</Text>
               <View style={[styles.card, styles.cardDanger]}>
                 {isOwner ? (
-                  <>
-                    {isSoftDeleted ? (
-                      <TouchableOpacity onPress={doRecover} style={styles.memberRow} activeOpacity={0.8} disabled={recoverMutation.isPending}>
-                        <Ionicons name="arrow-undo-outline" size={22} color={Colors.going} />
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.leaveTitle}>Recover Group</Text>
-                          <Text style={styles.leaveDesc}>Restore this deactivated group</Text>
-                        </View>
-                        {recoverMutation.isPending && <ActivityIndicator size="small" color={Colors.text} />}
-                      </TouchableOpacity>
-                    ) : (
-                      <>
-                        <TouchableOpacity onPress={() => setShowDeactivateConfirm(true)} style={[styles.memberRow, styles.rowBorder]} activeOpacity={0.8} disabled={softDeleteMutation.isPending}>
-                          <View style={styles.dangerIconWrap}><Ionicons name="pause-circle-outline" size={22} color="#B45309" /></View>
-                          <View style={{ flex: 1 }}>
-                            <Text style={[styles.leaveTitle, { color: '#B45309' }]}>Deactivate Group</Text>
-                            <Text style={styles.leaveDesc}>Temporarily deactivate the group - you can recover it later</Text>
-                          </View>
-                          {softDeleteMutation.isPending && <ActivityIndicator size="small" color={Colors.text} />}
-                        </TouchableOpacity>
-                        <TouchableOpacity onPress={() => setShowDeleteConfirm(true)} style={styles.memberRow} activeOpacity={0.8} disabled={hardDeleteMutation.isPending}>
-                          <View style={styles.dangerIconWrap}><Ionicons name="trash-outline" size={22} color={Colors.notGoing} /></View>
-                          <View style={{ flex: 1 }}>
-                            <Text style={styles.leaveTitle}>Delete Group</Text>
-                            <Text style={styles.leaveDesc}>Permanently remove the group and all members</Text>
-                          </View>
-                          {hardDeleteMutation.isPending && <ActivityIndicator size="small" color={Colors.text} />}
-                        </TouchableOpacity>
-                      </>
-                    )}
-                  </>
+                  <TouchableOpacity onPress={() => setShowDeleteConfirm(true)} style={styles.memberRow} activeOpacity={0.8} disabled={hardDeleteMutation.isPending}>
+                    <View style={styles.dangerIconWrap}><Ionicons name="trash-outline" size={22} color={Colors.notGoing} /></View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.leaveTitle}>Delete Group</Text>
+                      <Text style={styles.leaveDesc}>Permanently remove the group and all members</Text>
+                    </View>
+                    {hardDeleteMutation.isPending && <ActivityIndicator size="small" color={Colors.text} />}
+                  </TouchableOpacity>
                 ) : (
                   <TouchableOpacity onPress={() => setShowLeave(true)} style={styles.memberRow} activeOpacity={0.8}>
                     <Ionicons name="log-out-outline" size={22} color={Colors.textSub} />
@@ -1316,28 +1265,6 @@ export function GroupDetailView({ groupId }: GroupDetailViewProps) {
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => { setShowLeave(false); leaveGroup(); }} style={[styles.confirmBtn, { backgroundColor: Colors.notGoing, borderColor: Colors.notGoing }]}>
                   <Text style={{ fontFamily: Fonts.bold, color: '#fff' }}>{isPending ? 'Cancel Request' : 'Leave'}</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </TouchableOpacity>
-        </Modal>
-      )}
-
-      {/* Deactivate confirm (owner) */}
-      {showDeactivateConfirm && (
-        <Modal {...edgeToEdgeModalProps} visible transparent animationType="fade" onRequestClose={() => setShowDeactivateConfirm(false)}>
-          <TouchableOpacity style={styles.menuOverlay} onPress={() => setShowDeactivateConfirm(false)} activeOpacity={1}>
-            <View style={styles.confirmCard}>
-              <Text style={styles.confirmTitle}>Deactivate {group.name}?</Text>
-              <Text style={styles.confirmBody}>
-                You can recover this group at any time.
-              </Text>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                <TouchableOpacity onPress={() => setShowDeactivateConfirm(false)} style={[styles.confirmBtn, { borderColor: Colors.border, backgroundColor: Colors.surface }]}>
-                  <Text style={{ fontFamily: Fonts.semiBold, color: Colors.text }}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={doSoftDelete} style={[styles.confirmBtn, { backgroundColor: '#F59E0B', borderColor: '#F59E0B' }]} disabled={softDeleteMutation.isPending}>
-                  <Text style={{ fontFamily: Fonts.bold, color: '#fff' }}>Deactivate</Text>
                 </TouchableOpacity>
               </View>
             </View>

@@ -6,6 +6,8 @@ import type { GroupOrderInput } from '../models/GroupOrder';
 import { groupStorage } from './GroupStorageService';
 import { S3UploadService } from './S3UploadService';
 import { deleteRevenueCatSubscriber } from './RevenueCatService';
+import { groupBilling } from './GroupBillingService';
+import { groupFriendships } from './GroupFriendshipService';
 
 const prisma = new PrismaClient();
 const objectStore = new S3UploadService();
@@ -167,10 +169,17 @@ export class UserService {
           { createdBy: userId, members: { none: { role: 'owner' } } },
         ],
       },
-      select: { id: true },
+      select: { id: true, name: true, sizeTier: true },
     });
 
     for (const group of groups) {
+      await groupBilling.cancelOnGroupDelete({
+        groupId: group.id,
+        userId,
+        name: group.name,
+        sizeTier: group.sizeTier,
+      });
+      await groupFriendships.removeAllForGroup(group.id);
       const urls = await groupStorage.collectAllManagedUrlsForPurge(group.id);
       await prisma.group.delete({ where: { id: group.id } });
       await Promise.all(urls.map((u) => objectStore.deleteManagedUploadBestEffort(u)));

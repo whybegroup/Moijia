@@ -5,7 +5,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { type Href } from 'expo-router';
 import { Colors, Fonts, Layout, Radius } from '../../constants/theme';
-import { useDeleteUser, useUpdateUser, useUser } from '../../hooks/api';
+import {
+  useAllGroupMemberColors,
+  useDeleteUser,
+  useGroups,
+  useNotifications,
+  useUpdateUser,
+  useUser,
+} from '../../hooks/api';
 import { usePullToRefresh } from '../../hooks/usePullToRefresh';
 import { useAuth } from '../../contexts/AuthContext';
 import { useCurrentUserContext } from '../../contexts/CurrentUserContext';
@@ -13,6 +20,8 @@ import { useAppRouter as useRouter } from '../../hooks/useAppRouter';
 import { SUPPORT_PATH } from '../../constants/legal';
 import { UserAvatar } from '../../components/UserAvatar';
 import { SubscriptionSettingsCard } from '../../components/SubscriptionSettingsCard';
+import { NotificationBellButton } from '../../components/NotificationBellButton';
+import { NotificationsPanelModal } from '../../components/NotificationsPanelModal';
 import { AvatarPickerModal } from '../../components/AvatarPickerModal';
 import { Toggle } from '../../components/ui';
 import { deleteManagedUploadFireAndForget } from '../../services/managedUploadDelete';
@@ -146,9 +155,15 @@ const REMINDER_OPTIONS = ['Never', '1 hour before', '1 day before', '1 week befo
 function ProfileHeader({
   avatar,
   onSupport,
+  showNotifs,
+  onToggleNotifs,
+  unreadCount,
 }: {
   avatar?: ReactNode;
   onSupport: () => void;
+  showNotifs: boolean;
+  onToggleNotifs: () => void;
+  unreadCount: number;
 }) {
   return (
     <View style={styles.header}>
@@ -156,15 +171,22 @@ function ProfileHeader({
         {avatar}
         <Text style={styles.title}>Profile</Text>
       </View>
-      <TouchableOpacity
-        onPress={onSupport}
-        style={styles.headerIconBtn}
-        hitSlop={8}
-        accessibilityRole="button"
-        accessibilityLabel="Support"
-      >
-        <Ionicons name="help-circle-outline" size={22} color={Colors.text} />
-      </TouchableOpacity>
+      <View style={styles.headerActions}>
+        <TouchableOpacity
+          onPress={onSupport}
+          style={styles.headerIconBtn}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Support"
+        >
+          <Ionicons name="help-circle-outline" size={22} color={Colors.text} />
+        </TouchableOpacity>
+        <NotificationBellButton
+          showNotifs={showNotifs}
+          onPress={onToggleNotifs}
+          unreadCount={unreadCount}
+        />
+      </View>
     </View>
   );
 }
@@ -177,6 +199,11 @@ export default function ProfileScreen() {
   const { refreshControl } = usePullToRefresh(refetchUser);
   const updateUser = useUpdateUser(userId || '');
   const deleteUser = useDeleteUser();
+  const { data: allGroups = [] } = useGroups(userId ?? '', true);
+  const { data: notifs = [], isLoading: notifsLoading } = useNotifications(userId || '');
+  const { data: groupColors = {} } = useAllGroupMemberColors(userId || '');
+  const [showNotifs, setShowNotifs] = useState(false);
+  const unreadNotifCount = notifs.filter((n) => !n.read).length;
 
   const [draftDisplayName, setDraftDisplayName] = useState('');
   const [editingDisplayName, setEditingDisplayName] = useState(false);
@@ -342,11 +369,25 @@ export default function ProfileScreen() {
   if (loading) {
     return (
       <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
-        <ProfileHeader onSupport={openSupport} />
+        <ProfileHeader
+          onSupport={openSupport}
+          showNotifs={showNotifs}
+          onToggleNotifs={() => setShowNotifs(true)}
+          unreadCount={unreadNotifCount}
+        />
         <View style={styles.emptyState}>
           <ActivityIndicator color={Colors.accent} />
           <Text style={styles.emptyStateText}>Loading your profile...</Text>
         </View>
+        <NotificationsPanelModal
+          visible={showNotifs}
+          onClose={() => setShowNotifs(false)}
+          userId={userId || ''}
+          notifications={notifs}
+          isLoading={notifsLoading}
+          groups={allGroups.map((g) => ({ id: g.id, name: g.name }))}
+          groupColors={groupColors}
+        />
       </SafeAreaView>
     );
   }
@@ -354,7 +395,12 @@ export default function ProfileScreen() {
   if (!user) {
     return (
       <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
-        <ProfileHeader onSupport={openSupport} />
+        <ProfileHeader
+          onSupport={openSupport}
+          showNotifs={showNotifs}
+          onToggleNotifs={() => setShowNotifs(true)}
+          unreadCount={unreadNotifCount}
+        />
         <View style={styles.emptyState}>
           <Text style={styles.emptyStateTitle}>Profile data unavailable</Text>
           <Text style={styles.emptyStateText}>
@@ -375,6 +421,15 @@ export default function ProfileScreen() {
             </Text>
           </TouchableOpacity>
         </View>
+        <NotificationsPanelModal
+          visible={showNotifs}
+          onClose={() => setShowNotifs(false)}
+          userId={userId || ''}
+          notifications={notifs}
+          isLoading={notifsLoading}
+          groups={allGroups.map((g) => ({ id: g.id, name: g.name }))}
+          groupColors={groupColors}
+        />
       </SafeAreaView>
     );
   }
@@ -383,6 +438,9 @@ export default function ProfileScreen() {
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
         <ProfileHeader
           onSupport={openSupport}
+          showNotifs={showNotifs}
+          onToggleNotifs={() => setShowNotifs(true)}
+          unreadCount={unreadNotifCount}
           avatar={
             <UserAvatar
               seed={user.displayName || user.name}
@@ -762,6 +820,15 @@ export default function ProfileScreen() {
         }}
         isSaving={updateUser.isPending}
       />
+      <NotificationsPanelModal
+        visible={showNotifs}
+        onClose={() => setShowNotifs(false)}
+        userId={userId || ''}
+        notifications={notifs}
+        isLoading={notifsLoading}
+        groups={allGroups.map((g) => ({ id: g.id, name: g.name }))}
+        groupColors={groupColors}
+      />
     </SafeAreaView>
   );
 }
@@ -770,6 +837,7 @@ const styles = StyleSheet.create({
   safe:             { flex: 1, backgroundColor: Colors.bg },
   header:           { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: Layout.tabHeaderMinHeight, paddingHorizontal: 20, paddingVertical: 12, backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border },
   headerTitleRow:   { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1, minWidth: 0 },
+  headerActions:    { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 0 },
   headerIconBtn:    {
     width: 34,
     height: 34,

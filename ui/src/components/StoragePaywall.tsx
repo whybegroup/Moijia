@@ -18,9 +18,7 @@ import { edgeToEdgeModalProps } from './edgeToEdgeModalProps';
 import { AppToastMount } from './AppToastMount';
 import { usePurchases } from '../contexts/PurchasesContext';
 import {
-  billingSnapshot,
   getActiveSizeAddon,
-  getCustomerInfo,
   isAlreadyPurchased,
   isPurchaseCancelled,
   listStoragePlanOptions,
@@ -92,7 +90,7 @@ export function StoragePaywall({
   /** Render inside an existing modal/page instead of opening another Modal. */
   embedded?: boolean;
 }) {
-  const { customerInfo, sizeAddon, purchasePackage, restorePurchases, presentCustomerCenter } =
+  const { purchaseStorageTier, presentPaywall, restorePurchases, presentCustomerCenter } =
     usePurchases();
   const insets = useSafeAreaInsets();
   const [options, setOptions] = useState<StoragePlanOption[]>([]);
@@ -102,7 +100,7 @@ export function StoragePaywall({
   const [restoring, setRestoring] = useState(false);
   const [error, setError] = useState('');
 
-  const activeTier: GroupSizeTier = currentTier ?? sizeAddon?.tier ?? 'small';
+  const activeTier: GroupSizeTier = currentTier ?? 'small';
   const nextTier: GroupSizeTier = scheduledTier ?? activeTier;
   const periodStamp = periodEndsAt ? formatPlanDate(periodEndsAt) : '';
   const activeDateLine =
@@ -116,7 +114,11 @@ export function StoragePaywall({
     : null;
 
   useEffect(() => {
-    if (!visible) return;
+    if (!visible) {
+      setSelected(null);
+      return;
+    }
+    setSelected(scheduledTier ?? currentTier ?? 'small');
     let cancelled = false;
     setLoading(true);
     setError('');
@@ -124,7 +126,6 @@ export function StoragePaywall({
       .then((next) => {
         if (cancelled) return;
         setOptions(next);
-        setSelected(nextTier);
       })
       .catch((e) => {
         if (!cancelled) {
@@ -137,18 +138,14 @@ export function StoragePaywall({
     return () => {
       cancelled = true;
     };
-  }, [visible, nextTier]);
+  }, [visible]);
 
-  const snapshot = billingSnapshot(customerInfo);
-  const alreadyOwnsSelected =
-    selected === 'large' ? snapshot.largeActive : selected === 'medium' ? snapshot.mediumActive : false;
   const selectedIsScheduled = selected != null && selected === nextTier && nextTier !== activeTier;
   const selectedKeepsActive = selected != null && selected === activeTier && nextTier !== activeTier;
   const selectedPaidMissing =
     selected != null &&
     selected !== 'small' &&
     !selectedKeepsActive &&
-    !alreadyOwnsSelected &&
     !options.some((item) => item.plan.tier === selected);
   const ctaLabel = useMemo(() => {
     if (!selected) return 'Choose a plan';
@@ -184,19 +181,25 @@ export function StoragePaywall({
         return;
       }
       if (selected !== 'medium' && selected !== 'large') return;
-      const latest = await getCustomerInfo().catch(() => customerInfo);
-      const latestSnap = billingSnapshot(latest);
-      const ownsSelected =
-        selected === 'large' ? latestSnap.largeActive : latestSnap.mediumActive;
-      if (!ownsSelected) {
-        const option = options.find((item) => item.plan.tier === selected);
-        if (!option) {
-          Toast.show({ type: 'error', text1: 'This plan is not available right now.' });
-          return;
-        }
-        const info = await purchasePackage(option.pkg);
+      try {
+        const info = await purchaseStorageTier(selected);
         if (!info) {
           Toast.show({ type: 'info', text1: 'Purchase cancelled' });
+          return;
+        }
+      } catch (e) {
+        if (isPurchaseCancelled(e)) {
+          Toast.show({ type: 'info', text1: 'Purchase cancelled' });
+          return;
+        }
+        if (!isAlreadyPurchased(e)) throw e;
+        const outcome = await presentPaywall(undefined, activeTier);
+        if (outcome === 'cancelled') {
+          Toast.show({ type: 'info', text1: 'Purchase cancelled' });
+          return;
+        }
+        if (outcome === 'unavailable') {
+          Toast.show({ type: 'error', text1: 'Could not open the App Store payment sheet.' });
           return;
         }
       }
@@ -214,15 +217,6 @@ export function StoragePaywall({
     } catch (e) {
       if (isPurchaseCancelled(e)) {
         Toast.show({ type: 'info', text1: 'Purchase cancelled' });
-        return;
-      }
-      if (
-        isAlreadyPurchased(e) &&
-        (selected === 'medium' || selected === 'large')
-      ) {
-        if (onApplyPaidTier) await onApplyPaidTier(selected);
-        onClose();
-        Toast.show({ type: 'success', text1: `${GROUP_TIERS[selected].label} is now active` });
         return;
       }
       Toast.show({

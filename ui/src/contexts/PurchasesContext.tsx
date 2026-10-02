@@ -15,6 +15,7 @@ import {
   logOutRevenueCat,
   purchaseExtraGroupSlot as purchaseExtraGroupSlotRc,
   purchaseProPackage,
+  purchaseStorageTier as purchaseStorageTierRc,
   purchasesErrorMessage,
   restorePurchases as restoreRevenueCatPurchases,
 } from '../services/revenueCat';
@@ -35,6 +36,7 @@ type PurchasesContextValue = {
   presentPaywall: (plan?: SizeAddon, currentTier?: GroupSizeTier) => Promise<ProPaywallOutcome>;
   presentCustomerCenter: () => Promise<void>;
   purchasePackage: (pkg: PurchasesPackage) => Promise<CustomerInfo | null>;
+  purchaseStorageTier: (tier: 'medium' | 'large') => Promise<CustomerInfo | null>;
   purchaseExtraGroupSlot: () => Promise<void>;
   restorePurchases: () => Promise<CustomerInfo>;
   refresh: () => Promise<CustomerInfo | null>;
@@ -171,6 +173,21 @@ export const PurchasesProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   }, [syncBilling]);
 
+  const purchaseStorageTier = useCallback(
+    async (tier: 'medium' | 'large'): Promise<CustomerInfo | null> => {
+      try {
+        const info = await purchaseStorageTierRc(tier);
+        setCustomerInfo(info);
+        await syncBilling(info);
+        return info;
+      } catch (error) {
+        if (isPurchaseCancelled(error)) return null;
+        throw error;
+      }
+    },
+    [syncBilling]
+  );
+
   const purchaseExtraGroupSlot = useCallback(async () => {
     const info = await purchaseExtraGroupSlotRc();
     setCustomerInfo(info);
@@ -199,6 +216,7 @@ export const PurchasesProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       presentPaywall,
       presentCustomerCenter,
       purchasePackage,
+      purchaseStorageTier,
       purchaseExtraGroupSlot,
       restorePurchases,
       refresh,
@@ -210,6 +228,7 @@ export const PurchasesProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       presentPaywall,
       presentCustomerCenter,
       purchasePackage,
+      purchaseStorageTier,
       purchaseExtraGroupSlot,
       restorePurchases,
       refresh,

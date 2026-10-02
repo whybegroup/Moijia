@@ -221,6 +221,14 @@ export class GroupFriendshipService {
     }
   }
 
+  public async removeAllForGroup(groupId: string): Promise<void> {
+    await prisma.groupFriendship.deleteMany({
+      where: {
+        OR: [{ fromGroupId: groupId }, { toGroupId: groupId }],
+      },
+    });
+  }
+
   public async remove(groupId: string, friendGroupId: string, userId: string): Promise<void> {
     await requireAdmin(groupId, userId);
     const { count } = await prisma.groupFriendship.deleteMany({

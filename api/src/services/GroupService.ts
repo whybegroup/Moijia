@@ -26,6 +26,7 @@ import { NotificationService } from './NotificationService';
 import { S3UploadService } from './S3UploadService';
 import { groupStorage } from './GroupStorageService';
 import { groupBilling } from './GroupBillingService';
+import { groupFriendships } from './GroupFriendshipService';
 import { UserService } from './UserService';
 import { sortByGroupOrder } from '../utils/groupOrder';
 import {
@@ -261,12 +262,15 @@ export class GroupService {
 
   private groupSizeFields(group: any) {
     const sizeTier = parseSizeTier(group.sizeTier);
-    const pendingSizeTier = group.pendingSizeTier ? parseSizeTier(group.pendingSizeTier) : null;
+    const ownerPending =
+      group.pendingSource === 'owner' && group.pendingSizeTier
+        ? parseSizeTier(group.pendingSizeTier)
+        : null;
     return {
       sizeTier,
-      pendingSizeTier,
+      pendingSizeTier: ownerPending,
       sizeStartedAt: group.sizeStartedAt ?? null,
-      graceEndsAt: group.graceEndsAt ?? null,
+      graceEndsAt: ownerPending ? group.graceEndsAt ?? null : null,
       maxStorageBytes: groupMaxStorageBytes(group.maxStorageBytes, group.sizeTier),
     };
   }
@@ -579,10 +583,21 @@ export class GroupService {
    */
   public async hardDelete(id: string, userId: string): Promise<void> {
     await this.requireOwner(id, userId);
-    const exists = await prisma.group.findUnique({ where: { id }, select: { id: true } });
+    const exists = await prisma.group.findUnique({
+      where: { id },
+      select: { id: true, name: true, sizeTier: true },
+    });
     if (!exists) {
       throw Object.assign(new Error('Group not found'), { status: 404 });
     }
+
+    await groupBilling.cancelOnGroupDelete({
+      groupId: exists.id,
+      userId,
+      name: exists.name,
+      sizeTier: exists.sizeTier,
+    });
+    await groupFriendships.removeAllForGroup(id);
 
     const urlsToPurge = await groupStorage.collectAllManagedUrlsForPurge(id);
 

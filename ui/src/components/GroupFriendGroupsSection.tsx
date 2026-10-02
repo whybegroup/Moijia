@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Platform,
@@ -43,6 +43,13 @@ function canOpenGroup(item: FriendGroup): boolean {
 export function GroupFriendGroupsSection({ groupId, userId, isAdmin }: Props) {
   const router = useRouter();
   const { data: friendGroups = [], isLoading } = useFriendGroups(groupId, userId);
+  const sortedFriendGroups = useMemo(
+    () =>
+      [...friendGroups].sort((a, b) =>
+        a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+      ),
+    [friendGroups]
+  );
   const requestFriend = useRequestFriendGroup(groupId, userId);
   const decideFriend = useDecideFriendGroup(groupId, userId);
   const removeFriend = useRemoveFriendGroup(groupId, userId);
@@ -111,7 +118,7 @@ export function GroupFriendGroupsSection({ groupId, userId, isAdmin }: Props) {
           <View style={styles.emptyRow}>
             <ActivityIndicator size="small" color={Colors.textMuted} />
           </View>
-        ) : friendGroups.length === 0 ? (
+        ) : sortedFriendGroups.length === 0 ? (
           <View style={styles.emptyRow}>
             <Text style={styles.emptyText}>
               {isAdmin
@@ -120,8 +127,8 @@ export function GroupFriendGroupsSection({ groupId, userId, isAdmin }: Props) {
             </Text>
           </View>
         ) : (
-          friendGroups.map((item, index) => {
-            const last = index === friendGroups.length - 1 && !isAdmin;
+          sortedFriendGroups.map((item, index) => {
+            const last = index === sortedFriendGroups.length - 1 && !isAdmin;
             const member = canOpenGroup(item);
             const pendingMembership = item.membershipStatus === 'pending';
             const rowInner = (
@@ -208,7 +215,7 @@ export function GroupFriendGroupsSection({ groupId, userId, isAdmin }: Props) {
         )}
 
         {isAdmin ? (
-          <View style={[styles.addBlock, friendGroups.length > 0 && styles.addBlockBorder]}>
+          <View style={[styles.addBlock, sortedFriendGroups.length > 0 && styles.addBlockBorder]}>
             <Text style={styles.addHint}>Add with invite code</Text>
             <View style={styles.inviteRow}>
               <TextInput

@@ -144,7 +144,7 @@ export class GroupBillingService {
         graceEndsAt: null,
         graceNotifiedAt: null,
         sizeProductId: productIdForTier(input.sizeTier),
-        sizeStartedAt: currentTier === 'small' || !group.sizeStartedAt ? new Date() : group.sizeStartedAt,
+        sizeStartedAt: new Date(),
         maxStorageBytes: storageBytesToDb(cap),
       },
     });
@@ -165,15 +165,34 @@ export class GroupBillingService {
     return { maxStorageBytes: cap, sizeTier: input.sizeTier };
   }
 
+  /** Immediate cancel log when a paid group is deleted (no grace). */
+  public async cancelOnGroupDelete(input: {
+    groupId: string;
+    userId: string;
+    name: string;
+    sizeTier: string | null | undefined;
+  }): Promise<void> {
+    const tier = parseSizeTier(input.sizeTier);
+    if (!isPaidSizeTier(tier)) return;
+    await recordPurchase({
+      userId: input.userId,
+      kind: 'cancel',
+      title: `Cancelled ${GROUP_TIERS[tier].label}`,
+      detail: input.name,
+      productId: productIdForTier(tier),
+      groupId: input.groupId,
+      groupName: input.name,
+    });
+  }
+
   /**
-   * Store Medium/Large add-ons are shared across owned groups of that tier.
-   * Owner-scheduled downgrades stay pending even while the entitlement is still active.
-   * Only a lapsed store entitlement starts billing grace, and only on groups the owner
-   * did not already schedule.
+   * Store entitlements are often missing in Test Store / sandbox and after an in-app
+   * apply, so sync must never invent a cancel. Owner-scheduled downgrades stay.
+   * Any billing-sourced pending cancel is cleared so a started Medium/Large plan sticks.
    */
   public async syncOwnerEntitlements(
     userId: string,
-    entitlements: BillingEntitlementSnapshot
+    _entitlements: BillingEntitlementSnapshot
   ): Promise<void> {
     const owned = await prisma.groupMember.findMany({
       where: {
@@ -188,12 +207,9 @@ export class GroupBillingService {
       where: { id: { in: owned.map((r) => r.groupId) } },
       select: {
         id: true,
-        name: true,
         sizeTier: true,
         pendingSizeTier: true,
         pendingSource: true,
-        graceEndsAt: true,
-        graceNotifiedAt: true,
       },
     });
 
@@ -201,16 +217,9 @@ export class GroupBillingService {
       const tier = parseSizeTier(group.sizeTier);
       if (!isPaidSizeTier(tier)) continue;
       if (group.pendingSource === 'owner') continue;
-
-      const covered = tier === 'large' ? entitlements.largeActive : entitlements.mediumActive;
-      if (covered) {
+      if (group.pendingSizeTier) {
         await this.clearGrace(group.id);
-        continue;
       }
-
-      const fallback: GroupSizeTier =
-        tier === 'large' && entitlements.mediumActive ? 'medium' : 'small';
-      await this.startGrace(group.id, group.name, userId, fallback, group.graceNotifiedAt, 'billing');
     }
   }
 
