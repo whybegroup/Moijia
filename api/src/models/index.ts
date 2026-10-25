@@ -7,3 +7,4 @@ export * from './Event';
 export * from './Notification';
 export * from './Upload';
 export * from './Poll';
+export * from './Support';

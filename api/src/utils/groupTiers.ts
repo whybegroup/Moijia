@@ -29,7 +29,7 @@ export function inferSizeTierFromBytes(bytes: number): GroupSizeTier {
   return 'small';
 }
 
-export function isPaidSizeTier(tier: GroupSizeTier): boolean {
+export function isPaidSizeTier(tier: GroupSizeTier): tier is 'medium' | 'large' {
   return tier === 'medium' || tier === 'large';
 }
 
