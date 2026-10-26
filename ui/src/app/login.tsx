@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -9,21 +9,22 @@ import {
   Alert,
   Platform,
   TextInput,
-  Modal,
   Pressable,
   Keyboard,
+  KeyboardAvoidingView,
+  ScrollView,
+  BackHandler,
   useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { signInWithGoogle, signInWithEmail, signUpWithEmail, sendPasswordReset, needsEmailVerification } from '../config/firebase';
 import { googleIosClientId, googleWebClientId } from '../config/googleAuth';
 import { signInWithGoogleIdTokenNative } from '../config/googleSignIn';
-import { type Href } from 'expo-router';
 import { Colors, Fonts, Radius, Shadows } from '../constants/theme';
-import { edgeToEdgeModalProps } from '../components/edgeToEdgeModalProps';
+import { WEB_APP_MAX_WIDTH } from '../constants/webAppMaxWidth';
+import { LegalDocumentModal, type LegalDocumentId } from '../components/LegalDocumentModal';
 import { useAppRouter as useRouter } from '../hooks/useAppRouter';
-import { PRIVACY_PATH, TERMS_PATH } from '../constants/legal';
 
 type AuthMode = 'signin' | 'signup';
 
@@ -58,9 +59,7 @@ function nativeGoogleSignInHint(err: unknown): string | undefined {
 
 export default function LoginScreen() {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
-  const sheetHeight = Math.round(windowHeight * 0.92);
   const wideViewport = windowWidth / Math.max(windowHeight, 1) > 0.68;
   const [emailMode, setEmailMode] = useState<AuthMode | null>(null);
   const [email, setEmail] = useState('');
@@ -68,6 +67,8 @@ export default function LoginScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [legalDoc, setLegalDoc] = useState<LegalDocumentId | null>(null);
 
   const showError = (msg: string) => {
     setError(msg);
@@ -80,6 +81,7 @@ export default function LoginScreen() {
     setError('');
     setPassword('');
     setConfirmPassword('');
+    setAcceptedTerms(false);
   };
 
   const closeEmail = () => {
@@ -87,6 +89,26 @@ export default function LoginScreen() {
     setEmailMode(null);
     setError('');
   };
+
+  const openLegal = (document: LegalDocumentId) => {
+    Keyboard.dismiss();
+    setLegalDoc(document);
+  };
+
+  useEffect(() => {
+    if (!emailMode && !legalDoc) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (legalDoc) {
+        setLegalDoc(null);
+        return true;
+      }
+      if (loading) return true;
+      setEmailMode(null);
+      setError('');
+      return true;
+    });
+    return () => sub.remove();
+  }, [emailMode, legalDoc, loading]);
 
   const handleForgotPassword = async () => {
     const trimmedEmail = email.trim();
@@ -127,6 +149,10 @@ export default function LoginScreen() {
       }
       if (password !== confirmPassword) {
         showError('Passwords do not match');
+        return;
+      }
+      if (!acceptedTerms) {
+        setError('Please accept the Terms of Service and Privacy Policy.');
         return;
       }
     }
@@ -203,6 +229,8 @@ export default function LoginScreen() {
 
   return (
     <View style={styles.container}>
+      {emailMode == null ? (
+      <>
       <Image
         source={require('../../assets/splash.png')}
         style={[styles.bgImage, wideViewport && styles.bgImageWide]}
@@ -258,59 +286,49 @@ export default function LoginScreen() {
             By continuing, you agree to our{' '}
             <Text
               style={styles.disclaimerLink}
-              onPress={() => router.push(TERMS_PATH as Href)}
+              onPress={() => openLegal('terms')}
+              accessibilityRole="link"
             >
               Terms of Service
             </Text>
             {' '}and{' '}
             <Text
               style={styles.disclaimerLink}
-              onPress={() => router.push(PRIVACY_PATH as Href)}
+              onPress={() => openLegal('privacy')}
+              accessibilityRole="link"
             >
               Privacy Policy
             </Text>
+            .
           </Text>
         </View>
       </SafeAreaView>
-
-      <Modal
-        visible={emailMode != null}
-        transparent
-        animationType="slide"
-        presentationStyle={Platform.OS === 'ios' ? 'overFullScreen' : undefined}
-        onRequestClose={closeEmail}
-        {...edgeToEdgeModalProps}
-      >
-        <View style={[styles.modalRoot, { height: windowHeight }]}>
-          <Pressable
-            style={StyleSheet.absoluteFill}
+      </>
+      ) : (
+      <SafeAreaView style={styles.emailSafe} edges={['top', 'left', 'right', 'bottom']}>
+        <View style={styles.emailHeader}>
+          <TouchableOpacity
             onPress={closeEmail}
+            disabled={loading}
+            hitSlop={12}
+            style={styles.backButton}
             accessibilityRole="button"
-            accessibilityLabel="Close"
-          />
-          <View
-            style={[
-              styles.modalCard,
-              { height: sheetHeight, paddingBottom: Math.max(24, insets.bottom + 12) },
-            ]}
-            onStartShouldSetResponder={() => true}
+            accessibilityLabel="Back"
           >
-            <Pressable
-              style={styles.modalCardPress}
-              onPress={Platform.OS === 'web' ? undefined : Keyboard.dismiss}
-            >
-            <View style={styles.modalTopBar}>
-              <TouchableOpacity
-                onPress={closeEmail}
-                disabled={loading}
-                style={styles.closeButton}
-                accessibilityRole="button"
-                accessibilityLabel="Close"
-              >
-                <Ionicons name="close" size={22} color={Colors.text} />
-              </TouchableOpacity>
-            </View>
-
+            <Ionicons name="chevron-back" size={22} color={Colors.text} />
+          </TouchableOpacity>
+        </View>
+        <KeyboardAvoidingView
+          style={styles.emailAvoid}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <ScrollView
+            contentContainerStyle={styles.emailBody}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.emailColumn}>
             <View style={styles.modalBrand}>
               <Image
                 source={require('../../assets/favicon.png')}
@@ -322,7 +340,6 @@ export default function LoginScreen() {
               </Text>
             </View>
 
-            <View style={styles.sheetForm}>
               <Text style={styles.fieldLabel}>Email</Text>
               <TextInput
                 placeholder="Email"
@@ -358,6 +375,46 @@ export default function LoginScreen() {
                     editable={!loading}
                   />
                 </>
+              )}
+
+              {emailMode === 'signup' && (
+                <View style={styles.termsRow}>
+                  <Pressable
+                    onPress={() => {
+                      setAcceptedTerms((checked) => !checked);
+                      setError('');
+                    }}
+                    disabled={loading}
+                    hitSlop={8}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: acceptedTerms, disabled: loading }}
+                    accessibilityLabel="I accept the Terms of Service and Privacy Policy"
+                    style={[styles.termsBox, acceptedTerms && styles.termsBoxOn]}
+                  >
+                    {acceptedTerms ? (
+                      <Ionicons name="checkmark" size={14} color={Colors.accentFg} />
+                    ) : null}
+                  </Pressable>
+                  <Text style={styles.termsLabel}>
+                    I accept the{' '}
+                    <Text
+                      style={styles.termsLink}
+                      onPress={() => openLegal('terms')}
+                      accessibilityRole="link"
+                    >
+                      Terms of Service
+                    </Text>
+                    {' '}and{' '}
+                    <Text
+                      style={styles.termsLink}
+                      onPress={() => openLegal('privacy')}
+                      accessibilityRole="link"
+                    >
+                      Privacy Policy
+                    </Text>
+                    .
+                  </Text>
+                </View>
               )}
 
               {error ? <Text style={styles.errorText}>{error}</Text> : null}
@@ -410,10 +467,16 @@ export default function LoginScreen() {
                 </Text>
               )}
             </View>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+      )}
+
+      <LegalDocumentModal
+        document={legalDoc}
+        onClose={() => setLegalDoc(null)}
+        onChange={setLegalDoc}
+      />
     </View>
   );
 }
@@ -442,33 +505,16 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
     gap: 12,
   },
-  modalRoot: {
+  emailSafe: {
     flex: 1,
-    width: '100%',
-    backgroundColor: 'transparent',
-    justifyContent: 'flex-end',
+    backgroundColor: Colors.bg,
   },
-  modalCard: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    width: '100%',
-    backgroundColor: Colors.surface,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    paddingHorizontal: 20,
+  emailHeader: {
+    paddingHorizontal: 16,
     paddingTop: 8,
+    paddingBottom: 4,
   },
-  modalCardPress: {
-    flex: 1,
-  },
-  modalTopBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  closeButton: {
+  backButton: {
     width: 36,
     height: 36,
     borderRadius: 18,
@@ -477,6 +523,20 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  emailAvoid: {
+    flex: 1,
+  },
+  emailBody: {
+    flexGrow: 1,
+    paddingHorizontal: 24,
+    paddingBottom: 32,
+  },
+  emailColumn: {
+    width: '100%',
+    maxWidth: WEB_APP_MAX_WIDTH,
+    alignSelf: 'center',
+    gap: 10,
   },
   modalBrand: {
     alignItems: 'center',
@@ -501,9 +561,38 @@ const styles = StyleSheet.create({
     letterSpacing: -0.6,
     marginTop: 4,
   },
-  sheetForm: {
+  termsRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     gap: 10,
-    paddingBottom: 8,
+    marginTop: 6,
+  },
+  termsBox: {
+    width: 22,
+    height: 22,
+    marginTop: 1,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: Colors.borderStrong,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.surface,
+  },
+  termsBoxOn: {
+    backgroundColor: Colors.accent,
+    borderColor: Colors.accent,
+  },
+  termsLabel: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 18,
+    fontFamily: Fonts.regular,
+    color: Colors.textSub,
+  },
+  termsLink: {
+    fontFamily: Fonts.medium,
+    color: '#2d668b',
+    textDecorationLine: 'underline',
   },
   fieldLabel: {
     fontSize: 14,
@@ -619,14 +708,14 @@ const styles = StyleSheet.create({
   disclaimer: {
     fontSize: 12,
     fontFamily: Fonts.regular,
-    color: Colors.textMuted,
+    color: Colors.textSub,
     textAlign: 'center',
     lineHeight: 18,
-    marginTop: 8,
+    marginTop: 4,
   },
   disclaimerLink: {
     fontFamily: Fonts.medium,
-    color: Colors.textSub,
+    color: '#2d668b',
     textDecorationLine: 'underline',
   },
 });

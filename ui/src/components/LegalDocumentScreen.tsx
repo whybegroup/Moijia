@@ -9,19 +9,18 @@ import { NavBar } from './ui';
 export function LegalDocumentScreen({
   title,
   children,
+  onClose,
 }: {
   title: string;
   children: ReactNode;
+  onClose?: () => void;
 }) {
   const router = useRouter();
+  const close = onClose ?? (router.canGoBack() ? () => router.back() : undefined);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
-      <NavBar
-        title={title}
-        centerTitle
-        onClose={router.canGoBack() ? () => router.back() : undefined}
-      />
+      <NavBar title={title} centerTitle onClose={close} />
       <ScrollView
         contentContainerStyle={styles.body}
         showsVerticalScrollIndicator={false}

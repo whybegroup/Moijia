@@ -47,7 +47,8 @@ function RootLayoutNav() {
       return;
     }
 
-    const publicScreen = isPublicAppSegment(segments[0]);
+    const onHome = pathname === '/' || pathname === '';
+    const publicScreen = isPublicAppSegment(segments[0]) || onHome;
     const inAuthGroup = segments[0] === 'login';
     const onVerifyEmail = segments[0] === 'verify-email';
     const returnTo = parseReturnToParam(firstSearchParam(searchParams.returnTo));

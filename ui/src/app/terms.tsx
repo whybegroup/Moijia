@@ -12,11 +12,9 @@ import {
   LegalP,
 } from '../components/LegalDocumentScreen';
 
-export default function TermsOfServiceScreen() {
-  const router = useRouter();
-
+export function TermsOfServiceContent({ onOpenPrivacy }: { onOpenPrivacy: () => void }) {
   return (
-    <LegalDocumentScreen title="Terms of Service">
+    <>
       <LegalP>
         These Terms of Service (“Terms”) are an agreement between you and moijia (“moijia,”
         “we,” “us”) for use of the moijia apps, website, and related services (the “Service”).
@@ -120,11 +118,19 @@ export default function TermsOfServiceScreen() {
       <LegalHeading>Contact</LegalHeading>
       <LegalP>
         Questions about these Terms: {LEGAL_CONTACT_EMAIL}. Our Privacy Policy is at{' '}
-        <LegalLink onPress={() => router.push(PRIVACY_PATH as Href)}>
-          {PRIVACY_URL}
-        </LegalLink>
+        <LegalLink onPress={onOpenPrivacy}>{PRIVACY_URL}</LegalLink>
         .
       </LegalP>
+    </>
+  );
+}
+
+export default function TermsOfServiceScreen() {
+  const router = useRouter();
+
+  return (
+    <LegalDocumentScreen title="Terms of Service">
+      <TermsOfServiceContent onOpenPrivacy={() => router.push(PRIVACY_PATH as Href)} />
     </LegalDocumentScreen>
   );
 }
