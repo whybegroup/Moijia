@@ -63,6 +63,7 @@ export const useCurrentUser = () => {
             id: userId,
             name: displayName,
             displayName: displayName,
+            email: firebaseUser?.email ?? null,
           });
         } catch {
           // Duplicate or API error — user may exist from another tab

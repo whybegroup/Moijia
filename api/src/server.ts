@@ -48,6 +48,17 @@ app.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+app.get('/email/moijia-icon.png', (_req: Request, res: Response) => {
+  const file = path.resolve(__dirname, '../assets/moijia-icon.png');
+  if (!fs.existsSync(file)) {
+    res.status(404).end();
+    return;
+  }
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.type('png');
+  res.sendFile(file);
+});
+
 // Error handling middleware
 app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   console.error(err);

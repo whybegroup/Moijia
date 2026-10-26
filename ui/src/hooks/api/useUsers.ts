@@ -60,11 +60,3 @@ export function useOwnedGroupQuota(userId: string) {
     enabled: !!userId,
   });
 }
-
-export function usePurchaseHistory(userId: string, enabled = true) {
-  return useQuery({
-    queryKey: queryKeys.users.purchases(userId),
-    queryFn: () => UsersService.getPurchaseHistory(userId),
-    enabled: enabled && !!userId,
-  });
-}

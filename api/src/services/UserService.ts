@@ -44,7 +44,14 @@ export class UserService {
    */
   public async create(input: UserInput): Promise<User> {
     const row = await prisma.user.create({
-      data: input,
+      data: {
+        id: input.id,
+        name: input.name,
+        displayName: input.displayName,
+        avatarSeed: input.avatarSeed ?? null,
+        thumbnail: input.thumbnail ?? null,
+        email: input.email ?? null,
+      },
     });
     return this.mapUser(row);
   }

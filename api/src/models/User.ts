@@ -43,6 +43,8 @@ export interface UserUpdate {
   displayName?: string;
   avatarSeed?: string | null;
   thumbnail?: string | null;
+  /** Auth email for billing notices */
+  email?: string | null;
   /** Merged into existing global notification preferences */
   notifPrefs?: NotifPrefsPartial;
 }

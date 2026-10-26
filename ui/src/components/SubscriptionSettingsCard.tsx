@@ -8,14 +8,12 @@ import { useOwnedGroupQuota } from '../hooks/api/useUsers';
 import { isGroupOwnedByUser } from '../utils/groupStorage';
 import { FREE_OWNED_GROUP_LIMIT } from '../utils/groupTiers';
 import { OwnedGroupsModal } from './OwnedGroupsModal';
-import { PurchaseHistoryModal } from './PurchaseHistoryModal';
 
 export function SubscriptionSettingsCard() {
   const { userId } = useCurrentUserContext();
   const { data: groups = [] } = useGroups(userId ?? '');
   const { data: quota } = useOwnedGroupQuota(userId ?? '');
   const [ownedModalOpen, setOwnedModalOpen] = useState(false);
-  const [historyOpen, setHistoryOpen] = useState(false);
 
   const ownedGroups = useMemo(
     () => groups.filter((group) => isGroupOwnedByUser(group, userId ?? '')),
@@ -54,27 +52,12 @@ export function SubscriptionSettingsCard() {
         ) : (
           <View style={styles.infoRow}>{ownedRow}</View>
         )}
-        <TouchableOpacity
-          style={[styles.historyRow, styles.rowBorder]}
-          onPress={() => setHistoryOpen(true)}
-          accessibilityRole="button"
-          accessibilityLabel="Purchase history"
-        >
-          <Text style={styles.historyText}>Purchase history</Text>
-        </TouchableOpacity>
       </View>
       {userId ? (
         <OwnedGroupsModal
           visible={ownedModalOpen}
           onClose={() => setOwnedModalOpen(false)}
           groups={ownedGroups}
-        />
-      ) : null}
-      {userId ? (
-        <PurchaseHistoryModal
-          visible={historyOpen}
-          onClose={() => setHistoryOpen(false)}
-          userId={userId}
         />
       ) : null}
     </>
@@ -105,10 +88,7 @@ const styles = StyleSheet.create({
     padding: 14,
     gap: 12,
   },
-  rowBorder: { borderTopWidth: 1, borderTopColor: Colors.border },
   infoLabel: { fontSize: 14, fontFamily: Fonts.regular, color: Colors.text },
   infoValue: { fontSize: 14, fontFamily: Fonts.medium, color: Colors.text, flexShrink: 1, textAlign: 'right' },
   countHit: { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  historyRow: { padding: 14, alignItems: 'center' },
-  historyText: { fontSize: 14, fontFamily: Fonts.regular, color: Colors.textMuted, textAlign: 'center' },
 });
