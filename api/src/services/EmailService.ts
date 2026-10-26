@@ -208,7 +208,7 @@ export async function sendSupportEmail(input: {
   const email = input.email.trim();
   const message = input.message.trim();
   await deliver({
-    from: NOREPLY_EMAIL,
+    from: SUPPORT_EMAIL,
     to: SUPPORT_EMAIL,
     replyTo: email,
     subject: `moijia support from ${name}`,
