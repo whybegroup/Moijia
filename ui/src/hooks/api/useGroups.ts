@@ -18,6 +18,7 @@ import {
 } from '@moijia/client';
 import { reorderGroupsInCache } from '../../utils/groupOrder';
 import { queryKeys } from '../../config/queryClient';
+import { getCurrentUser } from '../../config/firebase';
 import { retryUnlessNotFound } from '../../utils/apiErrors';
 
 /** Reuse list data so group detail can render without waiting on a duplicate GET /groups/:id. */
@@ -183,16 +184,31 @@ function patchGroupInCaches(
   }
 }
 
+async function persistBillingEmail(userId: string): Promise<string | undefined> {
+  const email = getCurrentUser()?.email ?? undefined;
+  if (!email) return undefined;
+  const name = getCurrentUser()?.displayName || email.split('@')[0] || 'User';
+  await UsersService.syncUser({
+    id: userId,
+    name,
+    displayName: name,
+    email,
+  }).catch(() => undefined);
+  return email;
+}
+
 export function useSetGroupStorageLimit(groupId: string, userId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (sizeTier: 'medium' | 'large') =>
-      GroupsService.setGroupStorageLimit(groupId, userId, {
+    mutationFn: async (sizeTier: 'medium' | 'large') => {
+      await persistBillingEmail(userId);
+      return GroupsService.setGroupStorageLimit(groupId, userId, {
         sizeTier:
           sizeTier === 'large'
             ? GroupStorageLimitInput.sizeTier.LARGE
             : GroupStorageLimitInput.sizeTier.MEDIUM,
-      }),
+      });
+    },
     onSuccess: async (result, sizeTier) => {
       const nextTier = (result?.sizeTier ?? sizeTier) as GroupScoped['sizeTier'];
       const pending = nextTier === sizeTier ? null : sizeTier;
@@ -215,7 +231,10 @@ export function useSetGroupStorageLimit(groupId: string, userId: string) {
 export function useCancelGroupStorageSubscription(groupId: string, userId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: () => GroupsService.cancelStorageSubscription(groupId, userId),
+    mutationFn: async () => {
+      await persistBillingEmail(userId);
+      return GroupsService.cancelStorageSubscription(groupId, userId);
+    },
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.groups.storageBreakdown(groupId) }),

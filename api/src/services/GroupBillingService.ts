@@ -1,9 +1,9 @@
 import { PrismaClient } from '@prisma/client';
 import { groupStorage } from './GroupStorageService';
 import { NotificationService } from './NotificationService';
-import { sendOwnerEmail } from './EmailService';
+import { MAIL_FOOTER, sendOwnerEmail, type ReceiptSection } from './EmailService';
 import { httpError } from '../utils/httpError';
-import { monthPeriodExpiresAt } from '../utils/groupPlanPeriod';
+import { monthPeriodExpiresAt, nextMonthlyAnniversary } from '../utils/groupPlanPeriod';
 import { recordPurchase } from './PurchaseHistoryService';
 import {
   FREE_OWNED_GROUP_LIMIT,
@@ -31,6 +31,16 @@ export interface BillingEntitlementSnapshot {
 
 function productIdForTier(tier: PaidSizeTier): string {
   return tier === 'large' ? 'subscription_large_group' : 'subscription_medium_group';
+}
+
+function formatMailDate(date: Date): string {
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function planReceipt(label: string): { name: string; price: string; storage: string } {
+  if (label === 'Large') return { name: 'Large Group', price: '$9.99/mo', storage: '100 GB' };
+  if (label === 'Medium') return { name: 'Medium Group', price: '$4.99/mo', storage: '10 GB' };
+  return { name: 'Small Group', price: '$0.00/mo', storage: '1 GB' };
 }
 
 export class GroupBillingService {
@@ -105,10 +115,18 @@ export class GroupBillingService {
     groupId: string;
     userId: string;
     sizeTier: PaidSizeTier;
+    email?: string | null;
   }): Promise<{ maxStorageBytes: number; sizeTier: GroupSizeTier }> {
     const group = await prisma.group.findUnique({
       where: { id: input.groupId },
-      select: { id: true, name: true, deletedAt: true, sizeTier: true, sizeStartedAt: true },
+      select: {
+        id: true,
+        name: true,
+        deletedAt: true,
+        sizeTier: true,
+        sizeStartedAt: true,
+        pendingSizeTier: true,
+      },
     });
     if (!group || group.deletedAt) throw httpError(404, 'Group not found');
     const member = await prisma.groupMember.findUnique({
@@ -122,19 +140,40 @@ export class GroupBillingService {
     const currentTier = parseSizeTier(group.sizeTier);
     const cap = storageCapForTier(input.sizeTier);
     if (input.sizeTier === currentTier) {
+      const hadPending = !!group.pendingSizeTier;
       await this.clearGrace(input.groupId);
+      if (hadPending) {
+        await this.emailPlanUpdate({
+          ownerId: input.userId,
+          email: input.email,
+          groupName: group.name,
+          currentLabel: GROUP_TIERS[currentTier].label,
+          nextLabel: GROUP_TIERS[input.sizeTier].label,
+          immediate: true,
+          startedAt: group.sizeStartedAt ?? new Date(),
+        });
+      }
       return { maxStorageBytes: cap, sizeTier: currentTier };
     }
     const isDowngrade = sizeTierRank(input.sizeTier) < sizeTierRank(currentTier);
 
     if (isDowngrade) {
-      await this.startGrace(group.id, group.name, input.userId, input.sizeTier, null, 'owner');
+      await this.startGrace(
+        group.id,
+        group.name,
+        input.userId,
+        input.sizeTier,
+        null,
+        'owner',
+        input.email
+      );
       return {
         maxStorageBytes: storageCapForTier(currentTier),
         sizeTier: currentTier,
       };
     }
 
+    const startedAt = new Date();
     await prisma.group.update({
       where: { id: input.groupId },
       data: {
@@ -144,7 +183,7 @@ export class GroupBillingService {
         graceEndsAt: null,
         graceNotifiedAt: null,
         sizeProductId: productIdForTier(input.sizeTier),
-        sizeStartedAt: new Date(),
+        sizeStartedAt: startedAt,
         maxStorageBytes: storageBytesToDb(cap),
       },
     });
@@ -161,6 +200,15 @@ export class GroupBillingService {
       productId: productIdForTier(input.sizeTier),
       groupId: group.id,
       groupName: group.name,
+    });
+    await this.emailPlanUpdate({
+      ownerId: input.userId,
+      email: input.email,
+      groupName: group.name,
+      currentLabel: GROUP_TIERS[currentTier].label,
+      nextLabel: GROUP_TIERS[input.sizeTier].label,
+      immediate: true,
+      startedAt,
     });
     return { maxStorageBytes: cap, sizeTier: input.sizeTier };
   }
@@ -182,6 +230,17 @@ export class GroupBillingService {
       productId: productIdForTier(tier),
       groupId: input.groupId,
       groupName: input.name,
+    });
+    const now = new Date();
+    await this.emailPlanUpdate({
+      ownerId: input.userId,
+      groupName: input.name,
+      currentLabel: GROUP_TIERS[tier].label,
+      nextLabel: 'cancelled',
+      immediate: true,
+      startedAt: now,
+      expiresAt: now,
+      cancelled: true,
     });
   }
 
@@ -241,7 +300,8 @@ export class GroupBillingService {
     ownerId: string,
     pendingSizeTier: GroupSizeTier,
     alreadyNotifiedAt: Date | null | undefined,
-    source: 'owner' | 'billing' = 'billing'
+    source: 'owner' | 'billing' = 'billing',
+    email?: string | null
   ): Promise<void> {
     const existing = await prisma.group.findUnique({
       where: { id: groupId },
@@ -280,6 +340,16 @@ export class GroupBillingService {
         groupId,
         groupName,
       });
+      await this.emailPlanUpdate({
+        ownerId,
+        email,
+        groupName,
+        currentLabel: from,
+        nextLabel: to,
+        immediate: false,
+        startedAt: existing.sizeStartedAt ?? new Date(),
+        expiresAt: graceEndsAt,
+      });
     }
 
     if (alreadyNotifiedAt ?? existing.graceNotifiedAt) return;
@@ -298,16 +368,6 @@ export class GroupBillingService {
     await this.notifyOwnerAndAdmins(groupId, 'Group size grace period', body, {
       icon: 'warning-outline',
     });
-
-    const owner = await prisma.user.findUnique({
-      where: { id: ownerId },
-      select: { email: true },
-    });
-    await sendOwnerEmail({
-      to: owner?.email,
-      subject: `Your moijia group “${groupName}” size changes on ${ends}`,
-      text: body,
-    }).catch(() => undefined);
   }
 
   public async applyDueGracePeriods(): Promise<void> {
@@ -329,9 +389,14 @@ export class GroupBillingService {
     const cap = storageCapForTier(pending);
     const group = await prisma.group.findUnique({
       where: { id: groupId },
-      select: { name: true },
+      select: { name: true, sizeTier: true },
+    });
+    const owner = await prisma.groupMember.findFirst({
+      where: { groupId, role: 'owner', status: 'active' },
+      select: { userId: true },
     });
     await groupStorage.purgeOldestUntilUnderCap(groupId, cap);
+    const startedAt = isPaidSizeTier(pending) ? new Date() : null;
     await prisma.group.update({
       where: { id: groupId },
       data: {
@@ -341,7 +406,7 @@ export class GroupBillingService {
         graceEndsAt: null,
         graceNotifiedAt: null,
         sizeProductId: isPaidSizeTier(pending) ? productIdForTier(pending as PaidSizeTier) : null,
-        ...(isPaidSizeTier(pending) ? {} : { sizeStartedAt: null }),
+        sizeStartedAt: startedAt,
         maxStorageBytes: storageBytesToDb(cap),
       },
     });
@@ -351,7 +416,108 @@ export class GroupBillingService {
         'Group size updated',
         `${group.name} is now a ${GROUP_TIERS[pending].label} group (${formatStorageBytes(cap)}).`
       );
+      if (owner) {
+        await this.emailPlanUpdate({
+          ownerId: owner.userId,
+          groupName: group.name,
+          currentLabel: GROUP_TIERS[parseSizeTier(group.sizeTier)].label,
+          nextLabel: GROUP_TIERS[pending].label,
+          immediate: true,
+          startedAt: startedAt ?? new Date(),
+          cancelled: pending === 'small',
+        });
+      }
     }
+  }
+
+  private async resolveOwnerEmail(ownerId: string, fallback?: string | null): Promise<string | null> {
+    const candidate = fallback?.trim();
+    const validFallback = candidate && candidate.includes('@') ? candidate : null;
+    const owner = await prisma.user.findUnique({
+      where: { id: ownerId },
+      select: { email: true },
+    });
+    if (validFallback && owner?.email !== validFallback) {
+      await prisma.user
+        .update({
+          where: { id: ownerId },
+          data: { email: validFallback },
+        })
+        .catch(() => undefined);
+    }
+    return validFallback ?? owner?.email ?? null;
+  }
+
+  private async emailPlanUpdate(input: {
+    ownerId: string;
+    email?: string | null;
+    groupName: string;
+    currentLabel: string;
+    nextLabel: string;
+    immediate: boolean;
+    startedAt: Date;
+    expiresAt?: Date | null;
+    cancelled?: boolean;
+  }): Promise<void> {
+    const to = await this.resolveOwnerEmail(input.ownerId, input.email);
+    const expires = input.expiresAt ?? monthPeriodExpiresAt(input.startedAt);
+    const renews = nextMonthlyAnniversary(input.startedAt);
+    const freeOrCancelled =
+      input.cancelled || input.nextLabel === 'Small' || input.nextLabel === 'cancelled';
+    const shownLabel = input.immediate || input.cancelled ? input.nextLabel : input.currentLabel;
+    const current = planReceipt(input.currentLabel);
+    const next = planReceipt(input.nextLabel);
+    const shown = input.cancelled ? { ...current, price: '$0.00/mo' } : planReceipt(shownLabel);
+    const intro = input.cancelled
+      ? `Your ${current.name} plan for “${input.groupName}” has been cancelled.`
+      : input.immediate
+        ? `Thanks for updating your moijia subscription. “${input.groupName}” is now on ${next.name}.`
+        : `Your moijia subscription for “${input.groupName}” will change from ${current.name} to ${next.name} on ${formatMailDate(expires)}.`;
+    const nextBilling = freeOrCancelled ? 'None' : formatMailDate(renews);
+    const paymentMethod = freeOrCancelled ? 'None' : 'App Store';
+    const subscriptionRows = [
+      { label: 'Group', value: input.groupName },
+      { label: 'Plan', value: shown.name },
+      { label: 'Storage', value: shown.storage },
+      { label: 'Price', value: shown.price },
+    ];
+    if (!input.immediate && !input.cancelled) {
+      subscriptionRows.splice(2, 0, { label: 'Changes to', value: `${next.name} on ${formatMailDate(expires)}` });
+    }
+    const sections: ReceiptSection[] = [
+      { heading: 'YOUR SUBSCRIPTION', rows: subscriptionRows },
+      {
+        heading: 'PAYMENT INFORMATION',
+        rows: [
+          { label: 'Payment Method', value: paymentMethod },
+          { label: 'Your Charge(s)', value: shown.price },
+          { label: 'Next billing date', value: nextBilling },
+          { label: 'Expiration date', value: formatMailDate(expires) },
+        ],
+      },
+    ];
+    const text = [
+      intro,
+      '',
+      ...sections.flatMap((section) => [
+        section.heading,
+        ...section.rows.map((row) => `${row.label}: ${row.value}`),
+        '',
+      ]),
+      MAIL_FOOTER.join('\n\n'),
+    ].join('\n');
+    const subject = input.cancelled
+      ? `Your moijia subscription for “${input.groupName}” was cancelled`
+      : 'Your moijia subscription confirmation';
+    await sendOwnerEmail({
+      to,
+      subject,
+      text,
+      intro,
+      sections,
+    }).catch((err) => {
+      console.warn('[mail] plan update failed', err);
+    });
   }
 
   private async notifyOwnerAndAdmins(
