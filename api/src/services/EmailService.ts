@@ -120,6 +120,7 @@ export function buildReceiptHtml(input: {
 }
 
 type OutboundMail = {
+  from: string;
   to: string;
   subject: string;
   text: string;
@@ -141,7 +142,7 @@ async function deliver(input: OutboundMail): Promise<void> {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      from: SUPPORT_EMAIL,
+      from: input.from,
       to: [input.to],
       subject: input.subject,
       text: input.text,
@@ -189,6 +190,7 @@ export async function sendOwnerEmail(input: {
 
   const icon = html ? mailIconAttachment() : null;
   await deliver({
+    from: NOREPLY_EMAIL,
     to,
     subject: input.subject,
     text: input.text,
@@ -206,7 +208,8 @@ export async function sendSupportEmail(input: {
   const email = input.email.trim();
   const message = input.message.trim();
   await deliver({
-    to: NOREPLY_EMAIL,
+    from: NOREPLY_EMAIL,
+    to: SUPPORT_EMAIL,
     replyTo: email,
     subject: `moijia support from ${name}`,
     text: `Name: ${name}\nEmail: ${email}\n\n${message}`,
