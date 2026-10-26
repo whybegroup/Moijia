@@ -1,8 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 
-const MAIL_FROM = process.env.MAIL_FROM?.trim() || 'moijia <hello@moijia.com>';
-const SUPPORT_INBOX = process.env.SUPPORT_EMAIL?.trim() || 'whybegroup@gmail.com';
+const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL?.trim() || 'support@moijia.com';
+const NOREPLY_EMAIL = process.env.NOREPLY_EMAIL?.trim() || 'noreply@moijia.com';
 export const MAIL_FOOTER = [
   'Your right to cancel: You may cancel your subscription at any time. Cancel at least 24 hours before the end of the current billing period to avoid the next charge. Access continues through the remainder of your paid period unless otherwise noted. To cancel, open the group in the moijia app and cancel the plan, or manage the subscription in your Apple App Store or Google Play account settings. Deleting the app does not cancel a subscription. Refunds and billing disputes are handled by the store that charged you. We reserve the right to change pricing and will try to notify you in advance of a change.',
   'moijia may use your data to operate and improve the Service and to send you information about your account. You can change notification preferences in the app. We use your data as described in our Privacy Policy at https://moijia.com/privacy.',
@@ -141,7 +141,7 @@ async function deliver(input: OutboundMail): Promise<void> {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      from: MAIL_FROM,
+      from: SUPPORT_EMAIL,
       to: [input.to],
       subject: input.subject,
       text: input.text,
@@ -206,7 +206,7 @@ export async function sendSupportEmail(input: {
   const email = input.email.trim();
   const message = input.message.trim();
   await deliver({
-    to: SUPPORT_INBOX,
+    to: NOREPLY_EMAIL,
     replyTo: email,
     subject: `moijia support from ${name}`,
     text: `Name: ${name}\nEmail: ${email}\n\n${message}`,
