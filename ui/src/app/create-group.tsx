@@ -284,7 +284,7 @@ export default function CreateGroupScreen() {
         const message =
           parseSubscriptionTier(quota.subscriptionTier) === 'pro'
             ? `Pro includes up to ${cap} groups. Contact us about Enterprise for more.`
-            : `Free includes up to ${cap} groups. Upgrade to Pro for up to 10.`;
+            : `Free includes up to ${cap} groups. Upgrade to Pro in Profile > Subscription to create up to 10 groups.`;
         Alert.alert('Group limit reached', message);
         return;
       }

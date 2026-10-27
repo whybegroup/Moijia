@@ -236,9 +236,9 @@ export interface GroupBillingSyncInput {
   proActive: boolean;
   /** False when Pro is cancelled but the paid period has not ended. */
   proRenewing?: boolean;
-  /** ISO time when the current Pro period ends. The server keeps Pro for 30 days from the subscribe date. */
+  /** When the provider says the current period ends. */
   expiresAt?: string | null;
-  /** ISO time of the latest store purchase. Used to start or renew the 30-day period. */
+  /** When the provider says the current period started. */
   purchasedAt?: string | null;
 }
 
@@ -262,6 +262,8 @@ export interface OwnedGroupQuota {
   groupCapacity: number | null;
   canCreateGroup: boolean;
   subscriptionExpiresAt?: Date | null;
+  /** Start of the current provider period. Grace after it ends is half of this span. */
+  subscriptionStartedAt?: Date | null;
   /** False when Pro is cancelled and access continues until subscriptionExpiresAt. */
   subscriptionWillRenew?: boolean;
   /** When extra owned groups are deleted and the groups that stay become Small. */

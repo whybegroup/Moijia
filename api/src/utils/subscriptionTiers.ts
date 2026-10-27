@@ -4,25 +4,12 @@ export type SubscriptionTier = 'free' | 'pro' | 'enterprise';
 
 export const PRO_PRODUCT_ID = 'pro_subscription';
 export const PRO_MONTHLY_PRICE_LABEL = '$19.99/mo';
-/** Paid Pro access lasts 30 days from the subscribe date. */
-export const PRO_PERIOD_MS = 30 * 24 * 60 * 60 * 1000;
-/** A later purchase at least this long after the period start is a renewal. */
-const PRO_RENEWAL_GAP_MS = 25 * 24 * 60 * 60 * 1000;
 
-export function proPeriodEnd(startedAt: Date): Date {
-  return new Date(startedAt.getTime() + PRO_PERIOD_MS);
-}
-
-/**
- * The period starts at the first subscribe date. A purchase 25 days later starts the next 30 days.
- * Sooner store dates, including sandbox renewals, do not move the period.
- */
-export function resolveProPeriodStart(storedStart: Date | null, purchasedAt: Date | null, now: Date): Date {
-  if (!storedStart) return purchasedAt ?? now;
-  if (purchasedAt && purchasedAt.getTime() >= storedStart.getTime() + PRO_RENEWAL_GAP_MS) {
-    return purchasedAt;
-  }
-  return storedStart;
+/** Half of the provider period, from its start to its expiration. */
+export function downgradeGraceMs(startedAt: Date | null, expiresAt: Date | null): number {
+  if (!startedAt || !expiresAt) return 0;
+  const period = expiresAt.getTime() - startedAt.getTime();
+  return period > 0 ? period / 2 : 0;
 }
 
 export function parseSubscriptionTier(raw: unknown): SubscriptionTier {

@@ -48,5 +48,14 @@ export function monthPeriodExpiresAt(startedAt: Date, now = new Date()): Date {
 export function formatPlanDate(raw: Date | string): string {
   const date = raw instanceof Date ? raw : new Date(raw);
   if (Number.isNaN(date.getTime())) return '';
+  const soon = Math.abs(date.getTime() - Date.now()) < 48 * 60 * 60 * 1000;
+  if (soon) {
+    return date.toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+  }
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }

@@ -1,12 +1,13 @@
 import { Text, View, StyleSheet } from 'react-native';
 import { Colors, Fonts, Radius } from '../constants/theme';
 import { GROUP_TIERS, parseSizeTier } from '../utils/groupTiers';
+import { formatPlanDate } from '../utils/groupPlanPeriod';
 
 function formatWhen(raw: Date | string | null | undefined): string | null {
   if (!raw) return null;
   const ends = new Date(raw);
   if (Number.isNaN(ends.getTime())) return null;
-  return ends.toLocaleDateString();
+  return formatPlanDate(ends);
 }
 
 export function GroupDowngradeBanner({

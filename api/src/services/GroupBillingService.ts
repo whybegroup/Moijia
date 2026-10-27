@@ -9,7 +9,6 @@ import { recordPurchase } from './PurchaseHistoryService';
 import type { OwnedGroupQuota, SubscriptionCancelCheck } from '../models/Group';
 import {
   FREE_OWNED_GROUP_LIMIT,
-  GROUP_DOWNGRADE_GRACE_MS,
   GROUP_TIERS,
   formatStorageBytes,
   parseSizeTier,
@@ -21,11 +20,10 @@ import {
 import {
   PRO_MONTHLY_PRICE_LABEL,
   PRO_PRODUCT_ID,
+  downgradeGraceMs,
   ownedGroupCapacity,
   parseSubscriptionTier,
   planLabel,
-  proPeriodEnd,
-  resolveProPeriodStart,
   sizeForNewGroup,
   subscriptionRank,
   tierAllowsSize,
@@ -39,7 +37,7 @@ export interface ProSubscriptionSnapshot {
   proActive: boolean;
   proRenewing: boolean;
   expiresAt: Date | null;
-  /** Latest store purchase. The period still ends 30 days after it started. */
+  /** Start of the current provider period. */
   purchasedAt: Date | null;
 }
 
@@ -49,6 +47,15 @@ function validDate(value: Date | null | undefined): Date | null {
 }
 
 function formatMailDate(date: Date): string {
+  const soon = Math.abs(date.getTime() - Date.now()) < 48 * 60 * 60 * 1000;
+  if (soon) {
+    return date.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+  }
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
@@ -137,6 +144,7 @@ export class GroupBillingService {
         select: {
           subscriptionTier: true,
           subscriptionExpiresAt: true,
+          subscriptionStartedAt: true,
           subscriptionWillRenew: true,
           downgradeAt: true,
           subscriptionWarning: true,
@@ -151,6 +159,7 @@ export class GroupBillingService {
       groupCapacity,
       canCreateGroup: groupCapacity == null || ownedGroupCount < groupCapacity,
       subscriptionExpiresAt: user?.subscriptionExpiresAt ?? null,
+      subscriptionStartedAt: user?.subscriptionStartedAt ?? null,
       subscriptionWillRenew: user?.subscriptionWillRenew ?? false,
       downgradeAt: user?.downgradeAt ?? null,
       subscriptionWarning: user?.subscriptionWarning?.trim() || null,
@@ -164,7 +173,7 @@ export class GroupBillingService {
     const message =
       quota.subscriptionTier === 'pro'
         ? `Pro includes up to ${cap} groups. Contact us about Enterprise for more.`
-        : `Free includes up to ${cap} groups. Upgrade to Pro for up to 10.`;
+        : `Free includes up to ${cap} groups. Upgrade to Pro in Profile > Subscription to create up to 10 groups.`;
     throw httpError(403, message, { code: 'owned_group_limit' });
   }
 
@@ -207,9 +216,8 @@ export class GroupBillingService {
 
   /**
    * Store Pro onto the user. Enterprise is assigned outside the app and is left alone.
-   * A new Pro subscription raises owned groups to Medium. After Pro expires, groups stay
-   * for 15 days. Then the top two in My Groups are kept and become Small, and the rest
-   * are permanently deleted.
+   * Dates come from the provider. After that period ends, groups stay for half of it.
+   * Then the top two in My Groups are kept and become Small, and the rest are permanently deleted.
    */
   public async syncSubscription(userId: string, input: ProSubscriptionSnapshot): Promise<OwnedGroupQuota> {
     const user = await prisma.user.findUnique({
@@ -226,13 +234,13 @@ export class GroupBillingService {
     const tier = parseSubscriptionTier(user.subscriptionTier);
     if (tier === 'enterprise') return this.getOwnedGroupQuota(userId);
 
-    const now = new Date();
     const purchasedAt = validDate(input.purchasedAt);
+    const storeExpires = validDate(input.expiresAt);
     const storedStart = validDate(user.subscriptionStartedAt);
-    const trackPeriod = input.proActive || tier === 'pro' || storedStart != null;
-    const startedAt = trackPeriod ? resolveProPeriodStart(storedStart, purchasedAt, now) : null;
-    const expiresAt = startedAt ? proPeriodEnd(startedAt) : validDate(input.expiresAt);
-    const inPaidPeriod = expiresAt != null && expiresAt.getTime() > now.getTime() && (input.proActive || tier === 'pro');
+    const storedExpires = validDate(user.subscriptionExpiresAt);
+    const startedAt = purchasedAt ?? storedStart;
+    const expiresAt = storeExpires ?? storedExpires;
+    const inPaidPeriod = input.proActive;
 
     if (inPaidPeriod) {
       const becomingPro = tier !== 'pro';
@@ -283,8 +291,8 @@ export class GroupBillingService {
     });
 
     if (wasPro && tier === 'pro') {
-      const periodEnd = expiresAt ?? user.subscriptionExpiresAt ?? now;
-      const downgradeAt = new Date(periodEnd.getTime() + GROUP_DOWNGRADE_GRACE_MS);
+      const periodEnd = expiresAt ?? storedExpires ?? new Date();
+      const downgradeAt = new Date(periodEnd.getTime() + downgradeGraceMs(startedAt, periodEnd));
       const downgrading = await this.scheduleDowngrade(userId, downgradeAt);
       await recordPurchase({
         userId,
@@ -384,18 +392,20 @@ export class GroupBillingService {
     });
   }
 
-  /** Enterprise plans with a developer-set end date become Free, then use the same 15-day group window. */
+  /** Enterprise plans with a developer-set end date become Free, then keep groups for half of that span. */
   public async expireEnterprisePlans(): Promise<void> {
     const due = await prisma.user.findMany({
       where: {
         subscriptionTier: 'enterprise',
         subscriptionExpiresAt: { lte: new Date() },
       },
-      select: { id: true, subscriptionExpiresAt: true },
+      select: { id: true, subscriptionStartedAt: true, subscriptionExpiresAt: true },
     });
     for (const user of due) {
       const periodEnd = user.subscriptionExpiresAt ?? new Date();
-      const downgradeAt = new Date(periodEnd.getTime() + GROUP_DOWNGRADE_GRACE_MS);
+      const downgradeAt = new Date(
+        periodEnd.getTime() + downgradeGraceMs(user.subscriptionStartedAt, periodEnd)
+      );
       await prisma.user.update({
         where: { id: user.id },
         data: {
@@ -418,7 +428,7 @@ export class GroupBillingService {
     }
   }
 
-  /** Free accounts over the free limits get the 15-day window before groups are trimmed or deleted. */
+  /** Free accounts over the free limits get half of their last period before groups are trimmed or deleted. */
   public async scheduleOutstandingFreeDowngrades(): Promise<void> {
     const groups = await prisma.group.findMany({
       where: {
@@ -457,9 +467,14 @@ export class GroupBillingService {
     for (const [userId, count] of ownedCounts) {
       if (count > FREE_OWNED_GROUP_LIMIT) ownerIds.add(userId);
     }
-    const downgradeAt = new Date(Date.now() + GROUP_DOWNGRADE_GRACE_MS);
-    for (const userId of ownerIds) {
-      await this.scheduleDowngrade(userId, downgradeAt);
+    if (ownerIds.size === 0) return;
+    const users = await prisma.user.findMany({
+      where: { id: { in: [...ownerIds] } },
+      select: { id: true, subscriptionStartedAt: true, subscriptionExpiresAt: true },
+    });
+    for (const user of users) {
+      const graceMs = downgradeGraceMs(user.subscriptionStartedAt, user.subscriptionExpiresAt);
+      await this.scheduleDowngrade(user.id, new Date(Date.now() + graceMs));
     }
   }
 

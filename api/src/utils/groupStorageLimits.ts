@@ -7,7 +7,6 @@ import {
 export {
   DEFAULT_GROUP_MAX_STORAGE_BYTES,
   FREE_OWNED_GROUP_LIMIT,
-  GROUP_DOWNGRADE_GRACE_MS,
   GROUP_TIERS,
   inferSizeTierFromBytes,
   isPaidSizeTier,

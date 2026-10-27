@@ -53,7 +53,7 @@ export function TermsOfServiceContent({ onOpenPrivacy }: { onOpenPrivacy: () => 
       <LegalP>
         Free accounts can create up to 2 Small groups (1 GB each). Pro is $19.99 per month
         and includes up to 10 Medium groups (10 GB each). Enterprise group counts and sizes
-        are arranged with us. If Pro ends, you have 15 days to reorder My Groups. After that,
+        are arranged with us. If Pro ends, you have half of that billing period to reorder My Groups. After that,
         only the top two groups you own are kept and become Small (1 GB). Every other group
         you own is permanently deleted, including its files. Older files over 1 GB in a kept
         group are removed. Storage is a digital service: unused space has no cash value,

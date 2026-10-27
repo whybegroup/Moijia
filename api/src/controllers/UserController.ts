@@ -98,7 +98,7 @@ export class UserController extends Controller {
 
   /**
    * Reconcile the App Store Pro subscription with this account.
-   * Enterprise is left unchanged. After Pro expires, groups stay for 15 days.
+   * Enterprise is left unchanged. After Pro expires, groups stay for half of that billing period.
    * Then only the top two in My Groups are kept and become Small. The rest are deleted.
    */
   @Post('{id}/billing-sync')

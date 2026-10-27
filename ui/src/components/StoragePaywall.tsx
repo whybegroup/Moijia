@@ -129,7 +129,7 @@ export function StoragePaywall({
             </View>
             <Text style={styles.legal}>
               Payment is charged to your Apple or Google account. Pro renews each month until you cancel in the store
-              settings. Fifteen days after Pro expires, only the top two groups in My Groups are kept. The others are
+              settings. After Pro expires, groups stay for half of that billing period. Then only the top two groups in My Groups are kept. The others are
               permanently deleted, and kept groups are trimmed to 1 GB.
             </Text>
           </ScrollView>

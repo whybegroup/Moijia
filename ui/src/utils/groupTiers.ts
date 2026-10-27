@@ -1,6 +1,5 @@
 export const FREE_OWNED_GROUP_LIMIT = 2;
 export const PRO_OWNED_GROUP_LIMIT = 10;
-export const GROUP_DOWNGRADE_GRACE_DAYS = 15;
 
 export type GroupSizeTier = 'small' | 'medium' | 'large';
 

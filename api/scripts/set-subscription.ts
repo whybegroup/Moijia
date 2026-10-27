@@ -2,8 +2,7 @@ import path from 'path';
 import { config as loadEnv } from 'dotenv';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { groupBilling } from '../src/services/GroupBillingService';
-import { GROUP_DOWNGRADE_GRACE_MS } from '../src/utils/groupTiers';
-import { PRO_PRODUCT_ID, parseSubscriptionTier, proPeriodEnd } from '../src/utils/subscriptionTiers';
+import { PRO_PRODUCT_ID, downgradeGraceMs, parseSubscriptionTier } from '../src/utils/subscriptionTiers';
 
 loadEnv({ path: path.resolve(__dirname, '../.env') });
 
@@ -51,7 +50,12 @@ async function main(): Promise<void> {
   }
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, subscriptionTier: true },
+    select: {
+      id: true,
+      subscriptionTier: true,
+      subscriptionStartedAt: true,
+      subscriptionExpiresAt: true,
+    },
   });
   if (!user) throw new Error(`User not found: ${userId}`);
 
@@ -62,13 +66,12 @@ async function main(): Promise<void> {
 
   const data: Prisma.UserUpdateInput = {};
   if (tier) {
-    const startedAt = tier === 'pro' ? new Date() : null;
     data.subscriptionTier = tier;
     data.subscriptionProductId = tier === 'pro' ? PRO_PRODUCT_ID : null;
     data.subscriptionWillRenew = tier === 'pro';
-    data.subscriptionStartedAt = startedAt;
+    data.subscriptionStartedAt = tier === 'pro' ? new Date() : null;
     data.downgradeAt = null;
-    if (tier === 'pro') data.subscriptionExpiresAt = proPeriodEnd(startedAt ?? new Date());
+    if (tier === 'pro') data.subscriptionExpiresAt = null;
     else if (tier === 'free') data.subscriptionExpiresAt = null;
     else if (!expiresRaw && !clearExpires) data.subscriptionExpiresAt = null;
     if (tier === 'enterprise' && !warningFlag && !clearWarning) data.subscriptionWarning = null;
@@ -82,7 +85,10 @@ async function main(): Promise<void> {
   if (clearExpires) data.subscriptionExpiresAt = null;
   if (expiresRaw) {
     data.subscriptionExpiresAt = parseExpires(expiresRaw);
-    if (nextTier === 'enterprise') data.downgradeAt = null;
+    if (nextTier === 'enterprise') {
+      data.downgradeAt = null;
+      data.subscriptionStartedAt = user.subscriptionStartedAt ?? new Date();
+    }
   }
 
   await prisma.user.update({ where: { id: userId }, data });
@@ -91,7 +97,8 @@ async function main(): Promise<void> {
     await groupBilling.clearOwnedGrace(userId);
   }
   if (tier === 'free') {
-    await groupBilling.scheduleDowngrade(userId, new Date(Date.now() + GROUP_DOWNGRADE_GRACE_MS));
+    const graceMs = downgradeGraceMs(user.subscriptionStartedAt, user.subscriptionExpiresAt);
+    await groupBilling.scheduleDowngrade(userId, new Date(Date.now() + graceMs));
   }
   const saved = await prisma.user.findUnique({
     where: { id: userId },

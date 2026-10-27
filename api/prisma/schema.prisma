@@ -30,9 +30,9 @@ model User {
   extraGroupSlots Int @default(0)
   /// free | pro | enterprise. Everyone starts on free.
   subscriptionTier String @default("free")
-  /// When the current Pro period started. Expiration is 30 days after this.
+  /// Start of the current period, from the store or from when an Enterprise end date was set.
   subscriptionStartedAt DateTime?
-  /// When the current Pro period ends, or when an Enterprise plan is set to end.
+  /// When the provider says the current period ends, or when an Enterprise plan is set to end.
   subscriptionExpiresAt DateTime?
   /// Shown under Subscription when a plan is at risk, such as a stopped payment.
   subscriptionWarning String?

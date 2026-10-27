@@ -1,6 +1,7 @@
 import { groupBilling } from '../services/GroupBillingService';
 
-const INTERVAL_MS = 15 * 60 * 1000;
+/** Short enough that a test-store grace of a few minutes is applied on time. */
+const INTERVAL_MS = 15 * 1000;
 let timer: ReturnType<typeof setInterval> | null = null;
 
 export function startGroupBillingJobs(): void {

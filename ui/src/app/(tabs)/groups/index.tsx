@@ -3,6 +3,7 @@ import {
   useCallback,
   useMemo,
   useEffect,
+  useRef,
 } from 'react';
 import {
   View,
@@ -189,31 +190,18 @@ function DowngradeListNotice({
 
 function DowngradeGroupRow({
   index,
-  total,
   ...props
-}: ActiveGroupRowProps & { index: number; total: number }) {
+}: ActiveGroupRowProps & { index: number }) {
   const drag = useReorderableDrag();
   const isActive = useIsActive();
-  const keptCount = Math.min(FREE_OWNED_GROUP_LIMIT, total);
   return (
-    <View>
-      {index === 0 ? <SectionHeader title="Kept" count={String(keptCount)} tone="keep" /> : null}
-      {index === FREE_OWNED_GROUP_LIMIT ? (
-        <SectionHeader
-          title="Will be deleted"
-          count={String(total - FREE_OWNED_GROUP_LIMIT)}
-          tone="delete"
-          spaced
-        />
-      ) : null}
-      <GroupCard
-        {...props}
-        onLongPress={drag}
-        isActive={isActive}
-        showHandle
-        moveLabel={index < FREE_OWNED_GROUP_LIMIT ? 'Remove' : 'Keep'}
-      />
-    </View>
+    <GroupCard
+      {...props}
+      onLongPress={drag}
+      isActive={isActive}
+      showHandle
+      moveLabel={index < FREE_OWNED_GROUP_LIMIT ? 'Remove' : 'Keep'}
+    />
   );
 }
 
@@ -260,6 +248,7 @@ function GroupSectionList({
   spaced,
   tone,
   hideHeader,
+  pinnedSplit,
   data,
   panGesture,
   renderItem,
@@ -274,6 +263,8 @@ function GroupSectionList({
   spaced?: boolean;
   tone?: 'keep' | 'delete';
   hideHeader?: boolean;
+  /** Header drawn between items. It stays put while rows are dragged. */
+  pinnedSplit?: { at: number; title: string; count: string; tone?: 'keep' | 'delete' };
   data: GroupScoped[];
   panGesture: PanGesture;
   renderItem: ReorderableListRenderItem<GroupScoped>;
@@ -283,34 +274,111 @@ function GroupSectionList({
   dragLocked: boolean;
 }) {
   const [contentHeight, setContentHeight] = useState<number | null>(null);
+  const [splitHeight, setSplitHeight] = useState(0);
+  const [splitTop, setSplitTop] = useState<number | null>(null);
+  const wrapperRef = useRef<View>(null);
+  const spacerRef = useRef<View>(null);
+  const dragLockedRef = useRef(dragLocked);
+  dragLockedRef.current = dragLocked;
   const header = useMemo(
     () => (hideHeader ? null : <SectionHeader title={title} count={count} spaced={spaced} tone={tone} />),
     [hideHeader, title, count, spaced, tone]
   );
   const emptyNode = useMemo(() => <Text style={styles.sectionEmpty}>{empty}</Text>, [empty]);
+  const measureSplit = useCallback(() => {
+    const spacer = spacerRef.current;
+    const wrapper = wrapperRef.current;
+    if (!spacer || !wrapper || dragLockedRef.current) return;
+    const apply = (y: number) => {
+      setSplitTop((prev) => (prev != null && Math.abs(prev - y) < 1 ? prev : y));
+    };
+    spacer.measureLayout(
+      wrapper,
+      (_x, y) => apply(y),
+      () => {
+        spacer.measureInWindow((_sx, sy) => {
+          wrapper.measureInWindow((_wx, wy) => apply(sy - wy));
+        });
+      }
+    );
+  }, []);
+  useEffect(() => {
+    if (dragLocked || !pinnedSplit) return;
+    const id = requestAnimationFrame(measureSplit);
+    return () => cancelAnimationFrame(id);
+  }, [dragLocked, measureSplit, pinnedSplit, splitHeight, data]);
+  const renderItemWithSplit = useCallback<ReorderableListRenderItem<GroupScoped>>(
+    (info) => {
+      const row = renderItem(info);
+      if (!pinnedSplit || info.index !== pinnedSplit.at) return row;
+      return (
+        <View>
+          <View
+            ref={spacerRef}
+            collapsable={false}
+            style={{ height: splitHeight }}
+            onLayout={measureSplit}
+          />
+          {row}
+        </View>
+      );
+    },
+    [measureSplit, pinnedSplit, renderItem, splitHeight]
+  );
 
   return (
-    <NestedReorderableList
-      data={data}
-      keyExtractor={(g) => g.id}
-      renderItem={renderItem}
-      onReorder={onReorder}
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
-      shouldUpdateActiveItem
-      panGesture={panGesture}
-      cellAnimations={{ opacity: 1, transform: [] }}
-      scrollEnabled={false}
-      ListHeaderComponent={hideHeader ? undefined : header}
-      ListEmptyComponent={data.length === 0 ? emptyNode : null}
-      ItemSeparatorComponent={GroupItemGap}
-      initialNumToRender={Math.max(data.length, 1)}
-      onContentSizeChange={(_width, height) => {
-        if (dragLocked || height < 1) return;
-        setContentHeight((prev) => (prev != null && Math.abs(prev - height) < 1 ? prev : height));
-      }}
-      style={contentHeight != null ? { height: contentHeight, flexGrow: 0 } : { flexGrow: 0 }}
-    />
+    <View ref={wrapperRef} collapsable={false} style={styles.splitWrap}>
+      {pinnedSplit ? (
+        <View
+          pointerEvents="none"
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+          style={styles.splitMeasure}
+          onLayout={(e) => {
+            const height = e.nativeEvent.layout.height;
+            setSplitHeight((prev) => (Math.abs(prev - height) < 1 ? prev : height));
+          }}
+        >
+          <SectionHeader
+            title={pinnedSplit.title}
+            count={pinnedSplit.count}
+            tone={pinnedSplit.tone}
+            spaced
+          />
+        </View>
+      ) : null}
+      <NestedReorderableList
+        data={data}
+        keyExtractor={(g) => g.id}
+        renderItem={pinnedSplit ? renderItemWithSplit : renderItem}
+        onReorder={onReorder}
+        onDragStart={onDragStart}
+        onDragEnd={onDragEnd}
+        shouldUpdateActiveItem
+        panGesture={panGesture}
+        cellAnimations={{ opacity: 1, transform: [] }}
+        scrollEnabled={false}
+        ListHeaderComponent={hideHeader ? undefined : header}
+        ListEmptyComponent={data.length === 0 ? emptyNode : null}
+        ItemSeparatorComponent={GroupItemGap}
+        initialNumToRender={Math.max(data.length, 1)}
+        onContentSizeChange={(_width, height) => {
+          if (dragLocked || height < 1) return;
+          setContentHeight((prev) => (prev != null && Math.abs(prev - height) < 1 ? prev : height));
+        }}
+        style={contentHeight != null ? { height: contentHeight, flexGrow: 0 } : { flexGrow: 0 }}
+      />
+      {pinnedSplit && splitTop != null ? (
+        <View pointerEvents="none" style={[styles.splitHeader, { top: splitTop }]}>
+          <SectionHeader
+            title={pinnedSplit.title}
+            count={pinnedSplit.count}
+            tone={pinnedSplit.tone}
+            spaced
+          />
+        </View>
+      ) : null}
+    </View>
   );
 }
 
@@ -462,13 +530,12 @@ export default function GroupsScreen() {
     ({ item: g, index }) => (
       <DowngradeGroupRow
         index={index}
-        total={myGroups.length}
         group={g}
         {...rowProps}
         onMove={() => moveOwnedGroup(g.id, index >= FREE_OWNED_GROUP_LIMIT)}
       />
     ),
-    [moveOwnedGroup, myGroups.length, rowProps]
+    [moveOwnedGroup, rowProps]
   );
   const renderOtherGroupRow = useCallback<ReorderableListRenderItem<GroupScoped>>(
     ({ item: g }) => <ActiveGroupRow group={g} {...rowProps} warningNote={deletionWarning(g)} />,
@@ -504,8 +571,14 @@ export default function GroupsScreen() {
             <GroupSectionList
               title="Kept"
               count={String(keptGroups.length)}
+              tone="keep"
               empty="The top two groups you own stay here."
-              hideHeader
+              pinnedSplit={{
+                at: FREE_OWNED_GROUP_LIMIT,
+                title: 'Will be deleted',
+                count: String(removedGroups.length),
+                tone: 'delete',
+              }}
               data={myGroups}
               panGesture={myPanGesture}
               renderItem={renderDowngradeRow}
@@ -612,6 +685,15 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
   },
   adminBadgeText: { fontSize: 11, fontFamily: Fonts.semiBold, color: Colors.textSub },
+  splitWrap: { position: 'relative' },
+  splitMeasure: { position: 'absolute', opacity: 0, zIndex: -1, left: 0, right: 0 },
+  splitHeader: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    zIndex: 5,
+    backgroundColor: Colors.bg,
+  },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
