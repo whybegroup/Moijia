@@ -175,14 +175,44 @@ function DowngradeListNotice({
     : 'On this date, groups you keep are trimmed to 1 GB, oldest files first.';
   return (
     <View style={styles.notice} accessibilityRole="alert">
-      <Text style={styles.noticeTitle}>{date ? `On ${date}` : 'After Pro ends'}</Text>
+      <Text style={styles.noticeTitle}>{date ? `On ${date}` : 'After this plan ends'}</Text>
       <Text style={styles.noticeBody}>
         {choosing
-          ? `Only the two groups under Kept stay. Everything under Will be deleted is permanently removed, including its files. Tap Keep or Remove to choose. ${keptLimit} You can still download, delete files, or transfer a group.`
+          ? `Only the two groups under Kept stay. Everything under Will be deleted is permanently removed, including its files. Drag a group across the split, or tap Keep or Remove. ${keptLimit} You can still download, delete files, or transfer a group.`
           : graceStarted
             ? 'Groups you own are limited to 1 GB now. New uploads stop once a group is over 1 GB. Older files over that limit are removed on this date. You can still download, delete files, or transfer a group.'
             : 'Groups you own become Small (1 GB). Files over that limit are removed, oldest first.'}
       </Text>
+    </View>
+  );
+}
+
+function DowngradeGroupRow({
+  index,
+  total,
+  ...props
+}: ActiveGroupRowProps & { index: number; total: number }) {
+  const drag = useReorderableDrag();
+  const isActive = useIsActive();
+  const keptCount = Math.min(FREE_OWNED_GROUP_LIMIT, total);
+  return (
+    <View>
+      {index === 0 ? <SectionHeader title="Kept" count={String(keptCount)} tone="keep" /> : null}
+      {index === FREE_OWNED_GROUP_LIMIT ? (
+        <SectionHeader
+          title="Will be deleted"
+          count={String(total - FREE_OWNED_GROUP_LIMIT)}
+          tone="delete"
+          spaced
+        />
+      ) : null}
+      <GroupCard
+        {...props}
+        onLongPress={drag}
+        isActive={isActive}
+        showHandle
+        moveLabel={index < FREE_OWNED_GROUP_LIMIT ? 'Remove' : 'Keep'}
+      />
     </View>
   );
 }
@@ -229,6 +259,7 @@ function GroupSectionList({
   empty,
   spaced,
   tone,
+  hideHeader,
   data,
   panGesture,
   renderItem,
@@ -242,6 +273,7 @@ function GroupSectionList({
   empty: string;
   spaced?: boolean;
   tone?: 'keep' | 'delete';
+  hideHeader?: boolean;
   data: GroupScoped[];
   panGesture: PanGesture;
   renderItem: ReorderableListRenderItem<GroupScoped>;
@@ -252,8 +284,8 @@ function GroupSectionList({
 }) {
   const [contentHeight, setContentHeight] = useState<number | null>(null);
   const header = useMemo(
-    () => <SectionHeader title={title} count={count} spaced={spaced} tone={tone} />,
-    [title, count, spaced, tone]
+    () => (hideHeader ? null : <SectionHeader title={title} count={count} spaced={spaced} tone={tone} />),
+    [hideHeader, title, count, spaced, tone]
   );
   const emptyNode = useMemo(() => <Text style={styles.sectionEmpty}>{empty}</Text>, [empty]);
 
@@ -269,7 +301,7 @@ function GroupSectionList({
       panGesture={panGesture}
       cellAnimations={{ opacity: 1, transform: [] }}
       scrollEnabled={false}
-      ListHeaderComponent={header}
+      ListHeaderComponent={hideHeader ? undefined : header}
       ListEmptyComponent={data.length === 0 ? emptyNode : null}
       ItemSeparatorComponent={GroupItemGap}
       initialNumToRender={Math.max(data.length, 1)}
@@ -291,7 +323,6 @@ export default function GroupsScreen() {
   const { data: quota, refetch: refetchQuota } = useOwnedGroupQuota(currentUserId ?? '');
   const updateGroupOrder = useUpdateGroupOrder(currentUserId ?? '');
   const myPanGesture = useMemo(() => Gesture.Pan().activateAfterLongPress(520), []);
-  const removedPanGesture = useMemo(() => Gesture.Pan().activateAfterLongPress(520), []);
   const otherPanGesture = useMemo(() => Gesture.Pan().activateAfterLongPress(520), []);
   const { data: events = [], refetch: refetchEvents } = useEvents({
     userId: currentUserId ?? '',
@@ -347,7 +378,7 @@ export default function GroupsScreen() {
   );
 
   const handleReorder = useCallback(
-    (section: 'mine' | 'kept' | 'removed' | 'other', from: number, to: number) => {
+    (section: 'mine' | 'other', from: number, to: number) => {
       if (from === to) return;
       setOrderedActiveGroups((prev) => {
         const isOwned = (g: GroupScoped) => g.ownerId === currentUserId;
@@ -358,13 +389,6 @@ export default function GroupsScreen() {
         if (section === 'other') {
           if (others.length < 2) return prev;
           nextOthers = reorderItems(others, from, to);
-        } else if (section === 'kept' || section === 'removed') {
-          const kept = mine.slice(0, FREE_OWNED_GROUP_LIMIT);
-          const removed = mine.slice(FREE_OWNED_GROUP_LIMIT);
-          const target = section === 'kept' ? kept : removed;
-          if (target.length < 2) return prev;
-          const nextTarget = reorderItems(target, from, to);
-          nextMine = section === 'kept' ? [...nextTarget, ...removed] : [...kept, ...nextTarget];
         } else {
           if (mine.length < 2) return prev;
           nextMine = reorderItems(mine, from, to);
@@ -391,14 +415,6 @@ export default function GroupsScreen() {
 
   const handleReorderMine = useCallback(
     ({ from, to }: ReorderableListReorderEvent) => handleReorder('mine', from, to),
-    [handleReorder]
-  );
-  const handleReorderKept = useCallback(
-    ({ from, to }: ReorderableListReorderEvent) => handleReorder('kept', from, to),
-    [handleReorder]
-  );
-  const handleReorderRemoved = useCallback(
-    ({ from, to }: ReorderableListReorderEvent) => handleReorder('removed', from, to),
     [handleReorder]
   );
   const handleReorderOther = useCallback(
@@ -442,17 +458,17 @@ export default function GroupsScreen() {
     ({ item: g }) => <ActiveGroupRow group={g} {...rowProps} />,
     [rowProps]
   );
-  const renderKeptRow = useCallback<ReorderableListRenderItem<GroupScoped>>(
-    ({ item: g }) => (
-      <ActiveGroupRow group={g} {...rowProps} moveLabel="Remove" onMove={() => moveOwnedGroup(g.id, false)} />
+  const renderDowngradeRow = useCallback<ReorderableListRenderItem<GroupScoped>>(
+    ({ item: g, index }) => (
+      <DowngradeGroupRow
+        index={index}
+        total={myGroups.length}
+        group={g}
+        {...rowProps}
+        onMove={() => moveOwnedGroup(g.id, index >= FREE_OWNED_GROUP_LIMIT)}
+      />
     ),
-    [moveOwnedGroup, rowProps]
-  );
-  const renderRemovedRow = useCallback<ReorderableListRenderItem<GroupScoped>>(
-    ({ item: g }) => (
-      <ActiveGroupRow group={g} {...rowProps} moveLabel="Keep" onMove={() => moveOwnedGroup(g.id, true)} />
-    ),
-    [moveOwnedGroup, rowProps]
+    [moveOwnedGroup, myGroups.length, rowProps]
   );
   const renderOtherGroupRow = useCallback<ReorderableListRenderItem<GroupScoped>>(
     ({ item: g }) => <ActiveGroupRow group={g} {...rowProps} warningNote={deletionWarning(g)} />,
@@ -485,35 +501,19 @@ export default function GroupsScreen() {
             />
           ) : null}
           {choosingKeepers ? (
-            <>
-              <GroupSectionList
-                title="Kept"
-                count={String(keptGroups.length)}
-                empty="The top two groups you own stay here."
-                tone="keep"
-                data={keptGroups}
-                panGesture={myPanGesture}
-                renderItem={renderKeptRow}
-                onReorder={handleReorderKept}
-                onDragStart={handleDragStart}
-                onDragEnd={handleDragEnd}
-                dragLocked={isDragging}
-              />
-              <GroupSectionList
-                title="Will be deleted"
-                count={String(removedGroups.length)}
-                empty="Groups below the top two are deleted."
-                tone="delete"
-                spaced
-                data={removedGroups}
-                panGesture={removedPanGesture}
-                renderItem={renderRemovedRow}
-                onReorder={handleReorderRemoved}
-                onDragStart={handleDragStart}
-                onDragEnd={handleDragEnd}
-                dragLocked={isDragging}
-              />
-            </>
+            <GroupSectionList
+              title="Kept"
+              count={String(keptGroups.length)}
+              empty="The top two groups you own stay here."
+              hideHeader
+              data={myGroups}
+              panGesture={myPanGesture}
+              renderItem={renderDowngradeRow}
+              onReorder={handleReorderMine}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+              dragLocked={isDragging}
+            />
           ) : (
             <GroupSectionList
               title="My Groups"

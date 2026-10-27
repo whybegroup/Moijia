@@ -34,6 +34,7 @@ import {
   useEvents,
   useGroupStorageBreakdown,
   useFriendGroups,
+  useOwnedGroupQuota,
 } from '../hooks/api';
 import { useCurrentUserContext } from '../contexts/CurrentUserContext';
 import { usePullToRefresh } from '../hooks/usePullToRefresh';
@@ -210,6 +211,7 @@ export function GroupDetailView({ groupId }: GroupDetailViewProps) {
 
   const { data: group, isError, error: groupError, refetch: refetchGroup } = useGroup(groupId, currentUserId ?? '');
   const deletionScheduledAt = useGroupDeletionAt(currentUserId, groupId, group?.deletionScheduledAt);
+  const { data: quota } = useOwnedGroupQuota(currentUserId ?? '');
   const { data: memberColorData, refetch: refetchMemberColor } = useGroupMemberColor(
     groupId,
     currentUserId ?? ''
@@ -966,6 +968,7 @@ export function GroupDetailView({ groupId }: GroupDetailViewProps) {
             pendingSizeTier={group.pendingSizeTier}
             graceEndsAt={group.graceEndsAt}
             deletionScheduledAt={deletionScheduledAt}
+            uploadsClosed={Boolean(quota?.downgradeAt)}
           />
         ) : null}
 

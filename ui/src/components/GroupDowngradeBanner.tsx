@@ -13,24 +13,28 @@ export function GroupDowngradeBanner({
   pendingSizeTier,
   graceEndsAt,
   deletionScheduledAt,
+  uploadsClosed = true,
   compact = false,
 }: {
   pendingSizeTier?: string | null;
   graceEndsAt?: Date | string | null;
   deletionScheduledAt?: Date | string | null;
+  /** False while the plan is still active and the deletion date is only planned. */
+  uploadsClosed?: boolean;
   compact?: boolean;
 }) {
   const deletionWhen = formatWhen(deletionScheduledAt);
   if (deletionScheduledAt) {
+    const when = deletionWhen ? `on ${deletionWhen}` : 'soon';
     return (
       <View style={[styles.banner, styles.bannerDanger, compact && styles.bannerCompact]} accessibilityRole="alert">
         <Text style={styles.title}>
           {deletionWhen ? `This group will be deleted on ${deletionWhen}` : 'This group will be deleted'}
         </Text>
         <Text style={styles.body}>
-          {`The owner's plan ended. Unless they move this group into Kept, it is permanently deleted ${
-            deletionWhen ? `on ${deletionWhen}` : '15 days after Pro ends'
-          }, including its files. New uploads are closed. You can still download or delete files until then.`}
+          {uploadsClosed
+            ? `Unless this group is moved into Kept, it is permanently deleted ${when}, including its files. New uploads are closed. You can still download or delete files until then.`
+            : `Unless this group is moved into Kept, it is permanently deleted ${when}, including its files. The plan keeps working until it ends. You can still download, delete files, or transfer the group.`}
         </Text>
       </View>
     );

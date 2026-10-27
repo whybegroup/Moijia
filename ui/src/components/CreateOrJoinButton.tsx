@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import {
+  Alert,
   View,
   Text,
   TouchableOpacity,
@@ -19,7 +20,8 @@ import { usePathname } from 'expo-router';
 import { useAppRouter as useRouter } from '../hooks/useAppRouter';
 import { useGuardedPress } from '../hooks/useGuardedPress';
 import { Colors, Fonts, Radius } from '../constants/theme';
-import { useJoinByInviteCode } from '../hooks/api';
+import { useJoinByInviteCode, useOwnedGroupQuota } from '../hooks/api';
+import { parseSubscriptionTier } from '../utils/subscriptionTiers';
 import { showJoinGroupToast } from '../utils/joinGroupToast';
 import { withReturnTo } from '../utils/navigationReturn';
 import { NoGroupForActionModal } from './NoGroupForActionModal';
@@ -53,6 +55,7 @@ export function CreateOrJoinButton({
   const router = useRouter();
   const pathname = usePathname();
   const joinByCode = useJoinByInviteCode();
+  const { data: groupQuota, refetch: refetchQuota } = useOwnedGroupQuota(userId ?? '');
   const [menuOpen, setMenuOpen] = useState(false);
   const [noGroupFor, setNoGroupFor] = useState<'event' | 'poll' | null>(null);
   const [inviteCode, setInviteCode] = useState('');
@@ -79,7 +82,21 @@ export function CreateOrJoinButton({
     router.push(withReturnTo(path, pathname));
   };
 
-  const goNewGroup = () => {
+  const goNewGroup = async () => {
+    let quota = groupQuota;
+    if (!quota && userId) {
+      quota = (await refetchQuota()).data;
+    }
+    if (quota && !quota.canCreateGroup) {
+      closeMenu();
+      const cap = quota.groupCapacity ?? 2;
+      const message =
+        parseSubscriptionTier(quota.subscriptionTier) === 'pro'
+          ? `Pro includes up to ${cap} groups. Contact us about Enterprise for more.`
+          : `Free includes up to ${cap} groups. Upgrade to Pro for up to 10.`;
+      setTimeout(() => Alert.alert('Group limit reached', message), 50);
+      return;
+    }
     closeMenu();
     router.push(withReturnTo('/create-group', pathname));
   };

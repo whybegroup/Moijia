@@ -12,6 +12,7 @@ CREATE TABLE "users" (
     "subscriptionTier" TEXT NOT NULL DEFAULT 'free',
     "subscriptionStartedAt" DATETIME,
     "subscriptionExpiresAt" DATETIME,
+    "subscriptionWarning" TEXT,
     "subscriptionProductId" TEXT,
     "subscriptionWillRenew" BOOLEAN NOT NULL DEFAULT false,
     "downgradeAt" DATETIME,

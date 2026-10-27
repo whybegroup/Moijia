@@ -32,13 +32,15 @@ model User {
   subscriptionTier String @default("free")
   /// When the current Pro period started. Expiration is 30 days after this.
   subscriptionStartedAt DateTime?
-  /// When the current Pro period ends. Null for free and for Enterprise.
+  /// When the current Pro period ends, or when an Enterprise plan is set to end.
   subscriptionExpiresAt DateTime?
+  /// Shown under Subscription when a plan is at risk, such as a stopped payment.
+  subscriptionWarning String?
   /// Store product bound to this user. Pro is pro_subscription.
   subscriptionProductId String?
   /// False after the store subscription is cancelled but may still be in its paid period.
   subscriptionWillRenew Boolean @default(false)
-  /// Non-small groups this user owns shrink to small at this time (15 days after Pro expires).
+  /// Extra owned groups are deleted and the groups that stay become Small at this time.
   downgradeAt DateTime?
   /// Email from the auth provider, used for billing notices.
   email      String?

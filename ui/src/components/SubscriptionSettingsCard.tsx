@@ -16,13 +16,13 @@ export function SubscriptionSettingsCard() {
   const { presentCustomerCenter } = usePurchases();
   const [paywallOpen, setPaywallOpen] = useState(false);
   const tier = parseSubscriptionTier(quota?.subscriptionTier);
-  const price = tier === 'pro' ? PRO_PRICE_LABEL : tier === 'enterprise' ? 'Custom' : '$0';
   const periodDate = quota?.subscriptionExpiresAt ? formatPlanDate(quota.subscriptionExpiresAt) : '';
   const periodLabel = quota?.subscriptionWillRenew ? 'Renews' : 'Expires';
   const downgradePending = downgradeIsPending(quota);
   const downgradeDate = pendingDowngradeAt(quota);
   const downgradeWhen = downgradeDate ? formatPlanDate(downgradeDate) : '';
   const choosingKeepers = downgradePending && (quota?.ownedGroupCount ?? 0) > FREE_OWNED_GROUP_LIMIT;
+  const subscriptionWarning = quota?.subscriptionWarning?.trim() ?? '';
 
   return (
     <>
@@ -32,14 +32,21 @@ export function SubscriptionSettingsCard() {
           <Text style={styles.infoLabel}>Current plan</Text>
           <Text style={styles.infoValue}>{subscriptionPlanLabel(tier)}</Text>
         </View>
-        <View style={[styles.infoRow, styles.actionRow]}>
-          <Text style={styles.infoLabel}>Price</Text>
-          <Text style={styles.infoValue}>{price}</Text>
-        </View>
+        {tier === 'pro' ? (
+          <View style={[styles.infoRow, styles.actionRow]}>
+            <Text style={styles.infoLabel}>Price</Text>
+            <Text style={styles.infoValue}>{PRO_PRICE_LABEL}</Text>
+          </View>
+        ) : null}
         {tier === 'pro' && periodDate ? (
           <View style={[styles.infoRow, styles.actionRow]}>
             <Text style={styles.infoLabel}>{periodLabel}</Text>
             <Text style={styles.infoValue}>{periodDate}</Text>
+          </View>
+        ) : null}
+        {subscriptionWarning ? (
+          <View style={[styles.infoRow, styles.actionRow]}>
+            <Text style={styles.warning}>{subscriptionWarning}</Text>
           </View>
         ) : null}
         {downgradePending ? (
@@ -106,4 +113,5 @@ const styles = StyleSheet.create({
   infoValue: { fontSize: 14, fontFamily: Fonts.medium, color: Colors.text, flexShrink: 1, textAlign: 'right' },
   actionText: { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.accent },
   notice: { fontSize: 14, lineHeight: 20, fontFamily: Fonts.regular, color: Colors.textSub },
+  warning: { flex: 1, fontSize: 14, lineHeight: 20, fontFamily: Fonts.regular, color: Colors.maybe },
 });

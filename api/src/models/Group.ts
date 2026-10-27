@@ -266,6 +266,8 @@ export interface OwnedGroupQuota {
   subscriptionWillRenew?: boolean;
   /** When extra owned groups are deleted and the groups that stay become Small. */
   downgradeAt?: Date | null;
+  /** Developer notice when a subscription is at risk, such as a failed payment. */
+  subscriptionWarning?: string | null;
 }
 
 export type GroupStorageCategoryId = 'group' | 'events' | 'polls' | 'posts';

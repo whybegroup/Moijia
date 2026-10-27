@@ -15,10 +15,11 @@ function parseDate(raw: string | null | undefined): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-/** True once Pro is cancelled or the grace period before deletion has started. */
+/** True once a plan is ending, or the grace period before deletion has started. */
 export function downgradeIsPending(quota: DowngradeQuota | null | undefined): boolean {
   if (!quota) return false;
   if (quota.downgradeAt) return true;
+  if (quota.subscriptionTier === 'enterprise' && quota.subscriptionExpiresAt) return true;
   return quota.subscriptionTier === 'pro' && quota.subscriptionWillRenew === false;
 }
 

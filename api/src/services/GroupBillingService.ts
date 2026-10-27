@@ -63,22 +63,24 @@ function downgradeNotice(
   when: string,
   keep: OwnedGroupRow[],
   deleting: OwnedGroupRow[],
-  hasAlreadyDeleted: boolean
+  hasAlreadyDeleted: boolean,
+  planName = 'Pro'
 ): string {
+  const ended = `${planName} has ended.`;
   if (deleting.length === 0 && !hasAlreadyDeleted) {
-    return `Pro has ended. Until ${when} you can download, delete files, or transfer a group. New uploads stop once a group is over 1 GB. On ${when} the groups you keep become Small (1 GB), and older files over that limit are removed.`;
+    return `${ended} Until ${when} you can download, delete files, or transfer a group. New uploads stop once a group is over 1 GB. On ${when} the groups you keep become Small (1 GB), and older files over that limit are removed.`;
   }
   if (deleting.length === 0) {
     const kept = keep.map((group) => group.name).join(', ');
     const size = kept
       ? `The groups you keep (${kept}) become Small (1 GB), and older files over that limit are removed. `
       : '';
-    return `Pro has ended. On ${when}, groups you already deleted are permanently removed and cannot be restored. ${size}`.trim();
+    return `${ended} On ${when}, groups you already deleted are permanently removed and cannot be restored. ${size}`.trim();
   }
   const kept = keep.map((group) => group.name).join(', ') || 'none';
   const removed = deleting.map((group) => group.name).join(', ');
   const lines = [
-    `Pro has ended. On ${when}, only the top two groups in My Groups are kept (${kept}).`,
+    `${ended} On ${when}, only the top two groups in My Groups are kept (${kept}).`,
   ];
   if (removed) {
     lines.push(`These groups will be permanently deleted: ${removed}.`);
@@ -137,6 +139,7 @@ export class GroupBillingService {
           subscriptionExpiresAt: true,
           subscriptionWillRenew: true,
           downgradeAt: true,
+          subscriptionWarning: true,
         },
       }),
     ]);
@@ -150,6 +153,7 @@ export class GroupBillingService {
       subscriptionExpiresAt: user?.subscriptionExpiresAt ?? null,
       subscriptionWillRenew: user?.subscriptionWillRenew ?? false,
       downgradeAt: user?.downgradeAt ?? null,
+      subscriptionWarning: user?.subscriptionWarning?.trim() || null,
     };
   }
 
@@ -380,6 +384,40 @@ export class GroupBillingService {
     });
   }
 
+  /** Enterprise plans with a developer-set end date become Free, then use the same 15-day group window. */
+  public async expireEnterprisePlans(): Promise<void> {
+    const due = await prisma.user.findMany({
+      where: {
+        subscriptionTier: 'enterprise',
+        subscriptionExpiresAt: { lte: new Date() },
+      },
+      select: { id: true, subscriptionExpiresAt: true },
+    });
+    for (const user of due) {
+      const periodEnd = user.subscriptionExpiresAt ?? new Date();
+      const downgradeAt = new Date(periodEnd.getTime() + GROUP_DOWNGRADE_GRACE_MS);
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          subscriptionTier: 'free',
+          subscriptionWillRenew: false,
+          subscriptionProductId: null,
+          subscriptionStartedAt: null,
+        },
+      });
+      const scheduled = await this.scheduleDowngrade(user.id, downgradeAt, 'Enterprise');
+      await recordPurchase({
+        userId: user.id,
+        kind: 'cancel',
+        title: 'Enterprise ended',
+        detail: scheduled
+          ? `Free plan limits apply on ${formatMailDate(downgradeAt)}`
+          : 'Switched to Free',
+        productId: null,
+      });
+    }
+  }
+
   /** Free accounts over the free limits get the 15-day window before groups are trimmed or deleted. */
   public async scheduleOutstandingFreeDowngrades(): Promise<void> {
     const groups = await prisma.group.findMany({
@@ -425,7 +463,7 @@ export class GroupBillingService {
     }
   }
 
-  public async scheduleDowngrade(userId: string, downgradeAt: Date): Promise<boolean> {
+  public async scheduleDowngrade(userId: string, downgradeAt: Date, planName = 'Pro'): Promise<boolean> {
     const { keep, remove, active } = await this.classifyOwnedGroups(userId);
     const shrinking = active.filter((group) => parseSizeTier(group.sizeTier) !== 'small');
     const deleting = remove.filter((group) => !group.deletedAt);
@@ -444,7 +482,7 @@ export class GroupBillingService {
       await this.startGrace(group.id, 'small', downgradeAt);
     }
     const when = formatMailDate(downgradeAt);
-    const body = downgradeNotice(when, keep, deleting, remove.some((group) => group.deletedAt));
+    const body = downgradeNotice(when, keep, deleting, remove.some((group) => group.deletedAt), planName);
     await notificationService
       .createForUsers([userId], 'Plan grace period', body, {
         type: 'group_storage',
@@ -491,7 +529,7 @@ export class GroupBillingService {
       price: '$0.00/mo',
       expiresAt: downgradeAt,
       renewing: false,
-      subject: 'Your moijia Pro plan has ended',
+      subject: `Your moijia ${planName} plan has ended`,
     });
     return true;
   }

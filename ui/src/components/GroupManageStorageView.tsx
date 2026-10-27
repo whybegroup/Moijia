@@ -11,7 +11,7 @@ import { useAppRouter as useRouter } from '../hooks/useAppRouter';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Fonts, Radius } from '../constants/theme';
 import { KeyboardSafeScrollView } from './KeyboardSafeScrollView';
-import { useGroup, useGroupStorageBreakdown } from '../hooks/api';
+import { useGroup, useGroupStorageBreakdown, useOwnedGroupQuota } from '../hooks/api';
 import { useCurrentUserContext } from '../contexts/CurrentUserContext';
 import { usePullToRefresh } from '../hooks/usePullToRefresh';
 import { useMissingGroupRedirect } from '../hooks/useMissingResourceAlert';
@@ -42,6 +42,7 @@ export function GroupManageStorageView({ groupId }: { groupId: string }) {
     currentUserId ?? ''
   );
   const deletionScheduledAt = useGroupDeletionAt(currentUserId, groupId, group?.deletionScheduledAt);
+  const { data: quota } = useOwnedGroupQuota(currentUserId ?? '');
   const isMember =
     group?.membershipStatus === 'member' || group?.membershipStatus === 'admin';
   const canView = !!currentUserId && isMember;
@@ -90,6 +91,7 @@ export function GroupManageStorageView({ groupId }: { groupId: string }) {
             pendingSizeTier={group.pendingSizeTier}
             graceEndsAt={group.graceEndsAt}
             deletionScheduledAt={deletionScheduledAt}
+            uploadsClosed={Boolean(quota?.downgradeAt)}
           />
           <GroupStorageUsageBar
             usedBytes={usedBytes}

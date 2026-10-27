@@ -7,7 +7,8 @@ export function startGroupBillingJobs(): void {
   if (timer) return;
   const run = () => {
     void groupBilling
-      .scheduleOutstandingFreeDowngrades()
+      .expireEnterprisePlans()
+      .then(() => groupBilling.scheduleOutstandingFreeDowngrades())
       .then(() => groupBilling.applyDueGracePeriods())
       .catch((err) => {
         console.error('[group-billing]', err);
