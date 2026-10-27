@@ -82,7 +82,8 @@ async function cacheOne(emoji: string): Promise<string | null> {
           return peek;
         }
         try {
-          void Image.prefetch(url);
+          const prefetched = await Image.prefetch(url).catch(() => false);
+          if (!prefetched) continue;
           const local = await ensureCachedImageFileUri(url, url);
           if (local) {
             workingUrlByEmoji.set(emoji, url);

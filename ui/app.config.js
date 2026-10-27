@@ -19,7 +19,7 @@ const plugins = [
       imageWidth: 200,
       resizeMode: 'contain',
       ios: {
-        image: './assets/splash.png',
+        image: './assets/splash.jpg',
         enableFullScreenImage_legacy: true,
       },
       android: {
