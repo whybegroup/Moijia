@@ -44,7 +44,7 @@ type ActiveGroupRowProps = {
   onOpenGroup: (groupId: string) => void;
 };
 
-function ActiveGroupRow({
+function GroupCard({
   group: g,
   groupColors,
   events,
@@ -52,9 +52,14 @@ function ActiveGroupRow({
   upcomingWeekEnd,
   currentUserId,
   onOpenGroup,
-}: ActiveGroupRowProps) {
-  const drag = useReorderableDrag();
-  const isActive = useIsActive();
+  onLongPress,
+  isActive = false,
+  showHandle,
+}: ActiveGroupRowProps & {
+  onLongPress?: () => void;
+  isActive?: boolean;
+  showHandle: boolean;
+}) {
   const userColorHex = groupColors[g.id] || getDefaultGroupThemeFromName(g.name);
   const p = getGroupColor(userColorHex);
   const announcementTrim = (g.announcement ?? '').trim();
@@ -66,17 +71,21 @@ function ActiveGroupRow({
   return (
     <Pressable
       onPress={isActive ? undefined : () => onOpenGroup(g.id)}
-      onLongPress={isActive ? undefined : drag}
+      onLongPress={isActive ? undefined : onLongPress}
       delayLongPress={120}
       style={[styles.groupItemCard, isActive && styles.groupItemCardDragging, isActive && Shadows.sm]}
       accessibilityRole="button"
       accessibilityLabel={g.name}
-      accessibilityHint="Hold and drag to reorder"
+      accessibilityHint={showHandle ? 'Hold and drag to reorder' : undefined}
     >
       <View style={styles.row}>
-        <View style={styles.dragHandle} pointerEvents="none">
-          <Ionicons name="reorder-three" size={22} color={Colors.textMuted} />
-        </View>
+        {showHandle ? (
+          <View style={styles.dragHandle} pointerEvents="none">
+            <Ionicons name="reorder-three" size={22} color={Colors.textMuted} />
+          </View>
+        ) : (
+          <View style={styles.dragHandleSpacer} />
+        )}
         <View style={styles.rowBody}>
           <View style={[styles.groupIconOuter, { backgroundColor: p.cal }]}>
             <View style={styles.groupIconInner}>
@@ -122,6 +131,16 @@ function ActiveGroupRow({
   );
 }
 
+function ActiveGroupRow(props: ActiveGroupRowProps) {
+  const drag = useReorderableDrag();
+  const isActive = useIsActive();
+  return <GroupCard {...props} onLongPress={drag} isActive={isActive} showHandle />;
+}
+
+function OwnedGroupRow(props: ActiveGroupRowProps) {
+  return <GroupCard {...props} showHandle={false} />;
+}
+
 export default function GroupsScreen() {
   const router = useRouter();
   const { userId: currentUserId } = useCurrentUserContext();
@@ -159,10 +178,22 @@ export default function GroupsScreen() {
     runOnJS(setIsDragging)(false);
   }, []);
 
+  const myGroups = useMemo(
+    () => orderedActiveGroups.filter((g) => g.ownerId === currentUserId),
+    [orderedActiveGroups, currentUserId]
+  );
+  const otherGroups = useMemo(
+    () => orderedActiveGroups.filter((g) => g.ownerId !== currentUserId),
+    [orderedActiveGroups, currentUserId]
+  );
+
   const handleReorder = useCallback(
     ({ from, to }: { from: number; to: number }) => {
       setOrderedActiveGroups((prev) => {
-        const data = reorderItems(prev, from, to);
+        const others = prev.filter((g) => g.ownerId !== currentUserId);
+        const nextOthers = reorderItems(others, from, to);
+        let index = 0;
+        const data = prev.map((g) => (g.ownerId === currentUserId ? g : nextOthers[index++]));
         if (currentUserId && data.length >= 2) {
           updateGroupOrder.mutate(data.map((g) => g.id));
         }
@@ -182,19 +213,39 @@ export default function GroupsScreen() {
     [router]
   );
 
+  const rowProps = {
+    groupColors,
+    events,
+    now,
+    upcomingWeekEnd,
+    currentUserId,
+    onOpenGroup: openGroup,
+  };
+
   const renderActiveGroupRow = useCallback(
     ({ item: g }: ReorderableListRenderItemInfo<GroupScoped>) => (
-      <ActiveGroupRow
-        group={g}
-        groupColors={groupColors}
-        events={events}
-        now={now}
-        upcomingWeekEnd={upcomingWeekEnd}
-        currentUserId={currentUserId}
-        onOpenGroup={openGroup}
-      />
+      <ActiveGroupRow group={g} {...rowProps} />
     ),
-    [groupColors, events, now, upcomingWeekEnd, currentUserId, openGroup]
+    [rowProps]
+  );
+
+  const listHeader = (
+    <View>
+      <Text style={styles.sectionLabel}>My Groups</Text>
+      {myGroups.length === 0 ? (
+        <Text style={styles.sectionEmpty}>Groups you create show up here.</Text>
+      ) : (
+        myGroups.map((g) => (
+          <View key={g.id} style={styles.ownedGap}>
+            <OwnedGroupRow group={g} {...rowProps} />
+          </View>
+        ))
+      )}
+      <Text style={[styles.sectionLabel, styles.allGroupsLabel]}>All Groups</Text>
+      {otherGroups.length === 0 ? (
+        <Text style={styles.sectionEmpty}>You are not in any other groups.</Text>
+      ) : null}
+    </View>
   );
 
   const listFooter = <View style={styles.listBottomPad} />;
@@ -211,9 +262,9 @@ export default function GroupsScreen() {
           <Text style={styles.emptyTitle}>No groups yet</Text>
           <Text style={styles.emptyDesc}>Create a group or join with an invite code.</Text>
         </ScrollView>
-      ) : orderedActiveGroups.length > 0 ? (
+      ) : otherGroups.length > 0 ? (
         <ReorderableList
-          data={orderedActiveGroups}
+          data={otherGroups}
           keyExtractor={(g) => g.id}
           renderItem={renderActiveGroupRow}
           onReorder={handleReorder}
@@ -225,6 +276,7 @@ export default function GroupsScreen() {
           style={styles.listContainer}
           contentContainerStyle={styles.listContent}
           ItemSeparatorComponent={() => <View style={styles.groupItemGap} />}
+          ListHeaderComponent={listHeader}
           ListFooterComponent={listFooter}
           refreshControl={refreshControl}
         />
@@ -234,6 +286,7 @@ export default function GroupsScreen() {
           contentContainerStyle={styles.listContent}
           refreshControl={refreshControl}
         >
+          {listHeader}
           {listFooter}
         </ScrollView>
       )}
@@ -305,6 +358,23 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
   },
   adminBadgeText: { fontSize: 11, fontFamily: Fonts.semiBold, color: Colors.textSub },
+  sectionLabel: {
+    fontSize: 11,
+    fontFamily: Fonts.semiBold,
+    color: Colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  allGroupsLabel: { marginTop: 18 },
+  sectionEmpty: {
+    fontSize: 14,
+    fontFamily: Fonts.regular,
+    color: Colors.textMuted,
+    marginBottom: 8,
+  },
+  ownedGap: { marginBottom: 2 },
   myEmpty: { alignItems: 'center', paddingTop: 24, paddingHorizontal: 24, paddingBottom: 8 },
   emptyGlyph: { marginBottom: 12 },
   emptyTitle: { fontSize: 18, fontFamily: Fonts.bold, color: Colors.text, marginBottom: 6 },

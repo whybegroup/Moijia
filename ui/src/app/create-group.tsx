@@ -25,7 +25,8 @@ import { KeyboardSafeScrollView } from '../components/KeyboardSafeScrollView';
 import { useCreateGroup, useGroup, useUpdateGroup } from '../hooks/api/useGroups';
 import { useOwnedGroupQuota } from '../hooks/api/useUsers';
 import { useAuth } from '../contexts/AuthContext';
-import { FREE_OWNED_GROUP_LIMIT } from '../utils/groupTiers';
+import { GROUP_TIERS, type GroupSizeTier } from '../utils/groupTiers';
+import { parseSubscriptionTier } from '../utils/subscriptionTiers';
 import { useCurrentUserContext } from '../contexts/CurrentUserContext';
 import { GroupAvatar } from '../components/GroupAvatar';
 import { AvatarPickerModal } from '../components/AvatarPickerModal';
@@ -37,7 +38,7 @@ import { ImageLightboxModal } from '../components/ImageLightboxModal';
 import { dropLightboxItem } from '../components/ForumPostMarkdownBody';
 import { ResolvableImage } from '../components/ResolvableImage';
 import { firstSearchParam, parseReturnToParam } from '../utils/navigationReturn';
-import { ApiError } from '@moijia/client';
+import { ApiError, GroupInput, GroupUpdate } from '@moijia/client';
 import { deleteManagedUploadFireAndForget } from '../services/managedUploadDelete';
 import { confirmDestructive } from '../utils/confirmDestructive';
 
@@ -46,6 +47,14 @@ const AVATAR_SIZE = 56;
 const DEFAULT_REQUIRE_APPROVAL = true;
 const DESC_MAX_LENGTH = 500;
 
+const SIZE_OPTIONS: GroupSizeTier[] = ['small', 'medium', 'large'];
+
+function groupSizeInput(tier: GroupSizeTier): GroupInput.sizeTier {
+  if (tier === 'large') return GroupInput.sizeTier.LARGE;
+  if (tier === 'small') return GroupInput.sizeTier.SMALL;
+  return GroupInput.sizeTier.MEDIUM;
+}
+
 function serializeGroupForm(args: {
   name: string;
   desc: string;
@@ -53,6 +62,7 @@ function serializeGroupForm(args: {
   thumbnail: string | null;
   coverPhotos: string[];
   requireApprovalToJoin: boolean;
+  sizeTier: GroupSizeTier | null;
 }): string {
   return JSON.stringify({
     name: args.name,
@@ -61,6 +71,7 @@ function serializeGroupForm(args: {
     thumbnail: args.thumbnail,
     coverPhotos: args.coverPhotos,
     requireApprovalToJoin: args.requireApprovalToJoin,
+    sizeTier: args.sizeTier,
   });
 }
 
@@ -75,9 +86,9 @@ export default function CreateGroupScreen() {
   const createGroup = useCreateGroup();
   const updateGroup = useUpdateGroup(editId ?? '', currentUserId ?? '');
   const actorIdForQuota = (currentUserId ?? user?.uid ?? '').trim();
-  const { data: groupQuota, refetch: refetchQuota } = useOwnedGroupQuota(
-    isEditing ? '' : actorIdForQuota
-  );
+  const { data: groupQuota, refetch: refetchQuota } = useOwnedGroupQuota(actorIdForQuota);
+  const subscriptionTier = parseSubscriptionTier(groupQuota?.subscriptionTier);
+  const isEnterprise = subscriptionTier === 'enterprise';
   const { data: editingGroup } = useGroup(editId ?? '', currentUserId ?? '', { enabled: isEditing });
   const [newGroupId] = useState(() => Crypto.randomUUID());
   const groupId = editId ?? newGroupId;
@@ -93,6 +104,7 @@ export default function CreateGroupScreen() {
     null,
   );
   const [requireApprovalToJoin, setRequireApprovalToJoin] = useState(DEFAULT_REQUIRE_APPROVAL);
+  const [draftSize, setDraftSize] = useState<GroupSizeTier>('medium');
   const [formBaselineSerialized, setFormBaselineSerialized] = useState<string | null>(null);
   const valid = !!draftName.trim();
   const savePending = createGroup.isPending || updateGroup.isPending;
@@ -109,6 +121,9 @@ export default function CreateGroupScreen() {
         ? DEFAULT_REQUIRE_APPROVAL
         : !!editingGroup.requireApprovalToJoin
     );
+    if (editingGroup.sizeTier === 'small' || editingGroup.sizeTier === 'medium' || editingGroup.sizeTier === 'large') {
+      setDraftSize(editingGroup.sizeTier);
+    }
     hydratedEditRef.current = true;
     setFormBaselineSerialized(null);
   }, [editingGroup, isEditing]);
@@ -122,8 +137,9 @@ export default function CreateGroupScreen() {
         thumbnail: draftThumbnail,
         coverPhotos: draftCoverPhotos,
         requireApprovalToJoin,
+        sizeTier: draftSize,
       }),
-    [draftName, draftDesc, draftSeed, draftThumbnail, draftCoverPhotos, requireApprovalToJoin]
+    [draftName, draftDesc, draftSeed, draftThumbnail, draftCoverPhotos, requireApprovalToJoin, draftSize]
   );
 
   useLayoutEffect(() => {
@@ -254,6 +270,7 @@ export default function CreateGroupScreen() {
           coverPhotos: draftCoverPhotos,
           avatarSeed: draftSeed || draftName.trim() || undefined,
           requireApprovalToJoin,
+          ...(isEnterprise ? { sizeTier: groupSizeInput(draftSize) as GroupUpdate.sizeTier } : {}),
           updatedBy: actorId,
         });
         Toast.show({ type: 'success', text1: 'Group updated' });
@@ -263,15 +280,12 @@ export default function CreateGroupScreen() {
 
       const quota = groupQuota ?? (await refetchQuota()).data;
       if (quota && !quota.canCreateGroup) {
-        const cap =
-          quota.groupCapacity ??
-          quota.ownedGroupLimit ??
-          quota.freeGroupLimit ??
-          FREE_OWNED_GROUP_LIMIT;
-        Alert.alert(
-          'Group limit reached',
-          `You cannot create more than ${cap} groups. If you need more, contact an administrator.`
-        );
+        const cap = quota.groupCapacity ?? 2;
+        const message =
+          parseSubscriptionTier(quota.subscriptionTier) === 'pro'
+            ? `Pro includes up to ${cap} groups. Contact us about Enterprise for more.`
+            : `Free includes up to ${cap} groups. Upgrade to Pro for up to 10.`;
+        Alert.alert('Group limit reached', message);
         return;
       }
 
@@ -287,6 +301,7 @@ export default function CreateGroupScreen() {
         adminIds: [actorId],
         memberIds: [actorId],
         requireApprovalToJoin,
+        ...(isEnterprise ? { sizeTier: groupSizeInput(draftSize) } : {}),
       });
 
       handleBack();
@@ -470,6 +485,29 @@ export default function CreateGroupScreen() {
               </View>
             ) : null}
 
+            {isEnterprise ? (
+              <Field label="Group size">
+                <View style={styles.sizeRow}>
+                  {SIZE_OPTIONS.map((tier) => {
+                    const selected = draftSize === tier;
+                    return (
+                      <TouchableOpacity
+                        key={tier}
+                        onPress={() => setDraftSize(tier)}
+                        style={[styles.sizeChip, selected && styles.sizeChipSelected]}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected }}
+                      >
+                        <Text style={[styles.sizeChipText, selected && styles.sizeChipTextSelected]}>
+                          {GROUP_TIERS[tier].label} · {GROUP_TIERS[tier].gb} GB
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </Field>
+            ) : null}
+
             <Field label="Settings">
               <View style={styles.settingsCard}>
                 <Toggle
@@ -648,6 +686,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  sizeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  sizeChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: Radius.full,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+  },
+  sizeChipSelected: { borderColor: Colors.accent, backgroundColor: Colors.accent },
+  sizeChipText: { fontSize: 13, fontFamily: Fonts.medium, color: Colors.text },
+  sizeChipTextSelected: { color: Colors.accentFg },
   settingsCard: {
     backgroundColor: Colors.surface,
     borderRadius: Radius.xl,

@@ -35,12 +35,12 @@ export function storageBytesToDb(n: number): string {
 }
 
 export function groupMaxStorageBytes(raw: unknown, sizeTier?: unknown): number {
+  const stored = storageBytesFromDb(raw);
   if (sizeTier === 'small' || sizeTier === 'medium' || sizeTier === 'large') {
-    return storageCapForTier(sizeTier);
+    return Math.max(storageCapForTier(sizeTier), stored);
   }
-  const n = storageBytesFromDb(raw);
-  if (n <= 0) return DEFAULT_GROUP_MAX_STORAGE_BYTES;
-  return n;
+  if (stored <= 0) return DEFAULT_GROUP_MAX_STORAGE_BYTES;
+  return stored;
 }
 
 export function formatStorageBytes(bytes: number): string {

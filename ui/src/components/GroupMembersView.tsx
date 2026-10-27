@@ -31,6 +31,7 @@ import { useCurrentUserContext } from '../contexts/CurrentUserContext';
 import { usePullToRefresh } from '../hooks/usePullToRefresh';
 import { UserAvatar } from './UserAvatar';
 import { useMissingGroupRedirect } from '../hooks/useMissingResourceAlert';
+import { parseSubscriptionTier, subscriptionRank } from '../utils/subscriptionTiers';
 
 export type GroupMembersViewProps = {
   groupId: string;
@@ -190,6 +191,12 @@ export function GroupMembersView({ groupId }: GroupMembersViewProps) {
   const regularMemberIds = (group.memberIds ?? []).filter(
     (memberId) => memberId !== ownerId && !admins.includes(memberId)
   );
+  const canReceiveOwnership = (userId: string) => {
+    const plans = group.memberPlans ?? [];
+    const ownerTier = parseSubscriptionTier(plans.find((plan) => plan.userId === ownerId)?.subscriptionTier);
+    const targetTier = parseSubscriptionTier(plans.find((plan) => plan.userId === userId)?.subscriptionTier);
+    return subscriptionRank(targetTier) >= subscriptionRank(ownerTier);
+  };
 
   return (
     <View style={styles.page}>
@@ -321,7 +328,7 @@ export function GroupMembersView({ groupId }: GroupMembersViewProps) {
                   {getUser(memberMenu.userId).displayName}
                 </Text>
               </View>
-              {isOwner && (
+              {isOwner && admins.includes(memberMenu.userId) && canReceiveOwnership(memberMenu.userId) && (
                 <TouchableOpacity
                   onPress={() => transferOwner(memberMenu.userId)}
                   style={[styles.menuItem, { borderBottomWidth: 1, borderBottomColor: Colors.border }]}

@@ -24,10 +24,20 @@ model User {
   notifPrefsJson String?
   /// JSON: ordered group ids for list / switcher UI (user preference)
   groupOrderJson String?
-  /// Max groups this user may own. Default 5; raise per user to extend capacity.
+  /// Max groups this user may own. Unused: caps now come from subscriptionTier.
   ownedGroupLimit Int @default(5)
-  /// Purchased extra owned-group slots beyond ownedGroupLimit.
+  /// Purchased extra owned-group slots. Unused under per-user plans.
   extraGroupSlots Int @default(0)
+  /// free | pro | enterprise. Everyone starts on free.
+  subscriptionTier String @default("free")
+  /// When the current Pro period ends. Null for free and for Enterprise.
+  subscriptionExpiresAt DateTime?
+  /// Store product bound to this user. Pro is subscription_pro.
+  subscriptionProductId String?
+  /// False after the store subscription is cancelled but may still be in its paid period.
+  subscriptionWillRenew Boolean @default(false)
+  /// Non-small groups this user owns shrink to small at this time (15 days after Pro expires).
+  downgradeAt DateTime?
   /// Email from the auth provider, used for billing notices.
   email      String?
   createdAt  DateTime @default(now())
@@ -63,7 +73,7 @@ model User {
 model UserPurchase {
   id        String   @id @default(uuid())
   userId    String
-  /// size_addon | extra_group | cancel
+  /// subscription | cancel
   kind      String
   productId String?
   title     String

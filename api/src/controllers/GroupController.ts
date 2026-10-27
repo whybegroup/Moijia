@@ -28,7 +28,6 @@ import {
   GroupPostReactionInput,
   NotifPrefs,
   NotifPrefsPartial,
-  GroupStorageLimitInput,
   GroupStorageBreakdown,
   GroupStorageFileList,
   GroupStorageFileDeleteInput,
@@ -252,44 +251,6 @@ export class GroupController extends Controller {
       }
       throw e;
     }
-  }
-
-  /**
-   * Set this group's size add-on (Medium or Large). Owner only.
-   * Upgrades apply immediately. Downgrades keep the current size until period end.
-   */
-  @Put('{id}/max-storage')
-  public async setGroupStorageLimit(
-    @Path() id: string,
-    @Query() userId: string,
-    @Body() body: GroupStorageLimitInput
-  ): Promise<{ maxStorageBytes: number; sizeTier: string }> {
-    if (!userId) {
-      this.setStatus(400);
-      throw new Error('userId is required');
-    }
-    if (body.sizeTier !== 'medium' && body.sizeTier !== 'large') {
-      this.setStatus(400);
-      throw new Error('sizeTier must be medium or large');
-    }
-    return this.groupService.setStorageLimit(id, userId, body.sizeTier);
-  }
-
-  /**
-   * Start a 15-day grace toward Small after canceling the size add-on. Owner only.
-   * Apple/Google still bill until the paid period ends; this is the in-app downgrade clock
-   * once paid access is gone or the owner opts out.
-   */
-  @Post('{id}/cancel-storage-subscription')
-  public async cancelStorageSubscription(
-    @Path() id: string,
-    @Query() userId: string
-  ): Promise<{ maxStorageBytes: number }> {
-    if (!userId) {
-      this.setStatus(400);
-      throw new Error('userId is required');
-    }
-    return this.groupService.cancelStorageSubscription(id, userId);
   }
 
   /**
@@ -615,7 +576,7 @@ export class GroupController extends Controller {
 
   /**
    * Transfer owner role to another member
-   * @summary Owner transfers ownership to an admin or member.
+   * @summary Owner transfers ownership to an admin on an equal or higher plan.
    */
   @Put('{id}/owner')
   @SuccessResponse('200', 'OK')

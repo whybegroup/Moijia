@@ -24,7 +24,8 @@ export function resolveGroupMaxStorageBytes(
   sizeTier?: string | null
 ): number {
   if (sizeTier === 'small' || sizeTier === 'medium' || sizeTier === 'large') {
-    return storageCapForTier(sizeTier);
+    const cap = storageCapForTier(sizeTier);
+    return max && max > cap ? max : cap;
   }
   const n = max && max > 0 ? max : DEFAULT_GROUP_MAX_STORAGE_BYTES;
   return n;

@@ -4,7 +4,7 @@ import path from 'path';
 const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL?.trim() || 'support@moijia.com';
 const NOREPLY_EMAIL = process.env.NOREPLY_EMAIL?.trim() || 'noreply@moijia.com';
 export const MAIL_FOOTER = [
-  'Your right to cancel: You may cancel your subscription at any time. Cancel at least 24 hours before the end of the current billing period to avoid the next charge. Access continues through the remainder of your paid period unless otherwise noted. To cancel, open the group in the moijia app and cancel the plan, or manage the subscription in your Apple App Store or Google Play account settings. Deleting the app does not cancel a subscription. Refunds and billing disputes are handled by the store that charged you. We reserve the right to change pricing and will try to notify you in advance of a change.',
+  'Your right to cancel: You may cancel Pro at any time. Cancel at least 24 hours before the end of the current billing period to avoid the next charge. Pro stays active through the remainder of the paid period. Groups you own that are larger than Small become Small 15 days after Pro expires. Manage or cancel the subscription in your Apple App Store or Google Play account settings. Deleting the app does not cancel a subscription. Refunds and billing disputes are handled by the store that charged you. We reserve the right to change pricing and will try to notify you in advance of a change.',
   'moijia may use your data to operate and improve the Service and to send you information about your account. You can change notification preferences in the app. We use your data as described in our Privacy Policy at https://moijia.com/privacy.',
 ];
 const MAIL_ICON_CID = 'favicon';

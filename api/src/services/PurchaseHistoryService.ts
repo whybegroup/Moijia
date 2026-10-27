@@ -1,6 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import type { PurchaseHistoryEntry, PurchaseHistoryKind } from '../models/PurchaseHistory';
-import { GROUP_TIERS, parseSizeTier } from '../utils/groupStorageLimits';
+import { PRO_MONTHLY_PRICE_LABEL, PRO_PRODUCT_ID } from '../utils/subscriptionTiers';
 
 const prisma = new PrismaClient();
 
@@ -30,47 +30,20 @@ async function backfillFromCurrentState(userId: string): Promise<void> {
   const count = await prisma.userPurchase.count({ where: { userId } });
   if (count > 0) return;
 
-  const owned = await prisma.groupMember.findMany({
-    where: { userId, role: 'owner', status: 'active', group: { deletedAt: null } },
-    select: {
-      group: {
-        select: { id: true, name: true, sizeTier: true, sizeStartedAt: true, sizeProductId: true },
-      },
-    },
-  });
-  for (const row of owned) {
-    const tier = parseSizeTier(row.group.sizeTier);
-    if (tier === 'small') continue;
-    await prisma.userPurchase.create({
-      data: {
-        userId,
-        kind: 'size_addon',
-        title: `${GROUP_TIERS[tier].label} group`,
-        detail: row.group.name,
-        productId: row.group.sizeProductId,
-        groupId: row.group.id,
-        groupName: row.group.name,
-        createdAt: row.group.sizeStartedAt ?? new Date(),
-      },
-    });
-  }
-
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { extraGroupSlots: true },
+    select: { subscriptionTier: true, subscriptionProductId: true },
   });
-  const extras = Math.max(0, user?.extraGroupSlots ?? 0);
-  for (let i = 0; i < extras; i += 1) {
-    await prisma.userPurchase.create({
-      data: {
-        userId,
-        kind: 'extra_group',
-        title: 'Extra group slot',
-        detail: '$0.99',
-        productId: 'product_extra_group',
-      },
-    });
-  }
+  if (user?.subscriptionTier !== 'pro' && user?.subscriptionProductId !== PRO_PRODUCT_ID) return;
+  await prisma.userPurchase.create({
+    data: {
+      userId,
+      kind: 'subscription',
+      title: 'Pro',
+      detail: PRO_MONTHLY_PRICE_LABEL,
+      productId: PRO_PRODUCT_ID,
+    },
+  });
 }
 
 export async function listPurchases(userId: string): Promise<PurchaseHistoryEntry[]> {

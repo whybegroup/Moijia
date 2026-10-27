@@ -1,43 +1,31 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { AppState } from 'react-native';
-import type { CustomerInfo, PurchasesPackage } from 'react-native-purchases';
-import type { SizeAddon } from '../config/revenueCat';
-import type { GroupSizeTier } from '../utils/groupTiers';
+import type { CustomerInfo } from 'react-native-purchases';
 import { useAuth } from './AuthContext';
 import {
   addCustomerInfoListener,
   billingSnapshot,
-  getActiveSizeAddon,
   getCustomerInfo,
   identifyRevenueCatUser,
   isAlreadyPurchased,
   isPurchaseCancelled,
   logOutRevenueCat,
-  purchaseExtraGroupSlot as purchaseExtraGroupSlotRc,
-  purchaseProPackage,
-  purchaseStorageTier as purchaseStorageTierRc,
+  proEntitlementActive,
+  purchasePro as purchaseProRc,
   purchasesErrorMessage,
   restorePurchases as restoreRevenueCatPurchases,
 } from '../services/revenueCat';
-import {
-  presentCurrentPaywall,
-  presentMoijiaCustomerCenter,
-  presentStoragePaywall,
-  type ProPaywallOutcome,
-} from '../services/revenueCatUi';
+import { presentCurrentPaywall, presentMoijiaCustomerCenter, type ProPaywallOutcome } from '../services/revenueCatUi';
 import { UsersService } from '@moijia/client';
 import { queryClient, queryKeys } from '../config/queryClient';
 
 type PurchasesContextValue = {
   ready: boolean;
   customerInfo: CustomerInfo | null;
-  hasPaidSizeAddon: boolean;
-  sizeAddon: SizeAddon | null;
-  presentPaywall: (plan?: SizeAddon, currentTier?: GroupSizeTier) => Promise<ProPaywallOutcome>;
+  isPro: boolean;
+  presentPaywall: () => Promise<ProPaywallOutcome>;
   presentCustomerCenter: () => Promise<void>;
-  purchasePackage: (pkg: PurchasesPackage) => Promise<CustomerInfo | null>;
-  purchaseStorageTier: (tier: 'medium' | 'large') => Promise<CustomerInfo | null>;
-  purchaseExtraGroupSlot: () => Promise<void>;
+  purchasePro: () => Promise<CustomerInfo | null>;
   restorePurchases: () => Promise<CustomerInfo>;
   refresh: () => Promise<CustomerInfo | null>;
 };
@@ -60,12 +48,14 @@ export const PurchasesProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const syncBilling = useCallback(
     async (info: CustomerInfo | null) => {
       if (!user?.uid || !info) return;
+      const snapshot = billingSnapshot(info);
       try {
-        await UsersService.syncBilling(user.uid, billingSnapshot(info));
+        await UsersService.syncBilling(user.uid, snapshot);
         await queryClient.invalidateQueries({ queryKey: queryKeys.groups._base });
         await queryClient.invalidateQueries({ queryKey: queryKeys.users.quota(user.uid) });
+        await queryClient.invalidateQueries({ queryKey: queryKeys.users.detail(user.uid) });
       } catch {
-        /* quota/grace sync is best-effort */
+        /* quota sync is best-effort */
       }
     },
     [user?.uid]
@@ -134,16 +124,11 @@ export const PurchasesProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return () => sub.remove();
   }, [refresh, user]);
 
-  const presentPaywall = useCallback(
-    async (plan?: SizeAddon, currentTier?: GroupSizeTier): Promise<ProPaywallOutcome> => {
-      const outcome = plan
-        ? await presentStoragePaywall(plan, currentTier)
-        : await presentCurrentPaywall(currentTier);
-      await refresh();
-      return outcome;
-    },
-    [refresh]
-  );
+  const presentPaywall = useCallback(async (): Promise<ProPaywallOutcome> => {
+    const outcome = await presentCurrentPaywall();
+    await refresh();
+    return outcome;
+  }, [refresh]);
 
   const presentCustomerCenter = useCallback(async () => {
     await presentMoijiaCustomerCenter((info) => {
@@ -153,9 +138,9 @@ export const PurchasesProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     await refresh();
   }, [refresh, syncBilling]);
 
-  const purchasePackage = useCallback(async (pkg: PurchasesPackage): Promise<CustomerInfo | null> => {
+  const purchasePro = useCallback(async (): Promise<CustomerInfo | null> => {
     try {
-      const info = await purchaseProPackage(pkg);
+      const info = await purchaseProRc();
       setCustomerInfo(info);
       await syncBilling(info);
       return info;
@@ -173,31 +158,6 @@ export const PurchasesProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   }, [syncBilling]);
 
-  const purchaseStorageTier = useCallback(
-    async (tier: 'medium' | 'large'): Promise<CustomerInfo | null> => {
-      try {
-        const info = await purchaseStorageTierRc(tier);
-        setCustomerInfo(info);
-        await syncBilling(info);
-        return info;
-      } catch (error) {
-        if (isPurchaseCancelled(error)) return null;
-        throw error;
-      }
-    },
-    [syncBilling]
-  );
-
-  const purchaseExtraGroupSlot = useCallback(async () => {
-    const info = await purchaseExtraGroupSlotRc();
-    setCustomerInfo(info);
-    if (user?.uid) {
-      await UsersService.addExtraGroupSlot(user.uid);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.users.purchases(user.uid) });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.users.quota(user.uid) });
-    }
-  }, [user?.uid]);
-
   const restorePurchases = useCallback(async () => {
     const info = await restoreRevenueCatPurchases();
     setCustomerInfo(info);
@@ -205,34 +165,20 @@ export const PurchasesProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return info;
   }, [syncBilling]);
 
-  const sizeAddon = getActiveSizeAddon(customerInfo);
+  const isPro = proEntitlementActive(customerInfo);
 
   const value = useMemo<PurchasesContextValue>(
     () => ({
       ready,
       customerInfo,
-      hasPaidSizeAddon: sizeAddon != null,
-      sizeAddon,
+      isPro,
       presentPaywall,
       presentCustomerCenter,
-      purchasePackage,
-      purchaseStorageTier,
-      purchaseExtraGroupSlot,
+      purchasePro,
       restorePurchases,
       refresh,
     }),
-    [
-      ready,
-      customerInfo,
-      sizeAddon,
-      presentPaywall,
-      presentCustomerCenter,
-      purchasePackage,
-      purchaseStorageTier,
-      purchaseExtraGroupSlot,
-      restorePurchases,
-      refresh,
-    ]
+    [ready, customerInfo, isPro, presentPaywall, presentCustomerCenter, purchasePro, restorePurchases, refresh]
   );
 
   return <PurchasesContext.Provider value={value}>{children}</PurchasesContext.Provider>;

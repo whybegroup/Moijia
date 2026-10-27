@@ -4,7 +4,6 @@ import {
   Text,
   ScrollView,
   TouchableOpacity,
-  Pressable,
   StyleSheet,
   Modal,
   TextInput,
@@ -12,7 +11,6 @@ import {
   ActivityIndicator,
   Platform,
   Image,
-  useWindowDimensions,
 } from 'react-native';
 import { KeyboardSafeScrollView } from './KeyboardSafeScrollView';
 import * as Clipboard from 'expo-clipboard';
@@ -52,11 +50,8 @@ import Toast from 'react-native-toast-message';
 import { ImageLightboxModal } from './ImageLightboxModal';
 import { dropLightboxItem } from './ForumPostMarkdownBody';
 import { GroupStorageUsageBar } from './GroupStorageUsageBar';
-import { GroupStorageRequestForm } from './GroupStorageRequestForm';
+import { GroupDowngradeBanner } from './GroupDowngradeBanner';
 import { GroupFriendGroupsSection } from './GroupFriendGroupsSection';
-import { resolveGroupMaxStorageBytes } from '../utils/groupStorage';
-import { GROUP_TIERS, parseSizeTier } from '../utils/groupTiers';
-import { formatPlanDate, monthPeriodExpiresAt, parseMaybeDate } from '../utils/groupPlanPeriod';
 import { groupSubpageFromPathname } from './groupScope/useGroupSubpage';
 import { groupsTabParentHref, navigateGroupsTabTo } from '../utils/tabBreadcrumbNav';
 import { useGroupScopeNav } from './groupScope/GroupScopeNavContext';
@@ -77,21 +72,6 @@ import { groupStorageCategoryUsages } from '../utils/groupStorageCategories';
 import { ChromeHeaderTrailingRow, DetailActionIcon, RegisterChromeHeader } from './chromeHeaderSlot';
 
 const AVATAR_SIZE = 56;
-
-function paidSubscriptionEndsAt(group: {
-  graceEndsAt?: Date | string | null;
-  sizeStartedAt?: Date | string | null;
-}): Date | null {
-  const grace = parseMaybeDate(group.graceEndsAt);
-  if (grace && grace.getTime() > Date.now()) return grace;
-  const started = parseMaybeDate(group.sizeStartedAt);
-  return started ? monthPeriodExpiresAt(started) : null;
-}
-
-function wholeDaysUntil(date: Date): number {
-  const msPerDay = 24 * 60 * 60 * 1000;
-  return Math.max(0, Math.ceil((date.getTime() - Date.now()) / msPerDay));
-}
 
 /** Heuristic + newline check so long single-line copy still gets Read more. */
 function descriptionExceedsTwoLines(raw: string): boolean {
@@ -372,7 +352,6 @@ export function GroupDetailView({ groupId }: GroupDetailViewProps) {
   useMissingGroupRedirect(isError, groupError, group?.membershipStatus, '/(tabs)/groups');
   const [showLeave,   setShowLeave]   = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const { height: windowHeight } = useWindowDimensions();
   const [descExpanded, setDescExpanded] = useState(false);
   const [inviteSheetOpen, setInviteSheetOpen] = useState(false);
   const [inviteCodeCopied, setInviteCodeCopied] = useState(false);
@@ -459,18 +438,6 @@ export function GroupDetailView({ groupId }: GroupDetailViewProps) {
   const ownerId = group.ownerId ?? '';
   const admins = group.adminIds ?? [];
   const isOwner = ownerId === currentUserId;
-  const paidTier = parseSizeTier(group.sizeTier);
-  const hasPaidSubscription = paidTier === 'medium' || paidTier === 'large';
-  const paidPlanName = GROUP_TIERS[paidTier].label;
-  const paidPlanEndsAt = hasPaidSubscription ? paidSubscriptionEndsAt(group) : null;
-  const paidDaysLeft = paidPlanEndsAt ? wholeDaysUntil(paidPlanEndsAt) : null;
-  const paidRemainingLine = !paidPlanEndsAt
-    ? 'Any time left before this plan expires is forfeited the moment the group is deleted. The plan does not remain active through the rest of the billing period.'
-    : paidDaysLeft === 0
-      ? `This plan expires today (${formatPlanDate(paidPlanEndsAt)}). Deleting the group cancels it immediately, and the rest of today is forfeited.`
-      : paidDaysLeft === 1
-        ? `1 day is still left, through ${formatPlanDate(paidPlanEndsAt)}. That day is forfeited as soon as the group is deleted. The plan does not stay active until it expires.`
-        : `${paidDaysLeft} days are still left, through ${formatPlanDate(paidPlanEndsAt)}. Those days are forfeited as soon as the group is deleted. The plan does not stay active until it expires.`;
   const isAdmin = group.membershipStatus === 'admin';
   const isPending = group.membershipStatus === 'pending';
   const canEditMain = isAdmin && !isPending;
@@ -992,23 +959,11 @@ export function GroupDetailView({ groupId }: GroupDetailViewProps) {
           <GroupFriendGroupsSection groupId={groupId} userId={currentUserId} isAdmin={isAdmin} />
         ) : null}
 
-        {isOwner && currentUserId && !isPending ? (
-          <View style={styles.planSection}>
-            <Text style={styles.sectionLabel}>MANAGE GROUP PLAN</Text>
-            <GroupStorageRequestForm
-              groupId={groupId}
-              userId={currentUserId}
-              currentMaxBytes={resolveGroupMaxStorageBytes(
-                group.maxStorageBytes,
-                group.sizeTier
-              )}
-              usedBytes={storageBreakdown?.usedBytes ?? group.usedStorageBytes ?? 0}
-              sizeTier={group.sizeTier}
-              pendingSizeTier={group.pendingSizeTier}
-              graceEndsAt={group.graceEndsAt}
-              sizeStartedAt={group.sizeStartedAt}
-            />
-          </View>
+        {!isPending && group.pendingSizeTier && group.graceEndsAt ? (
+          <GroupDowngradeBanner
+            pendingSizeTier={group.pendingSizeTier}
+            graceEndsAt={group.graceEndsAt}
+          />
         ) : null}
 
         {!isPending &&
@@ -1131,9 +1086,7 @@ export function GroupDetailView({ groupId }: GroupDetailViewProps) {
                     <View style={{ flex: 1 }}>
                       <Text style={styles.leaveTitle}>Delete Group</Text>
                       <Text style={styles.leaveDesc}>
-                        {hasPaidSubscription
-                          ? `Permanently deletes the group and cancels the ${paidPlanName} plan immediately`
-                          : 'Permanently remove the group and all members'}
+                        Permanently remove the group and all members
                       </Text>
                     </View>
                     {hardDeleteMutation.isPending && <ActivityIndicator size="small" color={Colors.text} />}
@@ -1311,70 +1264,22 @@ export function GroupDetailView({ groupId }: GroupDetailViewProps) {
       {/* Delete confirm (owner) */}
       {showDeleteConfirm && (
         <Modal {...edgeToEdgeModalProps} visible transparent animationType="fade" onRequestClose={() => setShowDeleteConfirm(false)}>
-          {hasPaidSubscription ? (
-            <View style={styles.deleteWarnOverlay}>
-              <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowDeleteConfirm(false)} />
-              <View style={styles.deleteWarnCard}>
-                <ScrollView
-                  bounces={false}
-                  showsVerticalScrollIndicator={false}
-                  style={{ maxHeight: Math.round(windowHeight * 0.78) }}
-                >
-                  <View style={styles.deleteWarnIconWrap}>
-                    <Ionicons name="warning" size={36} color={Colors.notGoing} />
-                  </View>
-                  <Text style={styles.deleteWarnKicker}>Paid subscription</Text>
-                  <Text style={styles.deleteWarnTitle}>Delete {group.name}?</Text>
-                  <View style={styles.deleteWarnCallout}>
-                    <Text style={styles.deleteWarnCalloutTitle}>
-                      This cancels the {paidPlanName} subscription immediately
-                    </Text>
-                    <Text style={styles.deleteWarnPoint}>{paidRemainingLine}</Text>
-                    <Text style={styles.deleteWarnPoint}>
-                      This is non-refundable. Charges already paid for the current period are not returned, including payments made through the App Store or Google Play.
-                    </Text>
-                  </View>
-                  <Text style={styles.deleteWarnBody}>
-                    The group, its members, events, posts, and files are permanently removed. This cannot be undone.
-                  </Text>
-                  <TouchableOpacity
-                    onPress={() => setShowDeleteConfirm(false)}
-                    style={styles.deleteWarnKeepBtn}
-                    activeOpacity={0.85}
-                  >
-                    <Text style={styles.deleteWarnKeepText}>Keep group</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={doHardDelete}
-                    style={styles.deleteWarnDeleteBtn}
-                    activeOpacity={0.85}
-                    disabled={hardDeleteMutation.isPending}
-                  >
-                    <Text style={styles.deleteWarnDeleteText}>
-                      {hardDeleteMutation.isPending ? 'Deleting…' : 'Delete group and cancel subscription'}
-                    </Text>
-                  </TouchableOpacity>
-                </ScrollView>
+          <TouchableOpacity style={styles.menuOverlay} onPress={() => setShowDeleteConfirm(false)} activeOpacity={1}>
+            <View style={styles.confirmCard}>
+              <Text style={styles.confirmTitle}>Delete {group.name}?</Text>
+              <Text style={styles.confirmBody}>
+                This will permanently remove the group. This cannot be undone.
+              </Text>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <TouchableOpacity onPress={() => setShowDeleteConfirm(false)} style={[styles.confirmBtn, { borderColor: Colors.border, backgroundColor: Colors.surface }]}>
+                  <Text style={{ fontFamily: Fonts.semiBold, color: Colors.text }}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={doHardDelete} style={[styles.confirmBtn, { backgroundColor: Colors.notGoing, borderColor: Colors.notGoing }]} disabled={hardDeleteMutation.isPending}>
+                  <Text style={{ fontFamily: Fonts.bold, color: '#fff' }}>Delete</Text>
+                </TouchableOpacity>
               </View>
             </View>
-          ) : (
-            <TouchableOpacity style={styles.menuOverlay} onPress={() => setShowDeleteConfirm(false)} activeOpacity={1}>
-              <View style={styles.confirmCard}>
-                <Text style={styles.confirmTitle}>Delete {group.name}?</Text>
-                <Text style={styles.confirmBody}>
-                  This will permanently remove the group. This cannot be undone.
-                </Text>
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                  <TouchableOpacity onPress={() => setShowDeleteConfirm(false)} style={[styles.confirmBtn, { borderColor: Colors.border, backgroundColor: Colors.surface }]}>
-                    <Text style={{ fontFamily: Fonts.semiBold, color: Colors.text }}>Cancel</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={doHardDelete} style={[styles.confirmBtn, { backgroundColor: Colors.notGoing, borderColor: Colors.notGoing }]} disabled={hardDeleteMutation.isPending}>
-                    <Text style={{ fontFamily: Fonts.bold, color: '#fff' }}>Delete</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </TouchableOpacity>
-          )}
+          </TouchableOpacity>
         </Modal>
       )}
 

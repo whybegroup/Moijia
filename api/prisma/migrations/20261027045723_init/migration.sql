@@ -9,6 +9,11 @@ CREATE TABLE "users" (
     "groupOrderJson" TEXT,
     "ownedGroupLimit" INTEGER NOT NULL DEFAULT 5,
     "extraGroupSlots" INTEGER NOT NULL DEFAULT 0,
+    "subscriptionTier" TEXT NOT NULL DEFAULT 'free',
+    "subscriptionExpiresAt" DATETIME,
+    "subscriptionProductId" TEXT,
+    "subscriptionWillRenew" BOOLEAN NOT NULL DEFAULT false,
+    "downgradeAt" DATETIME,
     "email" TEXT,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL

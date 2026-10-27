@@ -1,65 +1,49 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { Colors, Fonts } from '../constants/theme';
 import { useCurrentUserContext } from '../contexts/CurrentUserContext';
-import { useGroups } from '../hooks/api/useGroups';
+import { usePurchases } from '../contexts/PurchasesContext';
 import { useOwnedGroupQuota } from '../hooks/api/useUsers';
-import { isGroupOwnedByUser } from '../utils/groupStorage';
-import { FREE_OWNED_GROUP_LIMIT } from '../utils/groupTiers';
-import { OwnedGroupsModal } from './OwnedGroupsModal';
+import { parseSubscriptionTier, subscriptionPlanLabel } from '../utils/subscriptionTiers';
+import { StoragePaywall } from './StoragePaywall';
 
 export function SubscriptionSettingsCard() {
   const { userId } = useCurrentUserContext();
-  const { data: groups = [] } = useGroups(userId ?? '');
   const { data: quota } = useOwnedGroupQuota(userId ?? '');
-  const [ownedModalOpen, setOwnedModalOpen] = useState(false);
-
-  const ownedGroups = useMemo(
-    () => groups.filter((group) => isGroupOwnedByUser(group, userId ?? '')),
-    [groups, userId]
-  );
-  const ownedCount = quota?.ownedGroupCount ?? ownedGroups.length;
-  const groupCapacity =
-    quota?.groupCapacity ??
-    (quota?.freeGroupLimit ?? FREE_OWNED_GROUP_LIMIT) + (quota?.extraGroupSlots ?? 0);
-  const canOpenOwned = ownedCount > 0;
-
-  const ownedValue = `${ownedCount}/${groupCapacity}`;
-  const ownedRow = (
-    <>
-      <Text style={styles.infoLabel}>Groups you own</Text>
-      <View style={styles.countHit}>
-        <Text style={styles.infoValue}>{ownedValue}</Text>
-        {canOpenOwned ? <Ionicons name="chevron-forward" size={16} color={Colors.text} /> : null}
-      </View>
-    </>
-  );
+  const { presentCustomerCenter } = usePurchases();
+  const [paywallOpen, setPaywallOpen] = useState(false);
+  const tier = parseSubscriptionTier(quota?.subscriptionTier);
 
   return (
     <>
       <Text style={styles.sectionLabel}>SUBSCRIPTION</Text>
       <View style={[styles.card, styles.cardGap]}>
-        {canOpenOwned ? (
+        <View style={styles.infoRow}>
+          <Text style={styles.infoLabel}>Current plan</Text>
+          <Text style={styles.infoValue}>{subscriptionPlanLabel(tier)}</Text>
+        </View>
+        {tier === 'free' ? (
           <TouchableOpacity
-            style={styles.infoRow}
-            onPress={() => setOwnedModalOpen(true)}
+            style={[styles.infoRow, styles.actionRow]}
+            onPress={() => setPaywallOpen(true)}
             accessibilityRole="button"
-            accessibilityLabel={`Groups you own, ${ownedValue}. Show details`}
+            accessibilityLabel="Upgrade to Pro"
           >
-            {ownedRow}
+            <Text style={styles.actionText}>Upgrade to Pro</Text>
           </TouchableOpacity>
-        ) : (
-          <View style={styles.infoRow}>{ownedRow}</View>
-        )}
+        ) : null}
+        {tier === 'pro' ? (
+          <TouchableOpacity
+            style={[styles.infoRow, styles.actionRow]}
+            onPress={() => void presentCustomerCenter().catch(() => undefined)}
+            accessibilityRole="button"
+            accessibilityLabel="Manage subscription"
+          >
+            <Text style={styles.actionText}>Manage subscription</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
-      {userId ? (
-        <OwnedGroupsModal
-          visible={ownedModalOpen}
-          onClose={() => setOwnedModalOpen(false)}
-          groups={ownedGroups}
-        />
-      ) : null}
+      <StoragePaywall visible={paywallOpen} onClose={() => setPaywallOpen(false)} />
     </>
   );
 }
@@ -88,7 +72,8 @@ const styles = StyleSheet.create({
     padding: 14,
     gap: 12,
   },
+  actionRow: { borderTopWidth: 1, borderTopColor: Colors.border },
   infoLabel: { fontSize: 14, fontFamily: Fonts.regular, color: Colors.text },
   infoValue: { fontSize: 14, fontFamily: Fonts.medium, color: Colors.text, flexShrink: 1, textAlign: 'right' },
-  countHit: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  actionText: { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.accent },
 });

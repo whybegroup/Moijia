@@ -7,6 +7,8 @@ import { groupStorage } from './GroupStorageService';
 import { S3UploadService } from './S3UploadService';
 import { deleteRevenueCatSubscriber } from './RevenueCatService';
 import { groupBilling } from './GroupBillingService';
+import { httpError } from '../utils/httpError';
+import { parseSubscriptionTier } from '../utils/subscriptionTiers';
 import { groupFriendships } from './GroupFriendshipService';
 
 const prisma = new PrismaClient();
@@ -14,9 +16,21 @@ const objectStore = new S3UploadService();
 
 export class UserService {
   private mapUser(row: any): User {
-    const { notifPrefsJson, extraGroupSlots: _slots, email: _email, ...rest } = row;
+    const { notifPrefsJson, ...rest } = row;
+    const {
+      extraGroupSlots: _slots,
+      ownedGroupLimit: _limit,
+      email: _email,
+      subscriptionExpiresAt: _expires,
+      subscriptionProductId: _product,
+      subscriptionWillRenew: _renew,
+      downgradeAt: _downgrade,
+      subscriptionTier,
+      ...publicRow
+    } = rest;
     return {
-      ...rest,
+      ...publicRow,
+      subscriptionTier: parseSubscriptionTier(subscriptionTier),
       notifPrefs: parseNotifPrefsJson(notifPrefsJson),
     };
   }
@@ -159,6 +173,14 @@ export class UserService {
     });
     if (!existing) return;
 
+    const owned = await groupBilling.ownedGroupCount(id);
+    if (owned > 0) {
+      throw httpError(
+        409,
+        'Transfer or delete every group you own before deleting your account.'
+      );
+    }
+
     await this.purgeOwnedGroups(id);
     await this.purgeLeftoverContent(id, existing.thumbnail);
 
@@ -176,16 +198,10 @@ export class UserService {
           { createdBy: userId, members: { none: { role: 'owner' } } },
         ],
       },
-      select: { id: true, name: true, sizeTier: true },
+      select: { id: true, name: true },
     });
 
     for (const group of groups) {
-      await groupBilling.cancelOnGroupDelete({
-        groupId: group.id,
-        userId,
-        name: group.name,
-        sizeTier: group.sizeTier,
-      });
       await groupFriendships.removeAllForGroup(group.id);
       const urls = await groupStorage.collectAllManagedUrlsForPurge(group.id);
       await prisma.group.delete({ where: { id: group.id } });

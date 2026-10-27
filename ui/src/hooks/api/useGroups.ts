@@ -14,11 +14,9 @@ import {
   type GroupScoped,
   type MembershipRequestAction,
   type Partial_NotifPrefs_,
-  GroupStorageLimitInput,
 } from '@moijia/client';
 import { reorderGroupsInCache } from '../../utils/groupOrder';
 import { queryKeys } from '../../config/queryClient';
-import { getCurrentUser } from '../../config/firebase';
 import { retryUnlessNotFound } from '../../utils/apiErrors';
 
 /** Reuse list data so group detail can render without waiting on a duplicate GET /groups/:id. */
@@ -182,68 +180,6 @@ function patchGroupInCaches(
         list?.map((group) => (group.id === groupId ? { ...group, ...patch } : group))
     );
   }
-}
-
-async function persistBillingEmail(userId: string): Promise<string | undefined> {
-  const email = getCurrentUser()?.email ?? undefined;
-  if (!email) return undefined;
-  const name = getCurrentUser()?.displayName || email.split('@')[0] || 'User';
-  await UsersService.syncUser({
-    id: userId,
-    name,
-    displayName: name,
-    email,
-  }).catch(() => undefined);
-  return email;
-}
-
-export function useSetGroupStorageLimit(groupId: string, userId: string) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (sizeTier: 'medium' | 'large') => {
-      await persistBillingEmail(userId);
-      return GroupsService.setGroupStorageLimit(groupId, userId, {
-        sizeTier:
-          sizeTier === 'large'
-            ? GroupStorageLimitInput.sizeTier.LARGE
-            : GroupStorageLimitInput.sizeTier.MEDIUM,
-      });
-    },
-    onSuccess: async (result, sizeTier) => {
-      const nextTier = (result?.sizeTier ?? sizeTier) as GroupScoped['sizeTier'];
-      const pending = nextTier === sizeTier ? null : sizeTier;
-      patchGroupInCaches(queryClient, userId, groupId, {
-        sizeTier: nextTier,
-        maxStorageBytes: result?.maxStorageBytes ?? undefined,
-        pendingSizeTier: pending,
-        ...(pending ? {} : { graceEndsAt: null }),
-      });
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.groups.storageBreakdown(groupId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.groups.detail(groupId, userId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.groups._base }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.users.purchases(userId) }),
-      ]);
-    },
-  });
-}
-
-export function useCancelGroupStorageSubscription(groupId: string, userId: string) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async () => {
-      await persistBillingEmail(userId);
-      return GroupsService.cancelStorageSubscription(groupId, userId);
-    },
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.groups.storageBreakdown(groupId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.groups.detail(groupId, userId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.groups._base }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.users.purchases(userId) }),
-      ]);
-    },
-  });
 }
 
 export function useGroupStorageBreakdown(groupId: string, userId: string, enabled = true) {

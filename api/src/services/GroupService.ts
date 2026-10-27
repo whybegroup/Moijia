@@ -33,7 +33,9 @@ import {
   groupMaxStorageBytes,
   parseSizeTier,
   storageBytesToDb,
+  storageCapForTier,
 } from '../utils/groupStorageLimits';
+import { parseSubscriptionTier } from '../utils/subscriptionTiers';
 import { httpError } from '../utils/httpError';
 import {
   extractMentionTokens,
@@ -262,15 +264,13 @@ export class GroupService {
 
   private groupSizeFields(group: any) {
     const sizeTier = parseSizeTier(group.sizeTier);
-    const ownerPending =
-      group.pendingSource === 'owner' && group.pendingSizeTier
-        ? parseSizeTier(group.pendingSizeTier)
-        : null;
+    const pending = group.pendingSizeTier ? parseSizeTier(group.pendingSizeTier) : null;
+    const pendingSizeTier = pending && pending !== sizeTier ? pending : null;
     return {
       sizeTier,
-      pendingSizeTier: ownerPending,
+      pendingSizeTier,
       sizeStartedAt: group.sizeStartedAt ?? null,
-      graceEndsAt: ownerPending ? group.graceEndsAt ?? null : null,
+      graceEndsAt: pendingSizeTier ? group.graceEndsAt ?? null : null,
       maxStorageBytes: groupMaxStorageBytes(group.maxStorageBytes, group.sizeTier),
     };
   }
@@ -314,6 +314,12 @@ export class GroupService {
     if (membershipStatus === 'member' || membershipStatus === 'admin') {
       base.inviteCode = group.inviteCode;
       base.ownerId = owner?.userId;
+      if (owner?.userId === userId) {
+        base.memberPlans = activeMembers.map((m: any) => ({
+          userId: m.userId,
+          subscriptionTier: parseSubscriptionTier(m.user?.subscriptionTier),
+        }));
+      }
       base.adminIds = admins.map((m: any) => m.userId);
       base.memberIds = activeMembers.map((m: any) => m.userId);
       base.createdBy = group.createdBy;
@@ -347,6 +353,7 @@ export class GroupService {
       createdBy,
       inviteCode,
       coverPhotos = [],
+      sizeTier: requestedSize,
       ...groupData
     } = input;
 
@@ -354,9 +361,9 @@ export class GroupService {
       throw Object.assign(new Error('ownerId and createdBy are required'), { status: 400 });
     }
 
-    await groupBilling.assertCanCreateOwnedGroup(ownerId.trim());
-
-    const maxStorageBytes = groupMaxStorageBytes(undefined, 'small');
+    const quota = await groupBilling.assertCanCreateOwnedGroup(ownerId.trim());
+    const sizeTier = groupBilling.sizeForNewGroup(quota.subscriptionTier, requestedSize);
+    const maxStorageBytes = storageCapForTier(sizeTier);
     const pendingUsed = await groupStorage.getUsedStorageBytes(input.id);
     if (pendingUsed > maxStorageBytes) {
       throw httpError(400, groupStorage.usedExceedsMaxMessage(pendingUsed));
@@ -402,7 +409,7 @@ export class GroupService {
     const group = await prisma.group.create({
       data: {
         ...groupData,
-        sizeTier: 'small',
+        sizeTier,
         maxStorageBytes: storageBytesToDb(maxStorageBytes),
         inviteCode: finalInviteCode,
         createdBy,
@@ -446,7 +453,11 @@ export class GroupService {
    * Update a group
    */
   public async update(id: string, input: GroupUpdate): Promise<Group> {
-    const { ownerId, adminIds, memberIds, updatedBy, coverPhotos, ...groupData } = input;
+    const { ownerId, adminIds, memberIds, updatedBy, coverPhotos, sizeTier, ...groupData } = input;
+
+    if (sizeTier) {
+      await groupBilling.setOwnedGroupSize({ groupId: id, userId: updatedBy, sizeTier });
+    }
 
     // If member lists are provided, update them
     if (ownerId || adminIds || memberIds) {
@@ -585,18 +596,12 @@ export class GroupService {
     await this.requireOwner(id, userId);
     const exists = await prisma.group.findUnique({
       where: { id },
-      select: { id: true, name: true, sizeTier: true },
+      select: { id: true, name: true },
     });
     if (!exists) {
       throw Object.assign(new Error('Group not found'), { status: 404 });
     }
 
-    await groupBilling.cancelOnGroupDelete({
-      groupId: exists.id,
-      userId,
-      name: exists.name,
-      sizeTier: exists.sizeTier,
-    });
     await groupFriendships.removeAllForGroup(id);
 
     const urlsToPurge = await groupStorage.collectAllManagedUrlsForPurge(id);
@@ -634,21 +639,6 @@ export class GroupService {
         deletedBy: null,
       },
     });
-  }
-
-  public async setStorageLimit(
-    groupId: string,
-    userId: string,
-    sizeTier: 'medium' | 'large'
-  ): Promise<{ maxStorageBytes: number; sizeTier: string }> {
-    return groupBilling.applyPaidSizeTier({ groupId, userId, sizeTier });
-  }
-
-  public async cancelStorageSubscription(
-    groupId: string,
-    userId: string
-  ): Promise<{ maxStorageBytes: number }> {
-    return groupStorage.cancelStorageSubscription({ groupId, userId });
   }
 
   public async getStorageBreakdown(groupId: string, userId: string): Promise<GroupStorageBreakdown> {
@@ -1360,8 +1350,8 @@ export class GroupService {
   /**
    * Get members of a group
    */
-  public async getMembers(groupId: string) {
-    return prisma.user.findMany({
+  public async getMembers(groupId: string): Promise<User[]> {
+    const rows = await prisma.user.findMany({
       where: {
         groupMemberships: {
           some: {
@@ -1370,6 +1360,7 @@ export class GroupService {
         },
       },
     });
+    return rows.map((row) => this.mapPublicUser(row));
   }
 
   /**
@@ -1386,7 +1377,31 @@ export class GroupService {
       },
     });
 
-    return pendingMembers.map((m) => m.user) as User[];
+    return pendingMembers.map((m) => this.mapPublicUser(m.user));
+  }
+
+  private mapPublicUser(row: {
+    id: string;
+    name: string;
+    displayName: string;
+    avatarSeed: string | null;
+    thumbnail: string | null;
+    subscriptionTier: string;
+    notifPrefsJson: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+  }): User {
+    return {
+      id: row.id,
+      name: row.name,
+      displayName: row.displayName,
+      avatarSeed: row.avatarSeed,
+      thumbnail: row.thumbnail,
+      subscriptionTier: parseSubscriptionTier(row.subscriptionTier),
+      notifPrefs: parseNotifPrefsJson(row.notifPrefsJson),
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
   }
 
   /**
@@ -1583,6 +1598,14 @@ export class GroupService {
     }
     if (!target) throw new Error('Member not found');
     if (target.role === 'owner') throw new Error('Already owner');
+    if (target.role !== 'admin') {
+      throw httpError(403, 'Ownership can only be transferred to an admin.');
+    }
+    await groupBilling.assertCanReceiveGroup({
+      fromUserId: performedBy,
+      toUserId: newOwnerId,
+      groupSize: parseSizeTier(group.sizeTier),
+    });
     await prisma.$transaction([
       prisma.groupMember.update({
         where: { groupId_userId: { groupId, userId: performedBy } },

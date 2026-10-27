@@ -34,6 +34,8 @@ export interface Group {
   usedStorageBytes?: number;
   /** ID of the group's owner */
   ownerId: string;
+  /** Present for the owner. Used to choose who can receive ownership. */
+  memberPlans?: MemberPlan[];
   /** Array of admin user IDs */
   adminIds: string[];
   /** Array of member user IDs */
@@ -76,6 +78,8 @@ export interface GroupScoped {
   /** Present when member or admin */
   inviteCode?: string | null;
   ownerId?: string;
+  /** Present for the owner. Used to choose who can receive ownership. */
+  memberPlans?: MemberPlan[];
   adminIds?: string[];
   memberIds?: string[];
   /** Present when admin only */
@@ -101,6 +105,8 @@ export interface GroupInput {
   avatarSeed?: string | null;
   inviteCode?: string | null;
   requireApprovalToJoin?: boolean;
+  /** Enterprise owners may choose small, medium, or large. Other plans ignore this. */
+  sizeTier?: 'small' | 'medium' | 'large';
   ownerId: string;
   adminIds?: string[];
   memberIds?: string[];
@@ -118,6 +124,8 @@ export interface GroupUpdate {
   coverPhotos?: string[];
   avatarSeed?: string | null;
   requireApprovalToJoin?: boolean;
+  /** Enterprise owners may set small, medium, or large. */
+  sizeTier?: 'small' | 'medium' | 'large';
   ownerId?: string;
   adminIds?: string[];
   memberIds?: string[];
@@ -213,28 +221,29 @@ export interface GroupPostReactionInput {
   emoji: string;
 }
 
-/** Owner-applied Medium or Large add-on. Takes effect immediately on upgrade; downgrade uses grace if over cap. */
-export interface GroupStorageLimitInput {
-  sizeTier: 'medium' | 'large';
+export interface MemberPlan {
+  userId: string;
+  subscriptionTier: 'free' | 'pro' | 'enterprise';
 }
 
 export interface GroupBillingSyncInput {
-  mediumActive: boolean;
-  largeActive: boolean;
-  /** False when the store add-on is cancelled but still in the paid period. */
-  mediumRenewing?: boolean;
-  largeRenewing?: boolean;
+  /** True while the store still entitles this user to Pro. */
+  proActive: boolean;
+  /** False when Pro is cancelled but the paid period has not ended. */
+  proRenewing?: boolean;
+  /** ISO time when the current Pro period ends. */
+  expiresAt?: string | null;
 }
 
 export interface OwnedGroupQuota {
   ownedGroupCount: number;
-  /** Stored per-user owned-group cap (default 5). */
-  ownedGroupLimit: number;
-  /** ownedGroupLimit + extraGroupSlots */
-  groupCapacity: number;
-  freeGroupLimit: number;
-  extraGroupSlots: number;
+  subscriptionTier: 'free' | 'pro' | 'enterprise';
+  /** Null on Enterprise, which has no group cap. */
+  groupCapacity: number | null;
   canCreateGroup: boolean;
+  subscriptionExpiresAt?: Date | null;
+  /** When owned groups that are not Small become Small. */
+  downgradeAt?: Date | null;
 }
 
 export type GroupStorageCategoryId = 'group' | 'events' | 'polls' | 'posts';

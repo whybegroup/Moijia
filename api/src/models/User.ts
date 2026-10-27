@@ -14,6 +14,8 @@ export interface User {
   avatarSeed?: string | null;
   /** Optional custom avatar image URL */
   thumbnail?: string | null;
+  /** free | pro | enterprise. Omitted only on incomplete client placeholders; the API sends free by default. */
+  subscriptionTier?: 'free' | 'pro' | 'enterprise';
   /** Global in-app notification toggles (applies to all groups, AND with per-group prefs) */
   notifPrefs?: NotifPrefs;
   /** Timestamp when the user was created */

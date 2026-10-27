@@ -153,8 +153,7 @@ export default function SupportScreen() {
               </Text>
             </TouchableOpacity>
             <Text style={styles.hint}>
-              For storage subscriptions, you can also manage or cancel in your Apple, Google, or web
-              store settings.
+              For Pro, you can also manage or cancel in your Apple, Google, or web store settings.
             </Text>
           </>
         )}

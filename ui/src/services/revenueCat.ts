@@ -9,13 +9,12 @@ import Purchases, {
 } from 'react-native-purchases';
 import { Platform } from 'react-native';
 import {
-  EXTRA_GROUP_PRODUCT_ID,
-  GROUP_SUBSCRIPTIONS_OFFERING,
-  SIZE_ADDONS,
+  PRO_ENTITLEMENT_ID,
+  PRO_OFFERING_ID,
+  PRO_PACKAGE_ID,
+  PRO_PRODUCT_ID,
   getRevenueCatApiKey,
-  type SizeAddon,
 } from '../config/revenueCat';
-import type { GroupSizeTier } from '../utils/groupTiers';
 
 let configureLock: Promise<void> | null = null;
 
@@ -66,44 +65,27 @@ export function purchasesErrorMessage(error: unknown, fallback = 'Something went
   return fallback;
 }
 
-export function entitlementActive(customerInfo: CustomerInfo | null | undefined, id: string): boolean {
-  return !!customerInfo?.entitlements.active[id]?.isActive;
-}
-
-export function getActiveSizeAddon(customerInfo: CustomerInfo | null | undefined): SizeAddon | null {
-  if (!customerInfo) return null;
-  for (let i = SIZE_ADDONS.length - 1; i >= 0; i -= 1) {
-    const plan = SIZE_ADDONS[i];
-    if (entitlementActive(customerInfo, plan.entitlementId)) return plan;
-    if (customerInfo.activeSubscriptions.includes(plan.productId)) return plan;
-  }
-  return null;
-}
-
-function sizePlanActive(customerInfo: CustomerInfo | null | undefined, plan: SizeAddon): boolean {
+export function proEntitlementActive(customerInfo: CustomerInfo | null | undefined): boolean {
   if (!customerInfo) return false;
-  return entitlementActive(customerInfo, plan.entitlementId) || customerInfo.activeSubscriptions.includes(plan.productId);
-}
-
-function sizePlanRenewing(customerInfo: CustomerInfo | null | undefined, plan: SizeAddon): boolean {
-  if (!sizePlanActive(customerInfo, plan)) return false;
-  const entitlement = customerInfo?.entitlements.active[plan.entitlementId];
-  return entitlement?.willRenew !== false;
+  if (customerInfo.entitlements.active[PRO_ENTITLEMENT_ID]?.isActive) return true;
+  return customerInfo.activeSubscriptions.includes(PRO_PRODUCT_ID);
 }
 
 export function billingSnapshot(customerInfo: CustomerInfo | null | undefined): {
-  mediumActive: boolean;
-  largeActive: boolean;
-  mediumRenewing: boolean;
-  largeRenewing: boolean;
+  proActive: boolean;
+  proRenewing: boolean;
+  expiresAt: string | null;
 } {
-  const medium = SIZE_ADDONS.find((plan) => plan.tier === 'medium')!;
-  const large = SIZE_ADDONS.find((plan) => plan.tier === 'large')!;
+  const proActive = proEntitlementActive(customerInfo);
+  const entitlement = customerInfo?.entitlements.active[PRO_ENTITLEMENT_ID];
+  const expiresAt =
+    entitlement?.expirationDate ??
+    customerInfo?.allExpirationDates?.[PRO_PRODUCT_ID] ??
+    null;
   return {
-    mediumActive: sizePlanActive(customerInfo, medium),
-    largeActive: sizePlanActive(customerInfo, large),
-    mediumRenewing: sizePlanRenewing(customerInfo, medium),
-    largeRenewing: sizePlanRenewing(customerInfo, large),
+    proActive,
+    proRenewing: proActive && entitlement?.willRenew !== false,
+    expiresAt,
   };
 }
 
@@ -178,128 +160,42 @@ export async function getOfferings(): Promise<PurchasesOfferings> {
   return Purchases.getOfferings();
 }
 
-export async function getStorageOffering(): Promise<PurchasesOffering | null> {
+export async function getProOffering(): Promise<PurchasesOffering | null> {
   const offerings = await getOfferings();
-  return offerings.all[GROUP_SUBSCRIPTIONS_OFFERING] ?? offerings.current ?? null;
+  const named = offerings.all[PRO_OFFERING_ID] ?? offerings.current ?? null;
+  if (named && packageForPro(named)) return named;
+  for (const offering of Object.values(offerings.all)) {
+    if (packageForPro(offering)) return offering;
+  }
+  return named;
 }
 
-function packageForAddon(offering: PurchasesOffering, plan: SizeAddon): PurchasesPackage | null {
+function packageForPro(offering: PurchasesOffering): PurchasesPackage | null {
   return (
     offering.availablePackages.find(
-      (pkg) => pkg.identifier === plan.packageId || pkg.product.identifier === plan.productId
+      (pkg) => pkg.identifier === PRO_PACKAGE_ID || pkg.product.identifier === PRO_PRODUCT_ID
     ) ?? null
   );
 }
 
-export type StoragePlanOption = {
-  plan: SizeAddon;
-  offering: PurchasesOffering;
-  pkg: PurchasesPackage;
-};
-
-export function monthlyRateLabel(priceString: string | null | undefined): string {
-  const raw = priceString?.trim() ?? '';
-  if (!raw) return '';
-  if (/\/\s*mo\b/i.test(raw)) return raw;
-  if (/per month/i.test(raw)) return raw.replace(/per month/i, '/mo');
-  if (/\/\s*month/i.test(raw)) return raw.replace(/\/\s*month/i, '/mo');
-  return `${raw}/mo`;
-}
-
-export function priceStringForTier(tier: GroupSizeTier, options: StoragePlanOption[]): string | null {
-  if (tier === 'small') return null;
-  const option = options.find((item) => item.plan.tier === tier);
-  return option?.pkg.product.priceString ?? null;
-}
-
-let planOptionsLock: Promise<StoragePlanOption[]> | null = null;
-
-export async function listStoragePlanOptions(): Promise<StoragePlanOption[]> {
-  if (planOptionsLock) return planOptionsLock;
-  planOptionsLock = loadStoragePlanOptions();
-  try {
-    return await planOptionsLock;
-  } catch (error) {
-    planOptionsLock = null;
-    throw error;
-  }
-}
-
-async function loadStoragePlanOptions(): Promise<StoragePlanOption[]> {
-  const offering = await getStorageOffering();
-  if (!offering) {
-    throw new Error(
-      'No storage offering is available from the App Store. In RevenueCat, attach Apple products subscription_medium_group and subscription_large_group to offering_group_subscriptions.'
-    );
-  }
-  const options: StoragePlanOption[] = [];
-  for (const plan of SIZE_ADDONS) {
-    const pkg = packageForAddon(offering, plan);
-    if (!pkg) continue;
-    options.push({ plan, offering, pkg });
-  }
-  if (options.length === 0) {
-    throw new Error(
-      'App Store did not return Medium or Large. Create those auto-renewable subscriptions in App Store Connect with the same product IDs, then add them to the RevenueCat offering.'
-    );
-  }
-  return options;
-}
-
-export async function purchaseProPackage(pkg: PurchasesPackage): Promise<CustomerInfo> {
-  const { customerInfo } = await Purchases.purchasePackage(pkg);
-  return customerInfo;
-}
-
-/** Fresh StoreKit product so Apple’s subscription sheet is presented. */
-export async function purchaseStorageTier(tier: 'medium' | 'large'): Promise<CustomerInfo> {
-  const addon = SIZE_ADDONS.find((plan) => plan.tier === tier);
-  if (!addon) {
-    throw new Error('This plan is not available right now.');
-  }
-  const products = await Purchases.getProducts([addon.productId]);
+export async function purchasePro(): Promise<CustomerInfo> {
+  const products = await Purchases.getProducts([PRO_PRODUCT_ID]);
   const product = products[0];
   if (product) {
     const { customerInfo } = await Purchases.purchaseStoreProduct(product);
     return customerInfo;
   }
-  planOptionsLock = null;
-  const options = await listStoragePlanOptions();
-  const option = options.find((item) => item.plan.tier === tier);
-  if (!option) {
-    throw new Error('This plan is not available right now.');
-  }
-  const { customerInfo } = await Purchases.purchasePackage(option.pkg);
-  return customerInfo;
-}
-
-export async function purchaseExtraGroupSlot(): Promise<CustomerInfo> {
-  const offerings = await getOfferings();
-  for (const offering of Object.values(offerings.all)) {
-    const pkg = offering.availablePackages.find(
-      (p) => p.product.identifier === EXTRA_GROUP_PRODUCT_ID
-    );
-    if (pkg) {
-      const { customerInfo } = await Purchases.purchasePackage(pkg);
-      return customerInfo;
-    }
-  }
-  const products = await Purchases.getProducts([EXTRA_GROUP_PRODUCT_ID]);
-  const product = products[0];
-  if (!product) {
+  const offering = await getProOffering();
+  const pkg = offering ? packageForPro(offering) : null;
+  if (!pkg) {
     throw new Error(
-      'Extra group slots are not in the store yet. Add product_extra_group ($0.99) in RevenueCat.'
+      'Pro is not available from the App Store. In RevenueCat, attach Apple product subscription_pro to the current offering.'
     );
   }
-  const { customerInfo } = await Purchases.purchaseStoreProduct(product);
+  const { customerInfo } = await Purchases.purchasePackage(pkg);
   return customerInfo;
 }
 
 export async function restorePurchases(): Promise<CustomerInfo> {
   return Purchases.restorePurchases();
-}
-
-export function planLabelForStorage(plan: SizeAddon | null | undefined): string {
-  if (!plan) return 'Small groups';
-  return `${plan.displayName} · ${plan.gb} GB / month`;
 }

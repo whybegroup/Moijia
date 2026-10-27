@@ -51,18 +51,17 @@ export function TermsOfServiceContent({ onOpenPrivacy }: { onOpenPrivacy: () => 
 
       <LegalHeading>Storage</LegalHeading>
       <LegalP>
-        Groups include a default storage allowance of 2 GB for photos, videos, and files.
-        Paid plans raise that cap to 10 GB, 50 GB, or 100 GB. Storage is a digital service:
-        unused space has no cash value, and we may refuse or remove files that exceed the
-        group’s cap or that violate these Terms.
+        Free accounts can create up to 2 Small groups (1 GB each). Pro is $19.99 per month
+        and includes up to 10 Medium groups (10 GB each). Enterprise group counts and sizes
+        are arranged with us. Storage is a digital service: unused space has no cash value,
+        and we may refuse or remove files that exceed a group’s cap or that violate these Terms.
       </LegalP>
 
       <LegalHeading>Subscriptions and billing</LegalHeading>
       <LegalP>
-        Paid storage is sold as auto-renewing monthly subscriptions through the Apple App
-        Store, Google Play, or other storefronts we enable (including via RevenueCat). The
-        title, length, and price of each plan are shown in the store and on the paywall
-        before you purchase.
+        Pro is an auto-renewing monthly subscription through the Apple App Store, Google Play,
+        or other storefronts we enable (including via RevenueCat). The price is shown in the
+        store and on the paywall before you purchase. Enterprise is not sold in the app.
       </LegalP>
       <LegalP>
         Payment is charged to your Apple, Google, or other store account at confirmation of

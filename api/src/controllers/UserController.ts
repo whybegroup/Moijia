@@ -72,7 +72,7 @@ export class UserController extends Controller {
   }
 
   /**
-   * How many groups this user can still own (5 free + extra slots).
+   * How many groups this user can still own on their plan.
    */
   @Get('{id}/owned-group-quota')
   public async getOwnedGroupQuota(@Path() id: string): Promise<OwnedGroupQuota> {
@@ -88,29 +88,25 @@ export class UserController extends Controller {
   }
 
   /**
-   * Record a purchased extra owned-group slot ($0.99).
-   */
-  @Post('{id}/extra-group-slots')
-  public async addExtraGroupSlot(@Path() id: string): Promise<{ extraGroupSlots: number }> {
-    return groupBilling.addExtraGroupSlot(id);
-  }
-
-  /**
-   * Reconcile Medium/Large add-ons from RevenueCat with owned groups.
-   * Lapsed entitlements start a 15-day grace; restored entitlements clear it.
+   * Reconcile the App Store Pro subscription with this account.
+   * Enterprise is left unchanged. After Pro expires, non-small groups stay
+   * for 15 days, then become Small.
    */
   @Post('{id}/billing-sync')
   public async syncBilling(
     @Path() id: string,
     @Body() body: GroupBillingSyncInput
   ): Promise<OwnedGroupQuota> {
-    await groupBilling.syncOwnerEntitlements(id, {
-      mediumActive: !!body.mediumActive,
-      largeActive: !!body.largeActive,
-      mediumRenewing: body.mediumRenewing !== false,
-      largeRenewing: body.largeRenewing !== false,
+    const expiresAt = body.expiresAt ? new Date(body.expiresAt) : null;
+    if (body.expiresAt && expiresAt && Number.isNaN(expiresAt.getTime())) {
+      this.setStatus(400);
+      throw new Error('expiresAt is invalid');
+    }
+    return groupBilling.syncSubscription(id, {
+      proActive: !!body.proActive,
+      proRenewing: !!body.proActive && body.proRenewing !== false,
+      expiresAt,
     });
-    return groupBilling.getOwnedGroupQuota(id);
   }
 
   /**

@@ -6,9 +6,12 @@ let timer: ReturnType<typeof setInterval> | null = null;
 export function startGroupBillingJobs(): void {
   if (timer) return;
   const run = () => {
-    void groupBilling.applyDueGracePeriods().catch((err) => {
-      console.error('[group-billing]', err);
-    });
+    void groupBilling
+      .scheduleOutstandingFreeDowngrades()
+      .then(() => groupBilling.applyDueGracePeriods())
+      .catch((err) => {
+        console.error('[group-billing]', err);
+      });
   };
   run();
   timer = setInterval(run, INTERVAL_MS);

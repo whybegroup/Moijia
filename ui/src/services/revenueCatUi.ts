@@ -1,28 +1,7 @@
 import { Linking, Platform } from 'react-native';
-import RevenueCatUI, {
-  CustomVariableValue,
-  PAYWALL_RESULT,
-  type CustomVariables,
-} from 'react-native-purchases-ui';
-import type { CustomerInfo, PurchasesOffering } from 'react-native-purchases';
-import { sizeAddonByTier, type SizeAddon } from '../config/revenueCat';
-import type { GroupSizeTier } from '../utils/groupTiers';
-import { GROUP_TIERS } from '../utils/groupTiers';
-import { getCustomerInfo, getStorageOffering } from './revenueCat';
-
-export function paywallCustomVariables(currentTier?: GroupSizeTier): CustomVariables {
-  const tier = currentTier ?? 'small';
-  const spec = GROUP_TIERS[tier];
-  const addon = sizeAddonByTier(tier);
-  return {
-    current_plan: CustomVariableValue.string(spec.label),
-    current_plan_gb: CustomVariableValue.number(spec.gb),
-    current_package_id: CustomVariableValue.string(addon?.packageId ?? ''),
-    is_current_small: CustomVariableValue.boolean(tier === 'small'),
-    is_current_medium: CustomVariableValue.boolean(tier === 'medium'),
-    is_current_large: CustomVariableValue.boolean(tier === 'large'),
-  };
-}
+import RevenueCatUI, { PAYWALL_RESULT } from 'react-native-purchases-ui';
+import type { CustomerInfo } from 'react-native-purchases';
+import { getCustomerInfo, getProOffering } from './revenueCat';
 
 export type ProPaywallOutcome = 'purchased' | 'restored' | 'already_pro' | 'cancelled' | 'unavailable';
 
@@ -41,33 +20,18 @@ function outcomeFromPaywallResult(result: PAYWALL_RESULT): ProPaywallOutcome {
   }
 }
 
-async function presentOfferingPaywall(
-  offering?: PurchasesOffering,
-  currentTier?: GroupSizeTier
-): Promise<ProPaywallOutcome> {
+/** Dashboard paywall for subscription_pro. */
+export async function presentCurrentPaywall(): Promise<ProPaywallOutcome> {
   try {
+    const offering = await getProOffering().catch(() => null);
     const result = await RevenueCatUI.presentPaywall({
-      offering,
+      offering: offering ?? undefined,
       displayCloseButton: true,
-      customVariables: paywallCustomVariables(currentTier),
     });
     return outcomeFromPaywallResult(result);
   } catch {
     return 'unavailable';
   }
-}
-
-/** Dashboard paywall on `offering_group_subscriptions` (Medium + Large). */
-export async function presentCurrentPaywall(currentTier?: GroupSizeTier): Promise<ProPaywallOutcome> {
-  const offering = await getStorageOffering().catch(() => null);
-  return presentOfferingPaywall(offering ?? undefined, currentTier);
-}
-
-export async function presentStoragePaywall(
-  _plan?: SizeAddon,
-  currentTier?: GroupSizeTier
-): Promise<ProPaywallOutcome> {
-  return presentCurrentPaywall(currentTier);
 }
 
 export async function presentMoijiaCustomerCenter(onCustomerInfo?: (info: CustomerInfo) => void): Promise<void> {

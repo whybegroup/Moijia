@@ -1,4 +1,4 @@
-export type PurchaseHistoryKind = 'size_addon' | 'extra_group' | 'cancel';
+export type PurchaseHistoryKind = 'subscription' | 'cancel';
 
 export interface PurchaseHistoryEntry {
   id: string;

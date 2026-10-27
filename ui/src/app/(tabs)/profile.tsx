@@ -348,9 +348,17 @@ export default function ProfileScreen() {
   };
 
   const handleDeleteAccount = () => {
+    const ownsGroup = allGroups.some((group) => !group.deletedAt && group.ownerId === userId);
+    if (ownsGroup) {
+      alertMessage(
+        'Delete Account',
+        'Transfer or delete every group you own before deleting your account.'
+      );
+      return;
+    }
     const title = 'Delete Account';
     const message =
-      'This permanently deletes your account, groups you own, and subscription records. Signing up again will not restore previous plans. This cannot be undone.';
+      'This permanently deletes your account. Signing up again will not restore it. This cannot be undone.';
     if (Platform.OS === 'web') {
       if (window.confirm(message)) void performDeleteAccount();
       return;

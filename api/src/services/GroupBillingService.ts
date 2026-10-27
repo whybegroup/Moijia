@@ -3,47 +3,48 @@ import { groupStorage } from './GroupStorageService';
 import { NotificationService } from './NotificationService';
 import { MAIL_FOOTER, sendOwnerEmail, type ReceiptSection } from './EmailService';
 import { httpError } from '../utils/httpError';
-import { monthPeriodExpiresAt, nextMonthlyAnniversary } from '../utils/groupPlanPeriod';
 import { recordPurchase } from './PurchaseHistoryService';
+import type { OwnedGroupQuota } from '../models/Group';
 import {
-  FREE_OWNED_GROUP_LIMIT,
+  GROUP_DOWNGRADE_GRACE_MS,
   GROUP_TIERS,
   formatStorageBytes,
-  isPaidSizeTier,
   parseSizeTier,
   sizeTierRank,
   storageBytesToDb,
   storageCapForTier,
   type GroupSizeTier,
 } from '../utils/groupStorageLimits';
+import {
+  PRO_MONTHLY_PRICE_LABEL,
+  PRO_PRODUCT_ID,
+  ownedGroupCapacity,
+  parseSubscriptionTier,
+  planLabel,
+  sizeForNewGroup,
+  subscriptionRank,
+  tierAllowsSize,
+  type SubscriptionTier,
+} from '../utils/subscriptionTiers';
 
 const prisma = new PrismaClient();
 const notificationService = new NotificationService();
 
-export type PaidSizeTier = 'medium' | 'large';
-
-export interface BillingEntitlementSnapshot {
-  mediumActive: boolean;
-  largeActive: boolean;
-  mediumRenewing?: boolean;
-  largeRenewing?: boolean;
-}
-
-function productIdForTier(tier: PaidSizeTier): string {
-  return tier === 'large' ? 'subscription_large_group' : 'subscription_medium_group';
+export interface ProSubscriptionSnapshot {
+  proActive: boolean;
+  proRenewing: boolean;
+  expiresAt: Date | null;
 }
 
 function formatMailDate(date: Date): string {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-function planReceipt(label: string): { name: string; price: string; storage: string } {
-  if (label === 'Large') return { name: 'Large Group', price: '$9.99/mo', storage: '100 GB' };
-  if (label === 'Medium') return { name: 'Medium Group', price: '$4.99/mo', storage: '10 GB' };
-  return { name: 'Small Group', price: '$0.00/mo', storage: '1 GB' };
-}
-
 export class GroupBillingService {
+  public sizeForNewGroup(tier: SubscriptionTier, requested: unknown): GroupSizeTier {
+    return sizeForNewGroup(tier, requested);
+  }
+
   public async ownedGroupCount(userId: string): Promise<number> {
     return prisma.groupMember.count({
       where: {
@@ -55,231 +56,318 @@ export class GroupBillingService {
     });
   }
 
-  public async getOwnedGroupQuota(userId: string): Promise<{
-    ownedGroupCount: number;
-    ownedGroupLimit: number;
-    groupCapacity: number;
-    freeGroupLimit: number;
-    extraGroupSlots: number;
-    canCreateGroup: boolean;
-  }> {
+  public async getOwnedGroupQuota(userId: string): Promise<OwnedGroupQuota> {
     const [ownedGroupCount, user] = await Promise.all([
       this.ownedGroupCount(userId),
       prisma.user.findUnique({
         where: { id: userId },
-        select: { ownedGroupLimit: true, extraGroupSlots: true },
+        select: {
+          subscriptionTier: true,
+          subscriptionExpiresAt: true,
+          downgradeAt: true,
+        },
       }),
     ]);
-    const ownedGroupLimit = Math.max(1, user?.ownedGroupLimit ?? FREE_OWNED_GROUP_LIMIT);
-    const extraGroupSlots = Math.max(0, user?.extraGroupSlots ?? 0);
-    const groupCapacity = ownedGroupLimit + extraGroupSlots;
+    const subscriptionTier = parseSubscriptionTier(user?.subscriptionTier);
+    const groupCapacity = ownedGroupCapacity(subscriptionTier);
     return {
       ownedGroupCount,
-      ownedGroupLimit,
+      subscriptionTier,
       groupCapacity,
-      freeGroupLimit: ownedGroupLimit,
-      extraGroupSlots,
-      canCreateGroup: ownedGroupCount < groupCapacity,
+      canCreateGroup: groupCapacity == null || ownedGroupCount < groupCapacity,
+      subscriptionExpiresAt: user?.subscriptionExpiresAt ?? null,
+      downgradeAt: user?.downgradeAt ?? null,
     };
   }
 
-  public async assertCanCreateOwnedGroup(userId: string): Promise<void> {
+  public async assertCanCreateOwnedGroup(userId: string): Promise<OwnedGroupQuota> {
     const quota = await this.getOwnedGroupQuota(userId);
-    if (quota.canCreateGroup) return;
-    throw httpError(
-      403,
-      `You cannot create more than ${quota.groupCapacity} groups. If you need more, contact an administrator.`,
-      { code: 'owned_group_limit' }
-    );
+    if (quota.canCreateGroup) return quota;
+    const cap = quota.groupCapacity ?? 0;
+    const message =
+      quota.subscriptionTier === 'pro'
+        ? `Pro includes up to ${cap} groups. Contact us about Enterprise for more.`
+        : `Free includes up to ${cap} groups. Upgrade to Pro for up to 10.`;
+    throw httpError(403, message, { code: 'owned_group_limit' });
   }
 
-  public async addExtraGroupSlot(userId: string): Promise<{ extraGroupSlots: number }> {
-    const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
-    if (!user) throw httpError(404, 'User not found');
-    const updated = await prisma.user.update({
+  public async assertCanReceiveGroup(input: {
+    fromUserId: string;
+    toUserId: string;
+    groupSize: GroupSizeTier;
+  }): Promise<void> {
+    const [from, to, owned] = await Promise.all([
+      prisma.user.findUnique({
+        where: { id: input.fromUserId },
+        select: { subscriptionTier: true },
+      }),
+      prisma.user.findUnique({
+        where: { id: input.toUserId },
+        select: { subscriptionTier: true },
+      }),
+      this.ownedGroupCount(input.toUserId),
+    ]);
+    if (!to) throw httpError(404, 'Member not found');
+    const fromTier = parseSubscriptionTier(from?.subscriptionTier);
+    const toTier = parseSubscriptionTier(to.subscriptionTier);
+    if (subscriptionRank(toTier) < subscriptionRank(fromTier)) {
+      throw httpError(
+        403,
+        'Transfer ownership to an admin on an equal or higher plan.'
+      );
+    }
+    if (!tierAllowsSize(toTier, input.groupSize)) {
+      throw httpError(
+        403,
+        `This admin's ${planLabel(toTier)} plan cannot own a ${GROUP_TIERS[input.groupSize].label} group.`
+      );
+    }
+    const cap = ownedGroupCapacity(toTier);
+    if (cap != null && owned >= cap) {
+      throw httpError(403, 'That admin is already at their group limit.');
+    }
+  }
+
+  /**
+   * Store Pro onto the user. Enterprise is assigned outside the app and is left alone.
+   * A new Pro subscription raises owned groups to Medium. After Pro expires, non-small
+   * groups stay put for 15 days, then become Small.
+   */
+  public async syncSubscription(userId: string, input: ProSubscriptionSnapshot): Promise<OwnedGroupQuota> {
+    const user = await prisma.user.findUnique({
       where: { id: userId },
-      data: { extraGroupSlots: { increment: 1 } },
-      select: { extraGroupSlots: true },
+      select: {
+        subscriptionTier: true,
+        subscriptionExpiresAt: true,
+        subscriptionProductId: true,
+      },
     });
-    await recordPurchase({
-      userId,
-      kind: 'extra_group',
-      title: 'Extra group slot',
-      detail: '$0.99',
-      productId: 'product_extra_group',
+    if (!user) throw httpError(404, 'User not found');
+
+    const tier = parseSubscriptionTier(user.subscriptionTier);
+    if (tier === 'enterprise') return this.getOwnedGroupQuota(userId);
+
+    const now = Date.now();
+    const expiresMs = input.expiresAt?.getTime();
+    const expiresValid = expiresMs != null && !Number.isNaN(expiresMs);
+    const inPaidPeriod = input.proActive && (!expiresValid || expiresMs > now);
+
+    if (inPaidPeriod) {
+      const becomingPro = tier !== 'pro';
+      await prisma.user.update({
+        where: { id: userId },
+        data: {
+          subscriptionTier: 'pro',
+          subscriptionExpiresAt: input.expiresAt,
+          subscriptionProductId: PRO_PRODUCT_ID,
+          subscriptionWillRenew: input.proRenewing,
+          downgradeAt: null,
+        },
+      });
+      await this.clearOwnedGrace(userId);
+      if (becomingPro) {
+        await this.upgradeOwnedGroupsToMedium(userId);
+        await recordPurchase({
+          userId,
+          kind: 'subscription',
+          title: 'Pro',
+          detail: PRO_MONTHLY_PRICE_LABEL,
+          productId: PRO_PRODUCT_ID,
+        });
+        await this.emailSubscription({
+          ownerId: userId,
+          intro: 'Thanks for subscribing to moijia Pro. Groups you own are Medium (10 GB), and you can create up to 10.',
+          plan: 'Pro',
+          price: PRO_MONTHLY_PRICE_LABEL,
+          expiresAt: input.expiresAt,
+          renewing: input.proRenewing,
+        });
+      }
+      await this.applyDueGracePeriods();
+      return this.getOwnedGroupQuota(userId);
+    }
+
+    const wasPro = tier === 'pro' || user.subscriptionProductId === PRO_PRODUCT_ID;
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        subscriptionTier: 'free',
+        subscriptionWillRenew: false,
+        subscriptionExpiresAt: input.expiresAt ?? user.subscriptionExpiresAt,
+        subscriptionProductId: wasPro ? PRO_PRODUCT_ID : null,
+      },
     });
-    return { extraGroupSlots: updated.extraGroupSlots };
+
+    if (wasPro && tier === 'pro') {
+      const periodEnd =
+        (expiresValid ? input.expiresAt : null) ?? user.subscriptionExpiresAt ?? new Date();
+      const downgradeAt = new Date(periodEnd.getTime() + GROUP_DOWNGRADE_GRACE_MS);
+      await this.scheduleDowngrade(userId, downgradeAt);
+      await recordPurchase({
+        userId,
+        kind: 'cancel',
+        title: 'Pro ended',
+        detail: `Groups stay at their current size until ${formatMailDate(downgradeAt)}`,
+        productId: PRO_PRODUCT_ID,
+      });
+    }
+
+    await this.applyDueGracePeriods();
+    return this.getOwnedGroupQuota(userId);
   }
 
-  public async applyPaidSizeTier(input: {
+  public async upgradeOwnedGroupsToMedium(userId: string): Promise<void> {
+    const owned = await this.ownedGroups(userId);
+    let raised = 0;
+    for (const group of owned) {
+      const size = parseSizeTier(group.sizeTier);
+      if (sizeTierRank(size) >= sizeTierRank('medium')) continue;
+      const cap = storageCapForTier('medium');
+      await prisma.group.update({
+        where: { id: group.id },
+        data: {
+          sizeTier: 'medium',
+          maxStorageBytes: storageBytesToDb(cap),
+          pendingSizeTier: null,
+          pendingSource: null,
+          graceEndsAt: null,
+          graceNotifiedAt: null,
+          sizeProductId: null,
+          sizeStartedAt: null,
+        },
+      });
+      raised += 1;
+    }
+    if (raised === 0) return;
+    await notificationService
+      .createForUsers(
+        [userId],
+        'Groups updated',
+        'Pro raised the groups you own to Medium (10 GB).',
+        { type: 'group_storage', icon: 'cloud-circle-outline' }
+      )
+      .catch(() => undefined);
+  }
+
+  /** Enterprise owners pick small, medium, or large. The change applies immediately. */
+  public async setOwnedGroupSize(input: {
     groupId: string;
     userId: string;
-    sizeTier: PaidSizeTier;
-    email?: string | null;
-  }): Promise<{ maxStorageBytes: number; sizeTier: GroupSizeTier }> {
+    sizeTier: GroupSizeTier;
+  }): Promise<void> {
+    const user = await prisma.user.findUnique({
+      where: { id: input.userId },
+      select: { subscriptionTier: true },
+    });
+    if (parseSubscriptionTier(user?.subscriptionTier) !== 'enterprise') {
+      throw httpError(403, 'Only an Enterprise plan can choose a group size.');
+    }
     const group = await prisma.group.findUnique({
       where: { id: input.groupId },
-      select: {
-        id: true,
-        name: true,
-        deletedAt: true,
-        sizeTier: true,
-        sizeStartedAt: true,
-        pendingSizeTier: true,
-      },
+      select: { id: true, name: true, deletedAt: true, sizeTier: true },
     });
     if (!group || group.deletedAt) throw httpError(404, 'Group not found');
     const member = await prisma.groupMember.findUnique({
       where: { groupId_userId: { groupId: input.groupId, userId: input.userId } },
-      select: { status: true, role: true },
+      select: { role: true, status: true },
     });
     if (!member || member.status !== 'active' || member.role !== 'owner') {
       throw httpError(403, 'Must be the group owner to change the group size');
     }
-
-    const currentTier = parseSizeTier(group.sizeTier);
-    const cap = storageCapForTier(input.sizeTier);
-    if (input.sizeTier === currentTier) {
-      const hadPending = !!group.pendingSizeTier;
+    const next = parseSizeTier(input.sizeTier);
+    const current = parseSizeTier(group.sizeTier);
+    if (next === current) {
       await this.clearGrace(input.groupId);
-      if (hadPending) {
-        await this.emailPlanUpdate({
-          ownerId: input.userId,
-          email: input.email,
-          groupName: group.name,
-          currentLabel: GROUP_TIERS[currentTier].label,
-          nextLabel: GROUP_TIERS[input.sizeTier].label,
-          immediate: true,
-          startedAt: group.sizeStartedAt ?? new Date(),
-        });
-      }
-      return { maxStorageBytes: cap, sizeTier: currentTier };
+      return;
     }
-    const isDowngrade = sizeTierRank(input.sizeTier) < sizeTierRank(currentTier);
-
-    if (isDowngrade) {
-      await this.startGrace(
-        group.id,
-        group.name,
-        input.userId,
-        input.sizeTier,
-        null,
-        'owner',
-        input.email
-      );
-      return {
-        maxStorageBytes: storageCapForTier(currentTier),
-        sizeTier: currentTier,
-      };
+    const cap = storageCapForTier(next);
+    if (sizeTierRank(next) < sizeTierRank(current)) {
+      await groupStorage.purgeOldestUntilUnderCap(input.groupId, cap);
     }
-
-    const startedAt = new Date();
     await prisma.group.update({
       where: { id: input.groupId },
       data: {
-        sizeTier: input.sizeTier,
+        sizeTier: next,
+        maxStorageBytes: storageBytesToDb(cap),
         pendingSizeTier: null,
         pendingSource: null,
         graceEndsAt: null,
         graceNotifiedAt: null,
-        sizeProductId: productIdForTier(input.sizeTier),
-        sizeStartedAt: startedAt,
-        maxStorageBytes: storageBytesToDb(cap),
+        sizeProductId: null,
+        sizeStartedAt: null,
       },
-    });
-    await this.notifyOwnerAndAdmins(
-      input.groupId,
-      'Group size updated',
-      `${group.name} is now a ${GROUP_TIERS[input.sizeTier].label} group (${formatStorageBytes(cap)}).`
-    );
-    await recordPurchase({
-      userId: input.userId,
-      kind: 'size_addon',
-      title: `${GROUP_TIERS[input.sizeTier].label} group`,
-      detail: group.name,
-      productId: productIdForTier(input.sizeTier),
-      groupId: group.id,
-      groupName: group.name,
-    });
-    await this.emailPlanUpdate({
-      ownerId: input.userId,
-      email: input.email,
-      groupName: group.name,
-      currentLabel: GROUP_TIERS[currentTier].label,
-      nextLabel: GROUP_TIERS[input.sizeTier].label,
-      immediate: true,
-      startedAt,
-    });
-    return { maxStorageBytes: cap, sizeTier: input.sizeTier };
-  }
-
-  /** Immediate cancel log when a paid group is deleted (no grace). */
-  public async cancelOnGroupDelete(input: {
-    groupId: string;
-    userId: string;
-    name: string;
-    sizeTier: string | null | undefined;
-  }): Promise<void> {
-    const tier = parseSizeTier(input.sizeTier);
-    if (!isPaidSizeTier(tier)) return;
-    await recordPurchase({
-      userId: input.userId,
-      kind: 'cancel',
-      title: `Cancelled ${GROUP_TIERS[tier].label}`,
-      detail: input.name,
-      productId: productIdForTier(tier),
-      groupId: input.groupId,
-      groupName: input.name,
-    });
-    const now = new Date();
-    await this.emailPlanUpdate({
-      ownerId: input.userId,
-      groupName: input.name,
-      currentLabel: GROUP_TIERS[tier].label,
-      nextLabel: 'cancelled',
-      immediate: true,
-      startedAt: now,
-      expiresAt: now,
-      cancelled: true,
     });
   }
 
-  /**
-   * Store entitlements are often missing in Test Store / sandbox and after an in-app
-   * apply, so sync must never invent a cancel. Owner-scheduled downgrades stay.
-   * Any billing-sourced pending cancel is cleared so a started Medium/Large plan sticks.
-   */
-  public async syncOwnerEntitlements(
-    userId: string,
-    _entitlements: BillingEntitlementSnapshot
-  ): Promise<void> {
-    const owned = await prisma.groupMember.findMany({
-      where: {
-        userId,
-        role: 'owner',
-        status: 'active',
-        group: { deletedAt: null },
-      },
-      select: { groupId: true },
-    });
+  /** Free accounts that still own a Medium or Large group get the 15-day backup window. */
+  public async scheduleOutstandingFreeDowngrades(): Promise<void> {
     const groups = await prisma.group.findMany({
-      where: { id: { in: owned.map((r) => r.groupId) } },
+      where: {
+        deletedAt: null,
+        sizeTier: { not: 'small' },
+        pendingSizeTier: null,
+        members: {
+          some: {
+            role: 'owner',
+            status: 'active',
+            user: { subscriptionTier: 'free', downgradeAt: null },
+          },
+        },
+      },
       select: {
-        id: true,
-        sizeTier: true,
-        pendingSizeTier: true,
-        pendingSource: true,
+        members: {
+          where: { role: 'owner', status: 'active' },
+          select: { userId: true },
+        },
       },
     });
-
-    for (const group of groups) {
-      const tier = parseSizeTier(group.sizeTier);
-      if (!isPaidSizeTier(tier)) continue;
-      if (group.pendingSource === 'owner') continue;
-      if (group.pendingSizeTier) {
-        await this.clearGrace(group.id);
-      }
+    const downgradeAt = new Date(Date.now() + GROUP_DOWNGRADE_GRACE_MS);
+    const ownerIds = new Set(groups.flatMap((group) => group.members.map((member) => member.userId)));
+    for (const userId of ownerIds) {
+      await this.scheduleDowngrade(userId, downgradeAt);
     }
+  }
+
+  public async scheduleDowngrade(userId: string, downgradeAt: Date): Promise<void> {
+    const owned = await this.ownedGroups(userId);
+    const shrinking = owned.filter((group) => parseSizeTier(group.sizeTier) !== 'small');
+    if (shrinking.length === 0) {
+      await prisma.user.update({
+        where: { id: userId },
+        data: { downgradeAt: null },
+      });
+      return;
+    }
+    await prisma.user.update({
+      where: { id: userId },
+      data: { downgradeAt },
+    });
+    for (const group of shrinking) {
+      await this.startGrace(group.id, 'small', downgradeAt);
+    }
+    const when = formatMailDate(downgradeAt);
+    const body =
+      `Pro has ended. Groups you own stay at their current size until ${when} so you can download files. After that they become Small (1 GB).`;
+    await notificationService
+      .createForUsers([userId], 'Plan grace period', body, {
+        type: 'group_storage',
+        icon: 'warning-outline',
+      })
+      .catch(() => undefined);
+    await this.emailSubscription({
+      ownerId: userId,
+      intro: body,
+      plan: 'Free',
+      price: '$0.00/mo',
+      expiresAt: downgradeAt,
+      renewing: false,
+      subject: 'Your moijia Pro plan has ended',
+    });
+  }
+
+  public async clearOwnedGrace(userId: string): Promise<void> {
+    const owned = await this.ownedGroups(userId);
+    await Promise.all(owned.map((group) => this.clearGrace(group.id)));
   }
 
   public async clearGrace(groupId: string): Promise<void> {
@@ -294,79 +382,24 @@ export class GroupBillingService {
     });
   }
 
-  public async startGrace(
-    groupId: string,
-    groupName: string,
-    ownerId: string,
-    pendingSizeTier: GroupSizeTier,
-    alreadyNotifiedAt: Date | null | undefined,
-    source: 'owner' | 'billing' = 'billing',
-    email?: string | null
-  ): Promise<void> {
+  public async startGrace(groupId: string, pendingSizeTier: GroupSizeTier, graceEndsAt: Date): Promise<void> {
     const existing = await prisma.group.findUnique({
       where: { id: groupId },
-      select: {
-        graceEndsAt: true,
-        graceNotifiedAt: true,
-        sizeTier: true,
-        sizeStartedAt: true,
-        pendingSizeTier: true,
-        pendingSource: true,
-      },
+      select: { sizeTier: true, pendingSizeTier: true, graceEndsAt: true },
     });
     if (!existing) return;
     if (parseSizeTier(existing.sizeTier) === pendingSizeTier) {
       await this.clearGrace(groupId);
       return;
     }
-
-    const alreadyPending = existing.pendingSizeTier === pendingSizeTier;
-    const periodEnd = monthPeriodExpiresAt(existing.sizeStartedAt ?? new Date());
-    const graceEndsAt = existing.graceEndsAt ?? periodEnd;
-    const pendingSource =
-      existing.pendingSource === 'owner' || source === 'owner' ? 'owner' : 'billing';
     await prisma.group.update({
       where: { id: groupId },
-      data: { pendingSizeTier, pendingSource, graceEndsAt },
-    });
-    if (!alreadyPending) {
-      const from = GROUP_TIERS[parseSizeTier(existing.sizeTier)].label;
-      const to = GROUP_TIERS[pendingSizeTier].label;
-      await recordPurchase({
-        userId: ownerId,
-        kind: 'cancel',
-        title: `Switched to ${to}`,
-        detail: `${groupName} · was ${from}`,
-        groupId,
-        groupName,
-      });
-      await this.emailPlanUpdate({
-        ownerId,
-        email,
-        groupName,
-        currentLabel: from,
-        nextLabel: to,
-        immediate: false,
-        startedAt: existing.sizeStartedAt ?? new Date(),
-        expiresAt: graceEndsAt,
-      });
-    }
-
-    if (alreadyNotifiedAt ?? existing.graceNotifiedAt) return;
-    await prisma.group.update({
-      where: { id: groupId },
-      data: { graceNotifiedAt: new Date() },
-    });
-
-    const ends = graceEndsAt.toLocaleDateString();
-    const cap = storageCapForTier(pendingSizeTier);
-    const body =
-      `${groupName} is scheduled to become a ${GROUP_TIERS[pendingSizeTier].label} group on ${ends}. ` +
-      `Until then, storage stays as-is so you can fix billing or download files. ` +
-      `After that, older files will be deleted until usage is under ${formatStorageBytes(cap)}.`;
-
-    await this.notifyOwnerAndAdmins(groupId, 'Group size grace period', body, {
-      icon: 'warning-outline',
+      data: {
+        pendingSizeTier,
+        pendingSource: 'billing',
+        graceEndsAt: existing.graceEndsAt ?? graceEndsAt,
+        graceNotifiedAt: existing.pendingSizeTier ? undefined : new Date(),
+      },
     });
   }
 
@@ -377,26 +410,36 @@ export class GroupBillingService {
         pendingSizeTier: { not: null },
         graceEndsAt: { lte: new Date() },
       },
-      select: { id: true, name: true, pendingSizeTier: true },
+      select: { id: true, pendingSizeTier: true },
     });
+    const owners = new Set<string>();
     for (const group of due) {
-      const pending = parseSizeTier(group.pendingSizeTier);
-      await this.finishGrace(group.id, pending);
+      const ownerId = await this.finishGrace(group.id, parseSizeTier(group.pendingSizeTier));
+      if (ownerId) owners.add(ownerId);
     }
+    if (owners.size > 0) {
+      await prisma.user.updateMany({
+        where: { id: { in: [...owners] } },
+        data: { downgradeAt: null },
+      });
+    }
+    await prisma.user.updateMany({
+      where: { downgradeAt: { lte: new Date() } },
+      data: { downgradeAt: null },
+    });
   }
 
-  public async finishGrace(groupId: string, pending: GroupSizeTier): Promise<void> {
+  public async finishGrace(groupId: string, pending: GroupSizeTier): Promise<string | null> {
     const cap = storageCapForTier(pending);
     const group = await prisma.group.findUnique({
       where: { id: groupId },
-      select: { name: true, sizeTier: true },
+      select: { name: true },
     });
     const owner = await prisma.groupMember.findFirst({
       where: { groupId, role: 'owner', status: 'active' },
       select: { userId: true },
     });
     await groupStorage.purgeOldestUntilUnderCap(groupId, cap);
-    const startedAt = isPaidSizeTier(pending) ? new Date() : null;
     await prisma.group.update({
       where: { id: groupId },
       data: {
@@ -405,8 +448,8 @@ export class GroupBillingService {
         pendingSource: null,
         graceEndsAt: null,
         graceNotifiedAt: null,
-        sizeProductId: isPaidSizeTier(pending) ? productIdForTier(pending as PaidSizeTier) : null,
-        sizeStartedAt: startedAt,
+        sizeProductId: null,
+        sizeStartedAt: null,
         maxStorageBytes: storageBytesToDb(cap),
       },
     });
@@ -416,88 +459,52 @@ export class GroupBillingService {
         'Group size updated',
         `${group.name} is now a ${GROUP_TIERS[pending].label} group (${formatStorageBytes(cap)}).`
       );
-      if (owner) {
-        await this.emailPlanUpdate({
-          ownerId: owner.userId,
-          groupName: group.name,
-          currentLabel: GROUP_TIERS[parseSizeTier(group.sizeTier)].label,
-          nextLabel: GROUP_TIERS[pending].label,
-          immediate: true,
-          startedAt: startedAt ?? new Date(),
-          cancelled: pending === 'small',
-        });
-      }
     }
+    return owner?.userId ?? null;
   }
 
-  private async resolveOwnerEmail(ownerId: string, fallback?: string | null): Promise<string | null> {
-    const candidate = fallback?.trim();
-    const validFallback = candidate && candidate.includes('@') ? candidate : null;
+  private async ownedGroups(userId: string): Promise<Array<{ id: string; name: string; sizeTier: string }>> {
+    const rows = await prisma.groupMember.findMany({
+      where: {
+        userId,
+        role: 'owner',
+        status: 'active',
+        group: { deletedAt: null },
+      },
+      select: { group: { select: { id: true, name: true, sizeTier: true } } },
+    });
+    return rows.map((row) => row.group);
+  }
+
+  private async emailSubscription(input: {
+    ownerId: string;
+    intro: string;
+    plan: string;
+    price: string;
+    expiresAt: Date | null;
+    renewing: boolean;
+    subject?: string;
+  }): Promise<void> {
     const owner = await prisma.user.findUnique({
-      where: { id: ownerId },
+      where: { id: input.ownerId },
       select: { email: true },
     });
-    if (validFallback && owner?.email !== validFallback) {
-      await prisma.user
-        .update({
-          where: { id: ownerId },
-          data: { email: validFallback },
-        })
-        .catch(() => undefined);
-    }
-    return validFallback ?? owner?.email ?? null;
-  }
-
-  private async emailPlanUpdate(input: {
-    ownerId: string;
-    email?: string | null;
-    groupName: string;
-    currentLabel: string;
-    nextLabel: string;
-    immediate: boolean;
-    startedAt: Date;
-    expiresAt?: Date | null;
-    cancelled?: boolean;
-  }): Promise<void> {
-    const to = await this.resolveOwnerEmail(input.ownerId, input.email);
-    const expires = input.expiresAt ?? monthPeriodExpiresAt(input.startedAt);
-    const renews = nextMonthlyAnniversary(input.startedAt);
-    const freeOrCancelled =
-      input.cancelled || input.nextLabel === 'Small' || input.nextLabel === 'cancelled';
-    const shownLabel = input.immediate || input.cancelled ? input.nextLabel : input.currentLabel;
-    const current = planReceipt(input.currentLabel);
-    const next = planReceipt(input.nextLabel);
-    const shown = input.cancelled ? { ...current, price: '$0.00/mo' } : planReceipt(shownLabel);
-    const intro = input.cancelled
-      ? `Your ${current.name} plan for “${input.groupName}” has been cancelled.`
-      : input.immediate
-        ? `Thanks for updating your moijia subscription. “${input.groupName}” is now on ${next.name}.`
-        : `Your moijia subscription for “${input.groupName}” will change from ${current.name} to ${next.name} on ${formatMailDate(expires)}.`;
-    const nextBilling = freeOrCancelled ? 'None' : formatMailDate(renews);
-    const paymentMethod = freeOrCancelled ? 'None' : 'App Store';
-    const subscriptionRows = [
-      { label: 'Group', value: input.groupName },
-      { label: 'Plan', value: shown.name },
-      { label: 'Storage', value: shown.storage },
-      { label: 'Price', value: shown.price },
-    ];
-    if (!input.immediate && !input.cancelled) {
-      subscriptionRows.splice(2, 0, { label: 'Changes to', value: `${next.name} on ${formatMailDate(expires)}` });
-    }
+    const to = owner?.email?.includes('@') ? owner.email : null;
     const sections: ReceiptSection[] = [
-      { heading: 'YOUR SUBSCRIPTION', rows: subscriptionRows },
       {
-        heading: 'PAYMENT INFORMATION',
+        heading: 'YOUR SUBSCRIPTION',
         rows: [
-          { label: 'Payment Method', value: paymentMethod },
-          { label: 'Your Charge(s)', value: shown.price },
-          { label: 'Next billing date', value: nextBilling },
-          { label: 'Expiration date', value: formatMailDate(expires) },
+          { label: 'Plan', value: input.plan },
+          { label: 'Price', value: input.price },
+          {
+            label: input.renewing ? 'Renews' : 'Access through',
+            value: input.expiresAt ? formatMailDate(input.expiresAt) : 'None',
+          },
         ],
       },
     ];
     const text = [
-      intro,
+      input.intro,
       '',
       ...sections.flatMap((section) => [
         section.heading,
@@ -506,26 +513,18 @@ export class GroupBillingService {
       ]),
       MAIL_FOOTER.join('\n\n'),
     ].join('\n');
-    const subject = input.cancelled
-      ? `Your moijia subscription for “${input.groupName}” was cancelled`
-      : 'Your moijia subscription confirmation';
     await sendOwnerEmail({
       to,
-      subject,
+      subject: input.subject ?? 'Your moijia subscription confirmation',
       text,
-      intro,
+      intro: input.intro,
       sections,
     }).catch((err) => {
-      console.warn('[mail] plan update failed', err);
+      console.warn('[mail] subscription update failed', err);
     });
   }
 
-  private async notifyOwnerAndAdmins(
-    groupId: string,
-    title: string,
-    body: string,
-    options?: { icon?: string }
-  ): Promise<void> {
+  private async notifyOwnerAndAdmins(groupId: string, title: string, body: string): Promise<void> {
     const members = await prisma.groupMember.findMany({
       where: {
         groupId,
@@ -534,12 +533,12 @@ export class GroupBillingService {
       },
       select: { userId: true },
     });
-    const ids = [...new Set(members.map((m) => m.userId))];
+    const ids = [...new Set(members.map((member) => member.userId))];
     if (ids.length === 0) return;
     await notificationService
       .createForUsers(ids, title, body, {
         type: 'group_storage',
-        icon: options?.icon ?? 'cloud-circle-outline',
+        icon: 'cloud-circle-outline',
         groupId,
         dest: 'group',
       })

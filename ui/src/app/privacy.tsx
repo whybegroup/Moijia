@@ -33,9 +33,9 @@ export function PrivacyPolicyContent({ onOpenTerms }: { onOpenTerms: () => void 
         metadata such as timestamps and which group they belong to.
       </LegalP>
       <LegalP>
-        Purchases. If you subscribe to extra storage, Apple, Google, or another storefront
-        (including RevenueCat) tells us whether your account has an active entitlement and
-        which plan it is. We do not receive your full payment-card number.
+        Purchases. If you subscribe to Pro, Apple, Google, or another storefront (including
+        RevenueCat) tells us whether your account has an active entitlement. We do not receive
+        your full payment-card number.
       </LegalP>
       <LegalP>
         Device and usage. We collect technical data needed to run the Service, such as app
@@ -79,8 +79,8 @@ export function PrivacyPolicyContent({ onOpenTerms }: { onOpenTerms: () => void 
       <LegalP>
         You can update profile information in the app, leave groups, delete content you
         posted where the product allows it, and turn off push notifications in device
-        settings. You can cancel a storage subscription in your Apple, Google, or web
-        customer-portal settings. To request access or deletion of your account data, email{' '}
+        settings. You can cancel Pro in your Apple, Google, or web customer-portal settings.
+        To request access or deletion of your account data, email{' '}
         {LEGAL_CONTACT_EMAIL}.
       </LegalP>
 
