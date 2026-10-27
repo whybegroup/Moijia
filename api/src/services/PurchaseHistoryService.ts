@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../generated/prisma';
 import type { PurchaseHistoryEntry, PurchaseHistoryKind } from '../models/PurchaseHistory';
 import { PRO_MONTHLY_PRICE_LABEL, PRO_PRODUCT_ID } from '../utils/subscriptionTiers';
 

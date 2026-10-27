@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../generated/prisma';
 import { Expo, ExpoPushMessage, ExpoPushTicket } from 'expo-server-sdk';
 import type { Notification } from '../models';
 

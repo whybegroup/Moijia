@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../generated/prisma';
 import { groupStorage } from './GroupStorageService';
 import { NotificationService } from './NotificationService';
 import { MAIL_FOOTER, sendOwnerEmail, type ReceiptSection } from './EmailService';

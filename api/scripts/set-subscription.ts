@@ -1,6 +1,6 @@
 import path from 'path';
 import { config as loadEnv } from 'dotenv';
-import { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '../src/generated/prisma';
 import { groupBilling } from '../src/services/GroupBillingService';
 import { PRO_PRODUCT_ID, downgradeGraceMs, parseSubscriptionTier } from '../src/utils/subscriptionTiers';
 

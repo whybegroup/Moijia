@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../generated/prisma';
 import { Notification, NotificationInput } from '../models';
 import { notifTypeToPrefKey, parseNotifPrefsJson } from '../utils/notifPrefsCore';
 import { PushNotificationService } from './PushNotificationService';

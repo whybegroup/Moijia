@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../generated/prisma';
 import { User, UserInput, UserUpdate } from '../models';
 import { mergeNotifPrefs, parseNotifPrefsJson } from '../utils/notifPrefsCore';
 import { parseGroupOrderJson, serializeGroupOrderJson } from '../utils/groupOrder';

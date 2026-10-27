@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../generated/prisma';
 import {
   Event,
   EventInput,
