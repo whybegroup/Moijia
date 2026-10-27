@@ -10,6 +10,7 @@ CREATE TABLE "users" (
     "ownedGroupLimit" INTEGER NOT NULL DEFAULT 5,
     "extraGroupSlots" INTEGER NOT NULL DEFAULT 0,
     "subscriptionTier" TEXT NOT NULL DEFAULT 'free',
+    "subscriptionStartedAt" DATETIME,
     "subscriptionExpiresAt" DATETIME,
     "subscriptionProductId" TEXT,
     "subscriptionWillRenew" BOOLEAN NOT NULL DEFAULT false,

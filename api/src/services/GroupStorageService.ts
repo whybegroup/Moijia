@@ -80,12 +80,20 @@ export class GroupStorageService {
       }
     }
 
-    const maxBytes = group
+    const normalMax = group
       ? groupMaxStorageBytes(group.maxStorageBytes, group.sizeTier)
       : DEFAULT_GROUP_MAX_STORAGE_BYTES;
+    const { groupBilling } = await import('./GroupBillingService');
+    const limit = await groupBilling.uploadLimitForGroup(groupId);
+    if (limit.kind === 'closed') {
+      if (extra > 0) throw httpError(413, limit.message);
+      return;
+    }
+    const maxBytes = limit.kind === 'capped' ? Math.min(normalMax, limit.maxBytes) : normalMax;
     const used = await this.getUsedStorageBytes(groupId);
     if (used >= maxBytes || used + extra > maxBytes) {
-      throw httpError(413, groupStorageExceededMessage(maxBytes));
+      const message = limit.kind === 'capped' ? limit.message : groupStorageExceededMessage(maxBytes);
+      throw httpError(413, message);
     }
   }
 

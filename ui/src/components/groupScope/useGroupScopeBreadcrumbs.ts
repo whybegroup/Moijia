@@ -83,14 +83,14 @@ export function useGroupScopeBreadcrumbs(
 
   const segments: BreadcrumbSegment[] = useMemo(() => {
     if (!enabled) {
-      return [{ label: 'All Groups' }];
+      return [{ label: 'Groups' }];
     }
     if (!groupForChrome) {
-      return [{ label: 'All Groups', onPress: goToAllGroups }];
+      return [{ label: 'Groups', onPress: goToAllGroups }];
     }
 
     const out: BreadcrumbSegment[] = [
-      { label: 'All Groups', onPress: goToAllGroups },
+      { label: 'Groups', onPress: goToAllGroups },
       {
         label: groupForChrome.name,
         ...(subpage.kind !== 'overview'

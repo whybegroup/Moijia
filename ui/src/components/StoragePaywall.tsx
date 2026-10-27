@@ -2,14 +2,16 @@ import { useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Fonts, Radius } from '../constants/theme';
 import { WEB_APP_MAX_WIDTH } from '../constants/webAppMaxWidth';
 import { edgeToEdgeModalProps } from './edgeToEdgeModalProps';
@@ -32,6 +34,8 @@ export function StoragePaywall({
   onClose: () => void;
 }) {
   const { purchasePro, restorePurchases, presentCustomerCenter } = usePurchases();
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const [purchasing, setPurchasing] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [error, setError] = useState('');
@@ -76,7 +80,7 @@ export function StoragePaywall({
 
   return (
     <Modal {...edgeToEdgeModalProps} visible={visible} animationType="slide" onRequestClose={onClose}>
-      <SafeAreaView style={styles.safe}>
+      <View style={[styles.safe, { height: windowHeight, paddingTop: insets.top }]}>
         <View style={styles.sheet}>
           <View style={styles.header}>
             <Text style={styles.kicker}>MOIJIA PRO</Text>
@@ -84,69 +88,84 @@ export function StoragePaywall({
               <Ionicons name="close" size={24} color={Colors.text} />
             </TouchableOpacity>
           </View>
-          <Text style={styles.price}>{PRO_PRICE_LABEL}</Text>
-          <Text style={styles.blurb}>
-            A monthly plan for the groups you own. Free stays at 2 Small groups. Enterprise is arranged with us
-            outside the app.
-          </Text>
-          <View style={styles.perks}>
-            {PERKS.map((perk) => (
-              <View key={perk.text} style={styles.perkRow}>
-                <Ionicons name={perk.icon} size={20} color={Colors.textSub} />
-                <Text style={styles.perkText}>{perk.text}</Text>
-              </View>
-            ))}
-          </View>
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-          <TouchableOpacity
-            style={[styles.cta, purchasing && styles.ctaDisabled]}
-            onPress={() => void confirm()}
-            disabled={purchasing}
-            accessibilityRole="button"
+          <ScrollView
+            style={styles.scroll}
+            contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 16 }]}
+            showsVerticalScrollIndicator={false}
           >
-            {purchasing ? (
-              <ActivityIndicator color={Colors.accentFg} />
-            ) : (
-              <Text style={styles.ctaText}>Subscribe · {PRO_PRICE_LABEL}</Text>
-            )}
-          </TouchableOpacity>
-          <View style={styles.links}>
-            <TouchableOpacity onPress={() => void restore()} disabled={restoring}>
-              <Text style={styles.link}>{restoring ? 'Restoring…' : 'Restore purchases'}</Text>
+            <Text style={styles.price}>{PRO_PRICE_LABEL}</Text>
+            <Text style={styles.blurb}>
+              A monthly plan for the groups you own. Free stays at 2 Small groups. Enterprise is arranged with us
+              outside the app.
+            </Text>
+            <View style={styles.perks}>
+              {PERKS.map((perk) => (
+                <View key={perk.text} style={styles.perkRow}>
+                  <Ionicons name={perk.icon} size={20} color={Colors.textSub} />
+                  <Text style={styles.perkText}>{perk.text}</Text>
+                </View>
+              ))}
+            </View>
+            {error ? <Text style={styles.error}>{error}</Text> : null}
+            <TouchableOpacity
+              style={[styles.cta, purchasing && styles.ctaDisabled]}
+              onPress={() => void confirm()}
+              disabled={purchasing}
+              accessibilityRole="button"
+            >
+              {purchasing ? (
+                <ActivityIndicator color={Colors.accentFg} />
+              ) : (
+                <Text style={styles.ctaText}>Subscribe · {PRO_PRICE_LABEL}</Text>
+              )}
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => void presentCustomerCenter().catch(() => undefined)}>
-              <Text style={styles.link}>Manage subscription</Text>
-            </TouchableOpacity>
-          </View>
-          <Text style={styles.legal}>
-            Payment is charged to your Apple or Google account. Pro renews each month until you cancel in the store
-            settings. Groups larger than Small become Small 15 days after Pro expires.
-          </Text>
+            <View style={styles.links}>
+              <TouchableOpacity onPress={() => void restore()} disabled={restoring}>
+                <Text style={styles.link}>{restoring ? 'Restoring…' : 'Restore purchases'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => void presentCustomerCenter().catch(() => undefined)}>
+                <Text style={styles.link}>Manage subscription</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.legal}>
+              Payment is charged to your Apple or Google account. Pro renews each month until you cancel in the store
+              settings. Fifteen days after Pro expires, only the top two groups in My Groups are kept. The others are
+              permanently deleted, and kept groups are trimmed to 1 GB.
+            </Text>
+          </ScrollView>
         </View>
         <AppToastMount />
-      </SafeAreaView>
+      </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: Colors.bg, alignItems: 'center' },
-  sheet: { flex: 1, width: '100%', maxWidth: WEB_APP_MAX_WIDTH, padding: 24 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  safe: { backgroundColor: Colors.bg, alignItems: 'center', overflow: 'hidden' },
+  sheet: { flex: 1, width: '100%', maxWidth: WEB_APP_MAX_WIDTH, paddingHorizontal: 24 },
+  scroll: { flex: 1 },
+  scrollContent: { paddingBottom: 16 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
   kicker: {
     fontSize: 13,
     fontFamily: Fonts.semiBold,
     color: Colors.textMuted,
     letterSpacing: 0.8,
   },
-  price: { marginTop: 18, fontSize: 34, fontFamily: Fonts.bold, color: Colors.text },
-  blurb: { marginTop: 8, fontSize: 15, lineHeight: 22, fontFamily: Fonts.regular, color: Colors.textSub },
-  perks: { marginTop: 24, gap: 14 },
+  price: { marginTop: 8, fontSize: 28, fontFamily: Fonts.bold, color: Colors.text },
+  blurb: { marginTop: 6, fontSize: 15, lineHeight: 21, fontFamily: Fonts.regular, color: Colors.textSub },
+  perks: { marginTop: 16, gap: 12 },
   perkRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   perkText: { flex: 1, fontSize: 15, fontFamily: Fonts.medium, color: Colors.text },
   error: { marginTop: 16, color: Colors.notGoing, fontFamily: Fonts.medium, fontSize: 14 },
   cta: {
-    marginTop: 28,
+    marginTop: 20,
     backgroundColor: Colors.accent,
     borderRadius: Radius.lg,
     minHeight: 48,
@@ -157,5 +176,5 @@ const styles = StyleSheet.create({
   ctaText: { color: Colors.accentFg, fontFamily: Fonts.semiBold, fontSize: 16 },
   links: { marginTop: 16, flexDirection: 'row', justifyContent: 'space-between' },
   link: { fontSize: 14, fontFamily: Fonts.medium, color: Colors.textSub },
-  legal: { marginTop: 20, fontSize: 12, lineHeight: 18, fontFamily: Fonts.regular, color: Colors.textMuted },
+  legal: { marginTop: 14, fontSize: 12, lineHeight: 17, fontFamily: Fonts.regular, color: Colors.textMuted },
 });

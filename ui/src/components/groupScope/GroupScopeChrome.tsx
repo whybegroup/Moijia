@@ -51,7 +51,7 @@ export function GroupScopeChrome({ groupId }: GroupScopeChromeProps) {
     { enabled: !!groupId }
   );
 
-  const listSegments = useMemo(() => [{ label: 'All Groups' }], []);
+  const listSegments = useMemo(() => [{ label: 'Groups' }], []);
 
   const segments = groupId ? groupBreadcrumbs.segments : listSegments;
   const groupSwitchModal = groupId ? groupBreadcrumbs.groupSwitchModal : null;

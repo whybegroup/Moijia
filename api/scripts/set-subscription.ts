@@ -3,7 +3,7 @@ import { config as loadEnv } from 'dotenv';
 import { PrismaClient } from '@prisma/client';
 import { groupBilling } from '../src/services/GroupBillingService';
 import { GROUP_DOWNGRADE_GRACE_MS } from '../src/utils/groupTiers';
-import { parseSubscriptionTier } from '../src/utils/subscriptionTiers';
+import { PRO_PRODUCT_ID, parseSubscriptionTier, proPeriodEnd } from '../src/utils/subscriptionTiers';
 
 loadEnv({ path: path.resolve(__dirname, '../.env') });
 
@@ -27,13 +27,15 @@ async function main(): Promise<void> {
   }
   const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
   if (!user) throw new Error(`User not found: ${userId}`);
+  const startedAt = tier === 'pro' ? new Date() : null;
   await prisma.user.update({
     where: { id: userId },
     data: {
       subscriptionTier: tier,
-      subscriptionProductId: tier === 'pro' ? 'subscription_pro' : null,
-      subscriptionWillRenew: false,
-      subscriptionExpiresAt: null,
+      subscriptionProductId: tier === 'pro' ? PRO_PRODUCT_ID : null,
+      subscriptionWillRenew: tier === 'pro',
+      subscriptionStartedAt: startedAt,
+      subscriptionExpiresAt: startedAt ? proPeriodEnd(startedAt) : null,
       downgradeAt: null,
     },
   });

@@ -71,6 +71,11 @@ export interface GroupScoped {
   /** When the current paid size add-on started (billing day-of-month). */
   sizeStartedAt?: Date | null;
   graceEndsAt?: Date | null;
+  /**
+   * When the owner's downgrade will permanently delete this group.
+   * Absent for groups that stay.
+   */
+  deletionScheduledAt?: Date | null;
   /** Bytes used by this group's images and file attachments. Present on group detail. */
   usedStorageBytes?: number;
   memberCount: number;
@@ -231,8 +236,23 @@ export interface GroupBillingSyncInput {
   proActive: boolean;
   /** False when Pro is cancelled but the paid period has not ended. */
   proRenewing?: boolean;
-  /** ISO time when the current Pro period ends. */
+  /** ISO time when the current Pro period ends. The server keeps Pro for 30 days from the subscribe date. */
   expiresAt?: string | null;
+  /** ISO time of the latest store purchase. Used to start or renew the 30-day period. */
+  purchasedAt?: string | null;
+}
+
+export interface SubscriptionCancelGroup {
+  id: string;
+  name: string;
+  usedBytes: number;
+}
+
+/** Whether owned groups already fit the free plan: 2 groups of at most 1 GB each. */
+export interface SubscriptionCancelCheck {
+  allowed: boolean;
+  ownedCount: number;
+  overStorage: SubscriptionCancelGroup[];
 }
 
 export interface OwnedGroupQuota {
@@ -242,7 +262,9 @@ export interface OwnedGroupQuota {
   groupCapacity: number | null;
   canCreateGroup: boolean;
   subscriptionExpiresAt?: Date | null;
-  /** When owned groups that are not Small become Small. */
+  /** False when Pro is cancelled and access continues until subscriptionExpiresAt. */
+  subscriptionWillRenew?: boolean;
+  /** When extra owned groups are deleted and the groups that stay become Small. */
   downgradeAt?: Date | null;
 }
 

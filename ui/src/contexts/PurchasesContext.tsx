@@ -6,6 +6,7 @@ import {
   addCustomerInfoListener,
   billingSnapshot,
   getCustomerInfo,
+  invalidateCustomerInfoCache,
   identifyRevenueCatUser,
   isAlreadyPurchased,
   isPurchaseCancelled,
@@ -50,7 +51,12 @@ export const PurchasesProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (!user?.uid || !info) return;
       const snapshot = billingSnapshot(info);
       try {
-        await UsersService.syncBilling(user.uid, snapshot);
+        await UsersService.syncBilling(user.uid, {
+          proActive: snapshot.proActive,
+          proRenewing: snapshot.proRenewing,
+          expiresAt: snapshot.expiresAt,
+          purchasedAt: snapshot.purchasedAt,
+        });
         await queryClient.invalidateQueries({ queryKey: queryKeys.groups._base });
         await queryClient.invalidateQueries({ queryKey: queryKeys.users.quota(user.uid) });
         await queryClient.invalidateQueries({ queryKey: queryKeys.users.detail(user.uid) });
@@ -131,12 +137,18 @@ export const PurchasesProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   }, [refresh]);
 
   const presentCustomerCenter = useCallback(async () => {
+    let info = customerInfo;
+    if (!info) {
+      info = await getCustomerInfo().catch(() => null);
+      if (info) setCustomerInfo(info);
+    }
     await presentMoijiaCustomerCenter((info) => {
       setCustomerInfo(info);
       void syncBilling(info);
     });
+    await invalidateCustomerInfoCache().catch(() => undefined);
     await refresh();
-  }, [refresh, syncBilling]);
+  }, [customerInfo, refresh, syncBilling]);
 
   const purchasePro = useCallback(async (): Promise<CustomerInfo | null> => {
     try {

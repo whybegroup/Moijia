@@ -12,7 +12,7 @@ import {
   SuccessResponse,
   Response,
 } from 'tsoa';
-import { User, UserInput, UserUpdate, GroupOrderInput, GroupBillingSyncInput, OwnedGroupQuota, PurchaseHistoryEntry } from '../models';
+import { User, UserInput, UserUpdate, GroupOrderInput, GroupBillingSyncInput, OwnedGroupQuota, PurchaseHistoryEntry, SubscriptionCancelCheck } from '../models';
 import type { PushTokenInput } from '../models/PushToken';
 import { UserService } from '../services/UserService';
 import { PushTokenService } from '../services/PushTokenService';
@@ -80,6 +80,15 @@ export class UserController extends Controller {
   }
 
   /**
+   * Whether the groups this user owns already fit the free plan.
+   * Cancelling Pro is always allowed. Extra groups are deleted after the grace period.
+   */
+  @Get('{id}/subscription-cancel')
+  public async getSubscriptionCancelCheck(@Path() id: string): Promise<SubscriptionCancelCheck> {
+    return groupBilling.getSubscriptionCancelCheck(id);
+  }
+
+  /**
    * Purchase and plan-change history for this user.
    */
   @Get('{id}/purchase-history')
@@ -89,8 +98,8 @@ export class UserController extends Controller {
 
   /**
    * Reconcile the App Store Pro subscription with this account.
-   * Enterprise is left unchanged. After Pro expires, non-small groups stay
-   * for 15 days, then become Small.
+   * Enterprise is left unchanged. After Pro expires, groups stay for 15 days.
+   * Then only the top two in My Groups are kept and become Small. The rest are deleted.
    */
   @Post('{id}/billing-sync')
   public async syncBilling(
@@ -102,10 +111,16 @@ export class UserController extends Controller {
       this.setStatus(400);
       throw new Error('expiresAt is invalid');
     }
+    const purchasedAt = body.purchasedAt ? new Date(body.purchasedAt) : null;
+    if (body.purchasedAt && purchasedAt && Number.isNaN(purchasedAt.getTime())) {
+      this.setStatus(400);
+      throw new Error('purchasedAt is invalid');
+    }
     return groupBilling.syncSubscription(id, {
       proActive: !!body.proActive,
       proRenewing: !!body.proActive && body.proRenewing !== false,
       expiresAt,
+      purchasedAt,
     });
   }
 

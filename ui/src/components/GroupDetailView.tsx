@@ -51,6 +51,7 @@ import { ImageLightboxModal } from './ImageLightboxModal';
 import { dropLightboxItem } from './ForumPostMarkdownBody';
 import { GroupStorageUsageBar } from './GroupStorageUsageBar';
 import { GroupDowngradeBanner } from './GroupDowngradeBanner';
+import { useGroupDeletionAt } from '../hooks/useGroupDeletionAt';
 import { GroupFriendGroupsSection } from './GroupFriendGroupsSection';
 import { groupSubpageFromPathname } from './groupScope/useGroupSubpage';
 import { groupsTabParentHref, navigateGroupsTabTo } from '../utils/tabBreadcrumbNav';
@@ -208,6 +209,7 @@ export function GroupDetailView({ groupId }: GroupDetailViewProps) {
   const { userId: currentUserId } = useCurrentUserContext();
 
   const { data: group, isError, error: groupError, refetch: refetchGroup } = useGroup(groupId, currentUserId ?? '');
+  const deletionScheduledAt = useGroupDeletionAt(currentUserId, groupId, group?.deletionScheduledAt);
   const { data: memberColorData, refetch: refetchMemberColor } = useGroupMemberColor(
     groupId,
     currentUserId ?? ''
@@ -959,10 +961,11 @@ export function GroupDetailView({ groupId }: GroupDetailViewProps) {
           <GroupFriendGroupsSection groupId={groupId} userId={currentUserId} isAdmin={isAdmin} />
         ) : null}
 
-        {!isPending && group.pendingSizeTier && group.graceEndsAt ? (
+        {!isPending && (deletionScheduledAt || (group.pendingSizeTier && group.graceEndsAt)) ? (
           <GroupDowngradeBanner
             pendingSizeTier={group.pendingSizeTier}
             graceEndsAt={group.graceEndsAt}
+            deletionScheduledAt={deletionScheduledAt}
           />
         ) : null}
 

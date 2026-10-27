@@ -3,9 +3,12 @@ import { groupStorage } from './GroupStorageService';
 import { NotificationService } from './NotificationService';
 import { MAIL_FOOTER, sendOwnerEmail, type ReceiptSection } from './EmailService';
 import { httpError } from '../utils/httpError';
+import { parseGroupOrderJson, partitionByOrder } from '../utils/groupOrder';
+import { purgeGroupCompletely } from './groupPurge';
 import { recordPurchase } from './PurchaseHistoryService';
-import type { OwnedGroupQuota } from '../models/Group';
+import type { OwnedGroupQuota, SubscriptionCancelCheck } from '../models/Group';
 import {
+  FREE_OWNED_GROUP_LIMIT,
   GROUP_DOWNGRADE_GRACE_MS,
   GROUP_TIERS,
   formatStorageBytes,
@@ -21,6 +24,8 @@ import {
   ownedGroupCapacity,
   parseSubscriptionTier,
   planLabel,
+  proPeriodEnd,
+  resolveProPeriodStart,
   sizeForNewGroup,
   subscriptionRank,
   tierAllowsSize,
@@ -34,10 +39,57 @@ export interface ProSubscriptionSnapshot {
   proActive: boolean;
   proRenewing: boolean;
   expiresAt: Date | null;
+  /** Latest store purchase. The period still ends 30 days after it started. */
+  purchasedAt: Date | null;
+}
+
+function validDate(value: Date | null | undefined): Date | null {
+  if (!value || Number.isNaN(value.getTime())) return null;
+  return value;
 }
 
 function formatMailDate(date: Date): string {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+type OwnedGroupRow = { id: string; name: string; sizeTier: string; deletedAt: Date | null };
+
+export type GroupUploadLimit =
+  | { kind: 'default' }
+  | { kind: 'closed'; message: string }
+  | { kind: 'capped'; maxBytes: number; message: string };
+
+function downgradeNotice(
+  when: string,
+  keep: OwnedGroupRow[],
+  deleting: OwnedGroupRow[],
+  hasAlreadyDeleted: boolean
+): string {
+  if (deleting.length === 0 && !hasAlreadyDeleted) {
+    return `Pro has ended. Until ${when} you can download, delete files, or transfer a group. New uploads stop once a group is over 1 GB. On ${when} the groups you keep become Small (1 GB), and older files over that limit are removed.`;
+  }
+  if (deleting.length === 0) {
+    const kept = keep.map((group) => group.name).join(', ');
+    const size = kept
+      ? `The groups you keep (${kept}) become Small (1 GB), and older files over that limit are removed. `
+      : '';
+    return `Pro has ended. On ${when}, groups you already deleted are permanently removed and cannot be restored. ${size}`.trim();
+  }
+  const kept = keep.map((group) => group.name).join(', ') || 'none';
+  const removed = deleting.map((group) => group.name).join(', ');
+  const lines = [
+    `Pro has ended. On ${when}, only the top two groups in My Groups are kept (${kept}).`,
+  ];
+  if (removed) {
+    lines.push(`These groups will be permanently deleted: ${removed}.`);
+  }
+  lines.push(
+    `On the Groups tab, move groups between Kept and Will be deleted before then. Until ${when} you can download, delete files, or transfer a group. New uploads stop once a kept group is over 1 GB. On ${when} those groups become Small (1 GB), and older files over that limit are removed.`
+  );
+  if (hasAlreadyDeleted) {
+    lines.push('Groups you already deleted are permanently removed on that date and cannot be restored.');
+  }
+  return lines.join(' ');
 }
 
 export class GroupBillingService {
@@ -56,6 +108,25 @@ export class GroupBillingService {
     });
   }
 
+  /** Reports whether owned groups already fit the free plan. Cancelling is still allowed. */
+  public async getSubscriptionCancelCheck(userId: string): Promise<SubscriptionCancelCheck> {
+    const owned = await this.ownedGroups(userId);
+    const cap = storageCapForTier('small');
+    const overStorage: SubscriptionCancelCheck['overStorage'] = [];
+    for (const group of owned) {
+      const usedBytes = await groupStorage.getUsedStorageBytes(group.id);
+      if (usedBytes > cap) {
+        overStorage.push({ id: group.id, name: group.name, usedBytes });
+      }
+    }
+    overStorage.sort((a, b) => b.usedBytes - a.usedBytes);
+    return {
+      allowed: owned.length <= FREE_OWNED_GROUP_LIMIT && overStorage.length === 0,
+      ownedCount: owned.length,
+      overStorage,
+    };
+  }
+
   public async getOwnedGroupQuota(userId: string): Promise<OwnedGroupQuota> {
     const [ownedGroupCount, user] = await Promise.all([
       this.ownedGroupCount(userId),
@@ -64,6 +135,7 @@ export class GroupBillingService {
         select: {
           subscriptionTier: true,
           subscriptionExpiresAt: true,
+          subscriptionWillRenew: true,
           downgradeAt: true,
         },
       }),
@@ -76,6 +148,7 @@ export class GroupBillingService {
       groupCapacity,
       canCreateGroup: groupCapacity == null || ownedGroupCount < groupCapacity,
       subscriptionExpiresAt: user?.subscriptionExpiresAt ?? null,
+      subscriptionWillRenew: user?.subscriptionWillRenew ?? false,
       downgradeAt: user?.downgradeAt ?? null,
     };
   }
@@ -130,14 +203,16 @@ export class GroupBillingService {
 
   /**
    * Store Pro onto the user. Enterprise is assigned outside the app and is left alone.
-   * A new Pro subscription raises owned groups to Medium. After Pro expires, non-small
-   * groups stay put for 15 days, then become Small.
+   * A new Pro subscription raises owned groups to Medium. After Pro expires, groups stay
+   * for 15 days. Then the top two in My Groups are kept and become Small, and the rest
+   * are permanently deleted.
    */
   public async syncSubscription(userId: string, input: ProSubscriptionSnapshot): Promise<OwnedGroupQuota> {
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: {
         subscriptionTier: true,
+        subscriptionStartedAt: true,
         subscriptionExpiresAt: true,
         subscriptionProductId: true,
       },
@@ -147,10 +222,13 @@ export class GroupBillingService {
     const tier = parseSubscriptionTier(user.subscriptionTier);
     if (tier === 'enterprise') return this.getOwnedGroupQuota(userId);
 
-    const now = Date.now();
-    const expiresMs = input.expiresAt?.getTime();
-    const expiresValid = expiresMs != null && !Number.isNaN(expiresMs);
-    const inPaidPeriod = input.proActive && (!expiresValid || expiresMs > now);
+    const now = new Date();
+    const purchasedAt = validDate(input.purchasedAt);
+    const storedStart = validDate(user.subscriptionStartedAt);
+    const trackPeriod = input.proActive || tier === 'pro' || storedStart != null;
+    const startedAt = trackPeriod ? resolveProPeriodStart(storedStart, purchasedAt, now) : null;
+    const expiresAt = startedAt ? proPeriodEnd(startedAt) : validDate(input.expiresAt);
+    const inPaidPeriod = expiresAt != null && expiresAt.getTime() > now.getTime() && (input.proActive || tier === 'pro');
 
     if (inPaidPeriod) {
       const becomingPro = tier !== 'pro';
@@ -158,7 +236,8 @@ export class GroupBillingService {
         where: { id: userId },
         data: {
           subscriptionTier: 'pro',
-          subscriptionExpiresAt: input.expiresAt,
+          subscriptionStartedAt: startedAt,
+          subscriptionExpiresAt: expiresAt,
           subscriptionProductId: PRO_PRODUCT_ID,
           subscriptionWillRenew: input.proRenewing,
           downgradeAt: null,
@@ -179,7 +258,7 @@ export class GroupBillingService {
           intro: 'Thanks for subscribing to moijia Pro. Groups you own are Medium (10 GB), and you can create up to 10.',
           plan: 'Pro',
           price: PRO_MONTHLY_PRICE_LABEL,
-          expiresAt: input.expiresAt,
+          expiresAt,
           renewing: input.proRenewing,
         });
       }
@@ -193,21 +272,23 @@ export class GroupBillingService {
       data: {
         subscriptionTier: 'free',
         subscriptionWillRenew: false,
-        subscriptionExpiresAt: input.expiresAt ?? user.subscriptionExpiresAt,
+        subscriptionStartedAt: startedAt,
+        subscriptionExpiresAt: expiresAt ?? user.subscriptionExpiresAt,
         subscriptionProductId: wasPro ? PRO_PRODUCT_ID : null,
       },
     });
 
     if (wasPro && tier === 'pro') {
-      const periodEnd =
-        (expiresValid ? input.expiresAt : null) ?? user.subscriptionExpiresAt ?? new Date();
+      const periodEnd = expiresAt ?? user.subscriptionExpiresAt ?? now;
       const downgradeAt = new Date(periodEnd.getTime() + GROUP_DOWNGRADE_GRACE_MS);
-      await this.scheduleDowngrade(userId, downgradeAt);
+      const downgrading = await this.scheduleDowngrade(userId, downgradeAt);
       await recordPurchase({
         userId,
         kind: 'cancel',
         title: 'Pro ended',
-        detail: `Groups stay at their current size until ${formatMailDate(downgradeAt)}`,
+        detail: downgrading
+          ? `Free plan limits apply on ${formatMailDate(downgradeAt)}`
+          : 'Switched to Free',
         productId: PRO_PRODUCT_ID,
       });
     }
@@ -299,7 +380,7 @@ export class GroupBillingService {
     });
   }
 
-  /** Free accounts that still own a Medium or Large group get the 15-day backup window. */
+  /** Free accounts over the free limits get the 15-day window before groups are trimmed or deleted. */
   public async scheduleOutstandingFreeDowngrades(): Promise<void> {
     const groups = await prisma.group.findMany({
       where: {
@@ -321,22 +402,39 @@ export class GroupBillingService {
         },
       },
     });
-    const downgradeAt = new Date(Date.now() + GROUP_DOWNGRADE_GRACE_MS);
     const ownerIds = new Set(groups.flatMap((group) => group.members.map((member) => member.userId)));
+    const memberships = await prisma.groupMember.findMany({
+      where: {
+        role: 'owner',
+        status: 'active',
+        group: { deletedAt: null },
+        user: { subscriptionTier: 'free', downgradeAt: null },
+      },
+      select: { userId: true },
+    });
+    const ownedCounts = new Map<string, number>();
+    for (const row of memberships) {
+      ownedCounts.set(row.userId, (ownedCounts.get(row.userId) ?? 0) + 1);
+    }
+    for (const [userId, count] of ownedCounts) {
+      if (count > FREE_OWNED_GROUP_LIMIT) ownerIds.add(userId);
+    }
+    const downgradeAt = new Date(Date.now() + GROUP_DOWNGRADE_GRACE_MS);
     for (const userId of ownerIds) {
       await this.scheduleDowngrade(userId, downgradeAt);
     }
   }
 
-  public async scheduleDowngrade(userId: string, downgradeAt: Date): Promise<void> {
-    const owned = await this.ownedGroups(userId);
-    const shrinking = owned.filter((group) => parseSizeTier(group.sizeTier) !== 'small');
-    if (shrinking.length === 0) {
+  public async scheduleDowngrade(userId: string, downgradeAt: Date): Promise<boolean> {
+    const { keep, remove, active } = await this.classifyOwnedGroups(userId);
+    const shrinking = active.filter((group) => parseSizeTier(group.sizeTier) !== 'small');
+    const deleting = remove.filter((group) => !group.deletedAt);
+    if (shrinking.length === 0 && remove.length === 0) {
       await prisma.user.update({
         where: { id: userId },
         data: { downgradeAt: null },
       });
-      return;
+      return false;
     }
     await prisma.user.update({
       where: { id: userId },
@@ -346,14 +444,46 @@ export class GroupBillingService {
       await this.startGrace(group.id, 'small', downgradeAt);
     }
     const when = formatMailDate(downgradeAt);
-    const body =
-      `Pro has ended. Groups you own stay at their current size until ${when} so you can download files. After that they become Small (1 GB).`;
+    const body = downgradeNotice(when, keep, deleting, remove.some((group) => group.deletedAt));
     await notificationService
       .createForUsers([userId], 'Plan grace period', body, {
         type: 'group_storage',
         icon: 'warning-outline',
       })
       .catch(() => undefined);
+    for (const group of keep) {
+      if (parseSizeTier(group.sizeTier) === 'small') continue;
+      const members = await prisma.groupMember.findMany({
+        where: { groupId: group.id, status: 'active', userId: { not: userId } },
+        select: { userId: true },
+      });
+      const ids = members.map((member) => member.userId);
+      if (ids.length === 0) continue;
+      await notificationService
+        .createForUsers(
+          ids,
+          'Group storage will shrink',
+          `${group.name} becomes Small (1 GB) on ${when}. New uploads stop once it is over 1 GB. Older files over that limit are removed on ${when}. Download anything you need before then.`,
+          { type: 'group_storage', icon: 'warning-outline', groupId: group.id, dest: 'group' }
+        )
+        .catch(() => undefined);
+    }
+    for (const group of deleting) {
+      const members = await prisma.groupMember.findMany({
+        where: { groupId: group.id, status: 'active', userId: { not: userId } },
+        select: { userId: true },
+      });
+      const ids = members.map((member) => member.userId);
+      if (ids.length === 0) continue;
+      await notificationService
+        .createForUsers(
+          ids,
+          'Group will be deleted',
+          `${group.name} will be permanently deleted on ${when} unless its owner moves it into Kept before then.`,
+          { type: 'group_storage', icon: 'warning-outline', groupId: group.id, dest: 'group' }
+        )
+        .catch(() => undefined);
+    }
     await this.emailSubscription({
       ownerId: userId,
       intro: body,
@@ -363,6 +493,7 @@ export class GroupBillingService {
       renewing: false,
       subject: 'Your moijia Pro plan has ended',
     });
+    return true;
   }
 
   public async clearOwnedGrace(userId: string): Promise<void> {
@@ -404,6 +535,19 @@ export class GroupBillingService {
   }
 
   public async applyDueGracePeriods(): Promise<void> {
+    const now = new Date();
+    const dueUsers = await prisma.user.findMany({
+      where: { downgradeAt: { lte: now } },
+      select: { id: true },
+    });
+    for (const user of dueUsers) {
+      try {
+        await this.finishUserDowngrade(user.id);
+      } catch (err) {
+        console.error('[group-billing] downgrade failed', user.id, err);
+      }
+    }
+
     const due = await prisma.group.findMany({
       where: {
         deletedAt: null,
@@ -412,21 +556,130 @@ export class GroupBillingService {
       },
       select: { id: true, pendingSizeTier: true },
     });
-    const owners = new Set<string>();
     for (const group of due) {
-      const ownerId = await this.finishGrace(group.id, parseSizeTier(group.pendingSizeTier));
-      if (ownerId) owners.add(ownerId);
-    }
-    if (owners.size > 0) {
-      await prisma.user.updateMany({
-        where: { id: { in: [...owners] } },
-        data: { downgradeAt: null },
-      });
+      await this.finishGrace(group.id, parseSizeTier(group.pendingSizeTier));
     }
     await prisma.user.updateMany({
       where: { downgradeAt: { lte: new Date() } },
       data: { downgradeAt: null },
     });
+  }
+
+  /**
+   * While a downgrade is scheduled, kept groups cannot grow past 1 GB.
+   * Groups that will be deleted accept no new uploads.
+   */
+  public async uploadLimitForGroup(groupId: string): Promise<GroupUploadLimit> {
+    const owner = await prisma.groupMember.findFirst({
+      where: { groupId, role: 'owner', status: 'active' },
+      select: {
+        userId: true,
+        user: { select: { downgradeAt: true, subscriptionTier: true } },
+      },
+    });
+    const downgradeAt = owner?.user.downgradeAt ?? null;
+    if (!owner || !downgradeAt || parseSubscriptionTier(owner.user.subscriptionTier) !== 'free') {
+      return { kind: 'default' };
+    }
+    const when = formatMailDate(downgradeAt);
+    const { keep, remove } = await this.classifyOwnedGroups(owner.userId);
+    if (remove.some((group) => group.id === groupId && !group.deletedAt)) {
+      return {
+        kind: 'closed',
+        message: `This group will be deleted on ${when}. New uploads are closed. You can still download or delete files.`,
+      };
+    }
+    if (keep.some((group) => group.id === groupId)) {
+      return {
+        kind: 'capped',
+        maxBytes: storageCapForTier('small'),
+        message: `This group is limited to 1 GB until ${when}. Delete files before uploading more. Older files over 1 GB are removed on that date.`,
+      };
+    }
+    return { kind: 'default' };
+  }
+
+  /** Groups past the top two in My Groups, plus already-deleted owned groups, are removed on this date. */
+  public async scheduledDeletionByGroup(groupIds: string[]): Promise<Map<string, Date>> {
+    const result = new Map<string, Date>();
+    const unique = [...new Set(groupIds.filter(Boolean))];
+    if (unique.length === 0) return result;
+    const owners = await prisma.groupMember.findMany({
+      where: { groupId: { in: unique }, role: 'owner', status: 'active' },
+      select: { userId: true },
+    });
+    const userIds = [...new Set(owners.map((owner) => owner.userId))];
+    if (userIds.length === 0) return result;
+    const users = await prisma.user.findMany({
+      where: { id: { in: userIds }, downgradeAt: { not: null } },
+      select: { id: true, downgradeAt: true },
+    });
+    for (const user of users) {
+      if (!user.downgradeAt) continue;
+      const { remove } = await this.classifyOwnedGroups(user.id);
+      for (const group of remove) {
+        if (!group.deletedAt) result.set(group.id, user.downgradeAt);
+      }
+    }
+    return result;
+  }
+
+  private async finishUserDowngrade(userId: string): Promise<void> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { subscriptionTier: true, downgradeAt: true },
+    });
+    if (!user?.downgradeAt || user.downgradeAt.getTime() > Date.now()) return;
+    if (parseSubscriptionTier(user.subscriptionTier) !== 'free') {
+      await prisma.user.update({ where: { id: userId }, data: { downgradeAt: null } });
+      return;
+    }
+
+    const { keep, remove } = await this.classifyOwnedGroups(userId);
+    const deletedNames: string[] = [];
+    for (const group of remove) {
+      const members = await prisma.groupMember.findMany({
+        where: { groupId: group.id, status: 'active', userId: { not: userId } },
+        select: { userId: true },
+      });
+      const removed = await purgeGroupCompletely(group.id);
+      if (!removed) continue;
+      deletedNames.push(group.name);
+      const ids = members.map((member) => member.userId);
+      if (ids.length === 0 || group.deletedAt) continue;
+      await notificationService
+        .createForUsers(
+          ids,
+          'Group deleted',
+          `${group.name} was permanently deleted because the owner's plan ended.`,
+          { type: 'group_storage', icon: 'warning-outline' }
+        )
+        .catch(() => undefined);
+    }
+
+    const smallCap = storageCapForTier('small');
+    for (const group of keep) {
+      const used = await groupStorage.getUsedStorageBytes(group.id);
+      if (parseSizeTier(group.sizeTier) === 'small' && used <= smallCap) {
+        await this.clearGrace(group.id);
+        continue;
+      }
+      await this.finishGrace(group.id, 'small');
+    }
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: { downgradeAt: null },
+    });
+    if (deletedNames.length === 0) return;
+    await notificationService
+      .createForUsers(
+        [userId],
+        'Groups deleted',
+        `These groups were permanently deleted: ${deletedNames.join(', ')}.`,
+        { type: 'group_storage', icon: 'warning-outline' }
+      )
+      .catch(() => undefined);
   }
 
   public async finishGrace(groupId: string, pending: GroupSizeTier): Promise<string | null> {
@@ -435,6 +688,7 @@ export class GroupBillingService {
       where: { id: groupId },
       select: { name: true },
     });
+    if (!group) return null;
     const owner = await prisma.groupMember.findFirst({
       where: { groupId, role: 'owner', status: 'active' },
       select: { userId: true },
@@ -461,6 +715,32 @@ export class GroupBillingService {
       );
     }
     return owner?.userId ?? null;
+  }
+
+  private async classifyOwnedGroups(userId: string): Promise<{
+    keep: OwnedGroupRow[];
+    remove: OwnedGroupRow[];
+    active: OwnedGroupRow[];
+  }> {
+    const [rows, user] = await Promise.all([
+      this.ownedGroupRows(userId),
+      prisma.user.findUnique({
+        where: { id: userId },
+        select: { groupOrderJson: true },
+      }),
+    ]);
+    const active = rows.filter((group) => !group.deletedAt);
+    const alreadyDeleted = rows.filter((group) => group.deletedAt);
+    const { keep, remove } = partitionByOrder(active, parseGroupOrderJson(user?.groupOrderJson), FREE_OWNED_GROUP_LIMIT);
+    return { keep, remove: [...remove, ...alreadyDeleted], active };
+  }
+
+  private async ownedGroupRows(userId: string): Promise<OwnedGroupRow[]> {
+    const rows = await prisma.groupMember.findMany({
+      where: { userId, role: 'owner', status: 'active' },
+      select: { group: { select: { id: true, name: true, sizeTier: true, deletedAt: true } } },
+    });
+    return rows.map((row) => row.group);
   }
 
   private async ownedGroups(userId: string): Promise<Array<{ id: string; name: string; sizeTier: string }>> {

@@ -4,7 +4,10 @@ import { Colors, Fonts } from '../constants/theme';
 import { useCurrentUserContext } from '../contexts/CurrentUserContext';
 import { usePurchases } from '../contexts/PurchasesContext';
 import { useOwnedGroupQuota } from '../hooks/api/useUsers';
-import { parseSubscriptionTier, subscriptionPlanLabel } from '../utils/subscriptionTiers';
+import { PRO_PRICE_LABEL, parseSubscriptionTier, subscriptionPlanLabel } from '../utils/subscriptionTiers';
+import { formatPlanDate } from '../utils/groupPlanPeriod';
+import { downgradeIsPending, pendingDowngradeAt } from '../utils/downgradePlan';
+import { FREE_OWNED_GROUP_LIMIT } from '../utils/groupTiers';
 import { StoragePaywall } from './StoragePaywall';
 
 export function SubscriptionSettingsCard() {
@@ -13,6 +16,13 @@ export function SubscriptionSettingsCard() {
   const { presentCustomerCenter } = usePurchases();
   const [paywallOpen, setPaywallOpen] = useState(false);
   const tier = parseSubscriptionTier(quota?.subscriptionTier);
+  const price = tier === 'pro' ? PRO_PRICE_LABEL : tier === 'enterprise' ? 'Custom' : '$0';
+  const periodDate = quota?.subscriptionExpiresAt ? formatPlanDate(quota.subscriptionExpiresAt) : '';
+  const periodLabel = quota?.subscriptionWillRenew ? 'Renews' : 'Expires';
+  const downgradePending = downgradeIsPending(quota);
+  const downgradeDate = pendingDowngradeAt(quota);
+  const downgradeWhen = downgradeDate ? formatPlanDate(downgradeDate) : '';
+  const choosingKeepers = downgradePending && (quota?.ownedGroupCount ?? 0) > FREE_OWNED_GROUP_LIMIT;
 
   return (
     <>
@@ -22,6 +32,25 @@ export function SubscriptionSettingsCard() {
           <Text style={styles.infoLabel}>Current plan</Text>
           <Text style={styles.infoValue}>{subscriptionPlanLabel(tier)}</Text>
         </View>
+        <View style={[styles.infoRow, styles.actionRow]}>
+          <Text style={styles.infoLabel}>Price</Text>
+          <Text style={styles.infoValue}>{price}</Text>
+        </View>
+        {tier === 'pro' && periodDate ? (
+          <View style={[styles.infoRow, styles.actionRow]}>
+            <Text style={styles.infoLabel}>{periodLabel}</Text>
+            <Text style={styles.infoValue}>{periodDate}</Text>
+          </View>
+        ) : null}
+        {downgradePending ? (
+          <View style={[styles.infoRow, styles.actionRow]}>
+            <Text style={styles.notice}>
+              {choosingKeepers
+                ? `${downgradeWhen ? `On ${downgradeWhen}, only` : 'Only'} the two groups under Kept stay. The others are permanently deleted.`
+                : `${downgradeWhen ? `On ${downgradeWhen}, groups` : 'Groups'} you own become Small (1 GB).`}
+            </Text>
+          </View>
+        ) : null}
         {tier === 'free' ? (
           <TouchableOpacity
             style={[styles.infoRow, styles.actionRow]}
@@ -76,4 +105,5 @@ const styles = StyleSheet.create({
   infoLabel: { fontSize: 14, fontFamily: Fonts.regular, color: Colors.text },
   infoValue: { fontSize: 14, fontFamily: Fonts.medium, color: Colors.text, flexShrink: 1, textAlign: 'right' },
   actionText: { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.accent },
+  notice: { fontSize: 14, lineHeight: 20, fontFamily: Fonts.regular, color: Colors.textSub },
 });

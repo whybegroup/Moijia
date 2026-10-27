@@ -14,6 +14,17 @@ export function serializeGroupOrderJson(groupIds: string[]): string {
   return JSON.stringify(groupIds);
 }
 
+/** First `keepCount` groups in My Groups order are kept. The rest are removed. */
+export function partitionByOrder<T extends { id: string; name: string }>(
+  groups: T[],
+  orderIds: string[],
+  keepCount: number
+): { keep: T[]; remove: T[] } {
+  const sorted = sortByGroupOrder(groups, orderIds);
+  const count = Math.max(0, keepCount);
+  return { keep: sorted.slice(0, count), remove: sorted.slice(count) };
+}
+
 /** Sort groups by stored order; unknown ids follow in name order after known ids. */
 export function sortByGroupOrder<T extends { id: string; name: string }>(
   groups: T[],

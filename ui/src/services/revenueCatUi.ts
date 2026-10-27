@@ -20,7 +20,7 @@ function outcomeFromPaywallResult(result: PAYWALL_RESULT): ProPaywallOutcome {
   }
 }
 
-/** Dashboard paywall for subscription_pro. */
+/** Dashboard paywall for pro_subscription. */
 export async function presentCurrentPaywall(): Promise<ProPaywallOutcome> {
   try {
     const offering = await getProOffering().catch(() => null);

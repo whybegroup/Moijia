@@ -6,9 +6,9 @@ const TEST_STORE_API_KEY = 'test_yZwTcJhfkgbkfOatxRovcSEgUdW';
 /** Offering that contains the Pro auto-renewable subscription. */
 export const PRO_OFFERING_ID = 'offering_group_subscriptions';
 
-export const PRO_PRODUCT_ID = 'subscription_pro';
-export const PRO_ENTITLEMENT_ID = 'entitlement_pro';
-export const PRO_PACKAGE_ID = 'package_pro';
+export const PRO_PRODUCT_ID = 'pro_subscription';
+export const PRO_ENTITLEMENT_ID = 'entitlement_subscription_pro';
+export const PRO_PACKAGE_ID = 'offering_subscription_pro';
 export const PRO_PRICE_LABEL = '$19.99/month';
 
 export function getRevenueCatApiKey(): string {

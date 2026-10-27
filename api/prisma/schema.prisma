@@ -30,9 +30,11 @@ model User {
   extraGroupSlots Int @default(0)
   /// free | pro | enterprise. Everyone starts on free.
   subscriptionTier String @default("free")
+  /// When the current Pro period started. Expiration is 30 days after this.
+  subscriptionStartedAt DateTime?
   /// When the current Pro period ends. Null for free and for Enterprise.
   subscriptionExpiresAt DateTime?
-  /// Store product bound to this user. Pro is subscription_pro.
+  /// Store product bound to this user. Pro is pro_subscription.
   subscriptionProductId String?
   /// False after the store subscription is cancelled but may still be in its paid period.
   subscriptionWillRenew Boolean @default(false)

@@ -3,36 +3,39 @@ import {
   useCallback,
   useMemo,
   useEffect,
-  useRef,
 } from 'react';
 import {
   View,
   Text,
-  TouchableOpacity,
   StyleSheet,
   Pressable,
   ScrollView,
 } from 'react-native';
-import { Gesture } from 'react-native-gesture-handler';
+import { Gesture, type PanGesture } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppRouter as useRouter } from '../../../hooks/useAppRouter';
 import { runOnJS } from 'react-native-reanimated';
-import ReorderableList, {
+import {
+  NestedReorderableList,
+  ScrollViewContainer,
   reorderItems,
   useIsActive,
   useReorderableDrag,
-  type ReorderableListRenderItemInfo,
+  type ReorderableListRenderItem,
+  type ReorderableListReorderEvent,
 } from 'react-native-reorderable-list';
 import { Colors, Fonts, Radius, Shadows } from '../../../constants/theme';
 import { getGroupColor, getDefaultGroupThemeFromName, groupAvatarBorderRadius } from '../../../utils/helpers';
-import { useEvents, useAllGroupMemberColors, useUpdateGroupOrder } from '../../../hooks/api';
+import { useEvents, useAllGroupMemberColors, useOwnedGroupQuota, useUpdateGroupOrder } from '../../../hooks/api';
 import { useCurrentUserContext } from '../../../contexts/CurrentUserContext';
 import { GroupAvatar } from '../../../components/GroupAvatar';
 import { useListGroups } from '../../../hooks/useListGroups';
 import { usePullToRefresh } from '../../../hooks/usePullToRefresh';
 import type { GroupScoped } from '@moijia/client';
-
-const groupsListPanGesture = Gesture.Pan().activateAfterLongPress(520);
+import { relocateOwnedGroup } from '../../../utils/groupOrder';
+import { downgradeIsPending, pendingDowngradeAt } from '../../../utils/downgradePlan';
+import { FREE_OWNED_GROUP_LIMIT } from '../../../utils/groupTiers';
+import { formatPlanDate } from '../../../utils/groupPlanPeriod';
 
 type ActiveGroupRowProps = {
   group: GroupScoped;
@@ -42,6 +45,9 @@ type ActiveGroupRowProps = {
   upcomingWeekEnd: Date;
   currentUserId: string | undefined;
   onOpenGroup: (groupId: string) => void;
+  moveLabel?: string;
+  onMove?: () => void;
+  warningNote?: string;
 };
 
 function GroupCard({
@@ -55,6 +61,9 @@ function GroupCard({
   onLongPress,
   isActive = false,
   showHandle,
+  moveLabel,
+  onMove,
+  warningNote,
 }: ActiveGroupRowProps & {
   onLongPress?: () => void;
   isActive?: boolean;
@@ -106,8 +115,22 @@ function GroupCard({
                 </Text>
               </View>
             ) : null}
+            {warningNote ? <Text style={styles.warningNote}>{warningNote}</Text> : null}
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            {moveLabel && onMove ? (
+              <Pressable
+                onPress={(event) => {
+                  event.stopPropagation();
+                  onMove();
+                }}
+                style={styles.moveBtn}
+                accessibilityRole="button"
+                accessibilityLabel={`${moveLabel} ${g.name}`}
+              >
+                <Text style={styles.moveBtnText}>{moveLabel}</Text>
+              </Pressable>
+            ) : null}
             {g.membershipStatus === 'pending' && (
               <View style={[styles.adminBadge, { backgroundColor: '#FEF3C7', borderColor: '#F59E0B' }]}>
                 <Text style={[styles.adminBadgeText, { color: '#B45309' }]}>Pending</Text>
@@ -131,14 +154,132 @@ function GroupCard({
   );
 }
 
+function deletionWarning(group: GroupScoped): string | undefined {
+  if (!group.deletionScheduledAt) return undefined;
+  const date = formatPlanDate(group.deletionScheduledAt);
+  return date ? `Will be deleted ${date}` : 'Will be deleted';
+}
+
+function DowngradeListNotice({
+  choosing,
+  when,
+  graceStarted,
+}: {
+  choosing: boolean;
+  when: Date | null;
+  graceStarted: boolean;
+}) {
+  const date = when ? formatPlanDate(when) : '';
+  const keptLimit = graceStarted
+    ? 'Groups under Kept are limited to 1 GB now. New uploads stop once a group is over 1 GB, and older files over that limit are removed on this date.'
+    : 'On this date, groups you keep are trimmed to 1 GB, oldest files first.';
+  return (
+    <View style={styles.notice} accessibilityRole="alert">
+      <Text style={styles.noticeTitle}>{date ? `On ${date}` : 'After Pro ends'}</Text>
+      <Text style={styles.noticeBody}>
+        {choosing
+          ? `Only the two groups under Kept stay. Everything under Will be deleted is permanently removed, including its files. Tap Keep or Remove to choose. ${keptLimit} You can still download, delete files, or transfer a group.`
+          : graceStarted
+            ? 'Groups you own are limited to 1 GB now. New uploads stop once a group is over 1 GB. Older files over that limit are removed on this date. You can still download, delete files, or transfer a group.'
+            : 'Groups you own become Small (1 GB). Files over that limit are removed, oldest first.'}
+      </Text>
+    </View>
+  );
+}
+
 function ActiveGroupRow(props: ActiveGroupRowProps) {
   const drag = useReorderableDrag();
   const isActive = useIsActive();
   return <GroupCard {...props} onLongPress={drag} isActive={isActive} showHandle />;
 }
 
-function OwnedGroupRow(props: ActiveGroupRowProps) {
-  return <GroupCard {...props} showHandle={false} />;
+function GroupItemGap() {
+  return <View style={styles.groupItemGap} />;
+}
+
+function SectionHeader({
+  title,
+  count,
+  spaced,
+  tone,
+}: {
+  title: string;
+  count: string;
+  spaced?: boolean;
+  tone?: 'keep' | 'delete';
+}) {
+  return (
+    <View style={[styles.sectionHeader, spaced && styles.sectionHeaderSpaced]}>
+      <Text
+        style={[
+          styles.sectionLabel,
+          tone === 'keep' && styles.sectionLabelKeep,
+          tone === 'delete' && styles.sectionLabelDelete,
+        ]}
+      >
+        {title} ({count})
+      </Text>
+    </View>
+  );
+}
+
+function GroupSectionList({
+  title,
+  count,
+  empty,
+  spaced,
+  tone,
+  data,
+  panGesture,
+  renderItem,
+  onReorder,
+  onDragStart,
+  onDragEnd,
+  dragLocked,
+}: {
+  title: string;
+  count: string;
+  empty: string;
+  spaced?: boolean;
+  tone?: 'keep' | 'delete';
+  data: GroupScoped[];
+  panGesture: PanGesture;
+  renderItem: ReorderableListRenderItem<GroupScoped>;
+  onReorder: (event: ReorderableListReorderEvent) => void;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+  dragLocked: boolean;
+}) {
+  const [contentHeight, setContentHeight] = useState<number | null>(null);
+  const header = useMemo(
+    () => <SectionHeader title={title} count={count} spaced={spaced} tone={tone} />,
+    [title, count, spaced, tone]
+  );
+  const emptyNode = useMemo(() => <Text style={styles.sectionEmpty}>{empty}</Text>, [empty]);
+
+  return (
+    <NestedReorderableList
+      data={data}
+      keyExtractor={(g) => g.id}
+      renderItem={renderItem}
+      onReorder={onReorder}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      shouldUpdateActiveItem
+      panGesture={panGesture}
+      cellAnimations={{ opacity: 1, transform: [] }}
+      scrollEnabled={false}
+      ListHeaderComponent={header}
+      ListEmptyComponent={data.length === 0 ? emptyNode : null}
+      ItemSeparatorComponent={GroupItemGap}
+      initialNumToRender={Math.max(data.length, 1)}
+      onContentSizeChange={(_width, height) => {
+        if (dragLocked || height < 1) return;
+        setContentHeight((prev) => (prev != null && Math.abs(prev - height) < 1 ? prev : height));
+      }}
+      style={contentHeight != null ? { height: contentHeight, flexGrow: 0 } : { flexGrow: 0 }}
+    />
+  );
 }
 
 export default function GroupsScreen() {
@@ -147,7 +288,11 @@ export default function GroupsScreen() {
   const [isDragging, setIsDragging] = useState(false);
 
   const { listGroups, refetch: refetchGroups } = useListGroups(currentUserId ?? '', false);
+  const { data: quota, refetch: refetchQuota } = useOwnedGroupQuota(currentUserId ?? '');
   const updateGroupOrder = useUpdateGroupOrder(currentUserId ?? '');
+  const myPanGesture = useMemo(() => Gesture.Pan().activateAfterLongPress(520), []);
+  const removedPanGesture = useMemo(() => Gesture.Pan().activateAfterLongPress(520), []);
+  const otherPanGesture = useMemo(() => Gesture.Pan().activateAfterLongPress(520), []);
   const { data: events = [], refetch: refetchEvents } = useEvents({
     userId: currentUserId ?? '',
     groupId: undefined,
@@ -156,7 +301,7 @@ export default function GroupsScreen() {
     currentUserId || ''
   );
   const { refreshControl } = usePullToRefresh(
-    [refetchGroups, refetchEvents, refetchGroupColors],
+    [refetchGroups, refetchEvents, refetchGroupColors, refetchQuota],
     { enabled: !isDragging }
   );
 
@@ -187,21 +332,86 @@ export default function GroupsScreen() {
     [orderedActiveGroups, currentUserId]
   );
 
-  const handleReorder = useCallback(
-    ({ from, to }: { from: number; to: number }) => {
-      setOrderedActiveGroups((prev) => {
-        const others = prev.filter((g) => g.ownerId !== currentUserId);
-        const nextOthers = reorderItems(others, from, to);
-        let index = 0;
-        const data = prev.map((g) => (g.ownerId === currentUserId ? g : nextOthers[index++]));
-        if (currentUserId && data.length >= 2) {
-          updateGroupOrder.mutate(data.map((g) => g.id));
-        }
-        return data;
-      });
+  const commitOrder = useCallback(
+    (prev: GroupScoped[], nextMine: GroupScoped[], nextOthers: GroupScoped[]) => {
+      const isOwned = (g: GroupScoped) => g.ownerId === currentUserId;
+      let mineIndex = 0;
+      let otherIndex = 0;
+      const data = prev.map((g) => (isOwned(g) ? nextMine[mineIndex++] : nextOthers[otherIndex++]));
+      if (currentUserId && data.length >= 2) {
+        updateGroupOrder.mutate(data.map((g) => g.id));
+      }
+      return data;
     },
     [currentUserId, updateGroupOrder]
   );
+
+  const handleReorder = useCallback(
+    (section: 'mine' | 'kept' | 'removed' | 'other', from: number, to: number) => {
+      if (from === to) return;
+      setOrderedActiveGroups((prev) => {
+        const isOwned = (g: GroupScoped) => g.ownerId === currentUserId;
+        const mine = prev.filter(isOwned);
+        const others = prev.filter((g) => !isOwned(g));
+        let nextMine = mine;
+        let nextOthers = others;
+        if (section === 'other') {
+          if (others.length < 2) return prev;
+          nextOthers = reorderItems(others, from, to);
+        } else if (section === 'kept' || section === 'removed') {
+          const kept = mine.slice(0, FREE_OWNED_GROUP_LIMIT);
+          const removed = mine.slice(FREE_OWNED_GROUP_LIMIT);
+          const target = section === 'kept' ? kept : removed;
+          if (target.length < 2) return prev;
+          const nextTarget = reorderItems(target, from, to);
+          nextMine = section === 'kept' ? [...nextTarget, ...removed] : [...kept, ...nextTarget];
+        } else {
+          if (mine.length < 2) return prev;
+          nextMine = reorderItems(mine, from, to);
+        }
+        return commitOrder(prev, nextMine, nextOthers);
+      });
+    },
+    [commitOrder, currentUserId]
+  );
+
+  const moveOwnedGroup = useCallback(
+    (groupId: string, toKept: boolean) => {
+      setOrderedActiveGroups((prev) => {
+        const isOwned = (g: GroupScoped) => g.ownerId === currentUserId;
+        const mine = prev.filter(isOwned);
+        const others = prev.filter((g) => !isOwned(g));
+        const nextMine = relocateOwnedGroup(mine, groupId, toKept, FREE_OWNED_GROUP_LIMIT);
+        if (nextMine.every((group, index) => group.id === mine[index]?.id)) return prev;
+        return commitOrder(prev, nextMine, others);
+      });
+    },
+    [commitOrder, currentUserId]
+  );
+
+  const handleReorderMine = useCallback(
+    ({ from, to }: ReorderableListReorderEvent) => handleReorder('mine', from, to),
+    [handleReorder]
+  );
+  const handleReorderKept = useCallback(
+    ({ from, to }: ReorderableListReorderEvent) => handleReorder('kept', from, to),
+    [handleReorder]
+  );
+  const handleReorderRemoved = useCallback(
+    ({ from, to }: ReorderableListReorderEvent) => handleReorder('removed', from, to),
+    [handleReorder]
+  );
+  const handleReorderOther = useCallback(
+    ({ from, to }: ReorderableListReorderEvent) => handleReorder('other', from, to),
+    [handleReorder]
+  );
+
+  const ownedCountLabel =
+    quota == null
+      ? String(myGroups.length)
+      : quota.groupCapacity == null
+        ? `${myGroups.length}/∞`
+        : `${myGroups.length}/${quota.groupCapacity}`;
 
   const now = new Date();
   const upcomingWeekEnd = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
@@ -222,33 +432,32 @@ export default function GroupsScreen() {
     onOpenGroup: openGroup,
   };
 
-  const renderActiveGroupRow = useCallback(
-    ({ item: g }: ReorderableListRenderItemInfo<GroupScoped>) => (
-      <ActiveGroupRow group={g} {...rowProps} />
-    ),
+  const downgradePending = downgradeIsPending(quota);
+  const keptGroups = downgradePending ? myGroups.slice(0, FREE_OWNED_GROUP_LIMIT) : [];
+  const removedGroups = downgradePending ? myGroups.slice(FREE_OWNED_GROUP_LIMIT) : [];
+  const choosingKeepers = removedGroups.length > 0;
+  const downgradeWhen = pendingDowngradeAt(quota);
+
+  const renderActiveGroupRow = useCallback<ReorderableListRenderItem<GroupScoped>>(
+    ({ item: g }) => <ActiveGroupRow group={g} {...rowProps} />,
     [rowProps]
   );
-
-  const listHeader = (
-    <View>
-      <Text style={styles.sectionLabel}>My Groups</Text>
-      {myGroups.length === 0 ? (
-        <Text style={styles.sectionEmpty}>Groups you create show up here.</Text>
-      ) : (
-        myGroups.map((g) => (
-          <View key={g.id} style={styles.ownedGap}>
-            <OwnedGroupRow group={g} {...rowProps} />
-          </View>
-        ))
-      )}
-      <Text style={[styles.sectionLabel, styles.allGroupsLabel]}>All Groups</Text>
-      {otherGroups.length === 0 ? (
-        <Text style={styles.sectionEmpty}>You are not in any other groups.</Text>
-      ) : null}
-    </View>
+  const renderKeptRow = useCallback<ReorderableListRenderItem<GroupScoped>>(
+    ({ item: g }) => (
+      <ActiveGroupRow group={g} {...rowProps} moveLabel="Remove" onMove={() => moveOwnedGroup(g.id, false)} />
+    ),
+    [moveOwnedGroup, rowProps]
   );
-
-  const listFooter = <View style={styles.listBottomPad} />;
+  const renderRemovedRow = useCallback<ReorderableListRenderItem<GroupScoped>>(
+    ({ item: g }) => (
+      <ActiveGroupRow group={g} {...rowProps} moveLabel="Keep" onMove={() => moveOwnedGroup(g.id, true)} />
+    ),
+    [moveOwnedGroup, rowProps]
+  );
+  const renderOtherGroupRow = useCallback<ReorderableListRenderItem<GroupScoped>>(
+    ({ item: g }) => <ActiveGroupRow group={g} {...rowProps} warningNote={deletionWarning(g)} />,
+    [rowProps]
+  );
 
   return (
     <View style={styles.page}>
@@ -262,33 +471,78 @@ export default function GroupsScreen() {
           <Text style={styles.emptyTitle}>No groups yet</Text>
           <Text style={styles.emptyDesc}>Create a group or join with an invite code.</Text>
         </ScrollView>
-      ) : otherGroups.length > 0 ? (
-        <ReorderableList
-          data={otherGroups}
-          keyExtractor={(g) => g.id}
-          renderItem={renderActiveGroupRow}
-          onReorder={handleReorder}
-          onDragStart={handleDragStart}
-          onDragEnd={handleDragEnd}
-          shouldUpdateActiveItem
-          panGesture={groupsListPanGesture}
-          cellAnimations={{ opacity: 1, transform: [] }}
-          style={styles.listContainer}
-          contentContainerStyle={styles.listContent}
-          ItemSeparatorComponent={() => <View style={styles.groupItemGap} />}
-          ListHeaderComponent={listHeader}
-          ListFooterComponent={listFooter}
-          refreshControl={refreshControl}
-        />
       ) : (
-        <ScrollView
+        <ScrollViewContainer
           style={styles.listContainer}
           contentContainerStyle={styles.listContent}
           refreshControl={refreshControl}
         >
-          {listHeader}
-          {listFooter}
-        </ScrollView>
+          {downgradePending ? (
+            <DowngradeListNotice
+              choosing={choosingKeepers}
+              when={downgradeWhen}
+              graceStarted={Boolean(quota?.downgradeAt)}
+            />
+          ) : null}
+          {choosingKeepers ? (
+            <>
+              <GroupSectionList
+                title="Kept"
+                count={String(keptGroups.length)}
+                empty="The top two groups you own stay here."
+                tone="keep"
+                data={keptGroups}
+                panGesture={myPanGesture}
+                renderItem={renderKeptRow}
+                onReorder={handleReorderKept}
+                onDragStart={handleDragStart}
+                onDragEnd={handleDragEnd}
+                dragLocked={isDragging}
+              />
+              <GroupSectionList
+                title="Will be deleted"
+                count={String(removedGroups.length)}
+                empty="Groups below the top two are deleted."
+                tone="delete"
+                spaced
+                data={removedGroups}
+                panGesture={removedPanGesture}
+                renderItem={renderRemovedRow}
+                onReorder={handleReorderRemoved}
+                onDragStart={handleDragStart}
+                onDragEnd={handleDragEnd}
+                dragLocked={isDragging}
+              />
+            </>
+          ) : (
+            <GroupSectionList
+              title="My Groups"
+              count={ownedCountLabel}
+              empty="Groups you create show up here."
+              data={myGroups}
+              panGesture={myPanGesture}
+              renderItem={renderActiveGroupRow}
+              onReorder={handleReorderMine}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+              dragLocked={isDragging}
+            />
+          )}
+          <GroupSectionList
+            title="Other groups"
+            count={String(otherGroups.length)}
+            empty="You are not in any other groups."
+            spaced
+            data={otherGroups}
+            panGesture={otherPanGesture}
+            renderItem={renderOtherGroupRow}
+            onReorder={handleReorderOther}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
+            dragLocked={isDragging}
+          />
+          <View style={styles.listBottomPad} />
+        </ScrollViewContainer>
       )}
     </View>
   );
@@ -358,23 +612,49 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
   },
   adminBadgeText: { fontSize: 11, fontFamily: Fonts.semiBold, color: Colors.textSub },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  sectionHeaderSpaced: { marginTop: 18 },
   sectionLabel: {
     fontSize: 11,
     fontFamily: Fonts.semiBold,
     color: Colors.textMuted,
     textTransform: 'uppercase',
     letterSpacing: 0.8,
-    marginTop: 8,
-    marginBottom: 8,
   },
-  allGroupsLabel: { marginTop: 18 },
+  sectionLabelKeep: { color: Colors.going },
+  sectionLabelDelete: { color: Colors.notGoing },
+  notice: {
+    marginTop: 8,
+    marginBottom: 4,
+    padding: 14,
+    borderRadius: Radius.lg,
+    backgroundColor: Colors.maybeBg,
+    borderWidth: 1,
+    borderColor: Colors.maybeBorder,
+  },
+  noticeTitle: { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.text, marginBottom: 6 },
+  noticeBody: { fontSize: 13, lineHeight: 18, fontFamily: Fonts.regular, color: Colors.textSub },
+  warningNote: { marginTop: 4, fontSize: 12, fontFamily: Fonts.medium, color: Colors.notGoing },
+  moveBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: Radius.full,
+    borderWidth: 1,
+    borderColor: Colors.borderStrong,
+    backgroundColor: Colors.bg,
+  },
+  moveBtnText: { fontSize: 12, fontFamily: Fonts.semiBold, color: Colors.text },
   sectionEmpty: {
     fontSize: 14,
     fontFamily: Fonts.regular,
     color: Colors.textMuted,
     marginBottom: 8,
   },
-  ownedGap: { marginBottom: 2 },
   myEmpty: { alignItems: 'center', paddingTop: 24, paddingHorizontal: 24, paddingBottom: 8 },
   emptyGlyph: { marginBottom: 12 },
   emptyTitle: { fontSize: 18, fontFamily: Fonts.bold, color: Colors.text, marginBottom: 6 },

@@ -75,17 +75,26 @@ export function billingSnapshot(customerInfo: CustomerInfo | null | undefined): 
   proActive: boolean;
   proRenewing: boolean;
   expiresAt: string | null;
+  purchasedAt: string | null;
 } {
   const proActive = proEntitlementActive(customerInfo);
-  const entitlement = customerInfo?.entitlements.active[PRO_ENTITLEMENT_ID];
+  const entitlement =
+    customerInfo?.entitlements.active[PRO_ENTITLEMENT_ID] ??
+    customerInfo?.entitlements.all[PRO_ENTITLEMENT_ID];
   const expiresAt =
     entitlement?.expirationDate ??
     customerInfo?.allExpirationDates?.[PRO_PRODUCT_ID] ??
+    null;
+  const purchasedAt =
+    entitlement?.latestPurchaseDate ??
+    entitlement?.originalPurchaseDate ??
+    customerInfo?.allPurchaseDates?.[PRO_PRODUCT_ID] ??
     null;
   return {
     proActive,
     proRenewing: proActive && entitlement?.willRenew !== false,
     expiresAt,
+    purchasedAt,
   };
 }
 
@@ -149,6 +158,11 @@ export async function getCustomerInfo(): Promise<CustomerInfo> {
   return Purchases.getCustomerInfo();
 }
 
+/** Drop the cached CustomerInfo so a cancel is visible on the next read. */
+export async function invalidateCustomerInfoCache(): Promise<void> {
+  await Purchases.invalidateCustomerInfoCache();
+}
+
 export function addCustomerInfoListener(listener: (info: CustomerInfo) => void): () => void {
   Purchases.addCustomerInfoUpdateListener(listener);
   return () => {
@@ -189,7 +203,7 @@ export async function purchasePro(): Promise<CustomerInfo> {
   const pkg = offering ? packageForPro(offering) : null;
   if (!pkg) {
     throw new Error(
-      'Pro is not available from the App Store. In RevenueCat, attach Apple product subscription_pro to the current offering.'
+      'Pro is not available from the App Store. In RevenueCat, attach Apple product pro_subscription to the current offering.'
     );
   }
   const { customerInfo } = await Purchases.purchasePackage(pkg);

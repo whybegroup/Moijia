@@ -26,9 +26,9 @@ import { NotificationService } from './NotificationService';
 import { S3UploadService } from './S3UploadService';
 import { groupStorage } from './GroupStorageService';
 import { groupBilling } from './GroupBillingService';
-import { groupFriendships } from './GroupFriendshipService';
 import { UserService } from './UserService';
 import { sortByGroupOrder } from '../utils/groupOrder';
+import { purgeGroupCompletely } from './groupPurge';
 import {
   groupMaxStorageBytes,
   parseSizeTier,
@@ -208,7 +208,7 @@ export class GroupService {
 
     const mapped = groups.map((g) => this.mapGroupScoped(g, userId));
     const orderIds = await userService.getGroupOrder(userId);
-    return sortByGroupOrder(mapped, orderIds);
+    return this.attachDeletionSchedule(sortByGroupOrder(mapped, orderIds));
   }
 
   /**
@@ -254,7 +254,9 @@ export class GroupService {
       );
       if (!isOwner) return null;
     }
-    return this.mapGroupScopedAsync(group, userId);
+    const scoped = await this.mapGroupScopedAsync(group, userId);
+    const [withSchedule] = await this.attachDeletionSchedule([scoped]);
+    return withSchedule ?? scoped;
   }
 
   private mapGroupCoverUrls(group: { coverPhotos?: { photoUrl: string }[] }): string[] {
@@ -334,6 +336,15 @@ export class GroupService {
     }
 
     return base;
+  }
+
+  private async attachDeletionSchedule(groups: GroupScoped[]): Promise<GroupScoped[]> {
+    const dates = await groupBilling.scheduledDeletionByGroup(groups.map((group) => group.id));
+    if (dates.size === 0) return groups;
+    return groups.map((group) => {
+      const at = dates.get(group.id);
+      return at ? { ...group, deletionScheduledAt: at } : group;
+    });
   }
 
   private async mapGroupScopedAsync(group: any, userId: string): Promise<GroupScoped> {
@@ -594,23 +605,10 @@ export class GroupService {
    */
   public async hardDelete(id: string, userId: string): Promise<void> {
     await this.requireOwner(id, userId);
-    const exists = await prisma.group.findUnique({
-      where: { id },
-      select: { id: true, name: true },
-    });
-    if (!exists) {
+    const removed = await purgeGroupCompletely(id);
+    if (!removed) {
       throw Object.assign(new Error('Group not found'), { status: 404 });
     }
-
-    await groupFriendships.removeAllForGroup(id);
-
-    const urlsToPurge = await groupStorage.collectAllManagedUrlsForPurge(id);
-
-    await prisma.group.delete({
-      where: { id },
-    });
-    await Promise.all(urlsToPurge.map((u) => objectStore.deleteManagedUploadBestEffort(u)));
-    await groupStorage.deleteTrackingForGroup(id);
   }
 
   /**

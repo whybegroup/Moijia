@@ -21,6 +21,7 @@ export class UserService {
       extraGroupSlots: _slots,
       ownedGroupLimit: _limit,
       email: _email,
+      subscriptionStartedAt: _started,
       subscriptionExpiresAt: _expires,
       subscriptionProductId: _product,
       subscriptionWillRenew: _renew,
