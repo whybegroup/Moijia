@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import type { CustomerInfo } from 'react-native-purchases';
 import { useAuth } from './AuthContext';
 import {
@@ -69,6 +69,7 @@ export const PurchasesProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const refresh = useCallback(async (): Promise<CustomerInfo | null> => {
     try {
+      await invalidateCustomerInfoCache().catch(() => undefined);
       const info = await getCustomerInfo();
       setCustomerInfo(info);
       await syncBilling(info);
@@ -124,10 +125,22 @@ export const PurchasesProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   }, [syncBilling]);
 
   useEffect(() => {
+    if (!user) return;
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active' && user) void refresh();
+      if (state === 'active') void refresh();
     });
-    return () => sub.remove();
+    const interval = setInterval(() => {
+      if (AppState.currentState === 'active') void refresh();
+    }, 15_000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void refresh();
+    };
+    if (Platform.OS === 'web') document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      sub.remove();
+      clearInterval(interval);
+      if (Platform.OS === 'web') document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [refresh, user]);
 
   const presentPaywall = useCallback(async (): Promise<ProPaywallOutcome> => {
@@ -146,7 +159,6 @@ export const PurchasesProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       setCustomerInfo(info);
       void syncBilling(info);
     });
-    await invalidateCustomerInfoCache().catch(() => undefined);
     await refresh();
   }, [customerInfo, refresh, syncBilling]);
 

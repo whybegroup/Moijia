@@ -40,8 +40,8 @@ export function SubscriptionSettingsCard() {
         ) : null}
         {tier === 'pro' && periodDate ? (
           <View style={[styles.infoRow, styles.actionRow]}>
-            <Text style={styles.infoLabel}>{periodLabel}</Text>
-            <Text style={styles.infoValue}>{periodDate}</Text>
+            <Text style={[styles.infoLabel, !quota?.subscriptionWillRenew && styles.expires]}>{periodLabel}</Text>
+            <Text style={[styles.infoValue, !quota?.subscriptionWillRenew && styles.expires]}>{periodDate}</Text>
           </View>
         ) : null}
         {subscriptionWarning ? (
@@ -53,8 +53,8 @@ export function SubscriptionSettingsCard() {
           <View style={[styles.infoRow, styles.actionRow]}>
             <Text style={styles.notice}>
               {choosingKeepers
-                ? `${downgradeWhen ? `On ${downgradeWhen}, only` : 'Only'} the two groups under Kept stay. The others are permanently deleted.`
-                : `${downgradeWhen ? `On ${downgradeWhen}, groups` : 'Groups'} you own become Small (1 GB).`}
+                ? `${downgradeWhen ? `On ${downgradeWhen}, only` : 'Only'} the two groups under Kept will stay. The others will be permanently deleted.`
+                : `${downgradeWhen ? `On ${downgradeWhen}, groups` : 'Groups'} you own will become Small (1 GB).`}
             </Text>
           </View>
         ) : null}
@@ -111,7 +111,8 @@ const styles = StyleSheet.create({
   actionRow: { borderTopWidth: 1, borderTopColor: Colors.border },
   infoLabel: { fontSize: 14, fontFamily: Fonts.regular, color: Colors.text },
   infoValue: { fontSize: 14, fontFamily: Fonts.medium, color: Colors.text, flexShrink: 1, textAlign: 'right' },
+  expires: { color: Colors.notGoing, fontFamily: Fonts.semiBold },
   actionText: { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.accent },
-  notice: { fontSize: 14, lineHeight: 20, fontFamily: Fonts.regular, color: Colors.textSub },
-  warning: { flex: 1, fontSize: 14, lineHeight: 20, fontFamily: Fonts.regular, color: Colors.maybe },
+  notice: { flex: 1, fontSize: 14, lineHeight: 20, fontFamily: Fonts.semiBold, color: Colors.notGoing },
+  warning: { flex: 1, fontSize: 14, lineHeight: 20, fontFamily: Fonts.semiBold, color: Colors.notGoing },
 });

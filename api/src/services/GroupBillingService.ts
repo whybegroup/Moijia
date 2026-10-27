@@ -172,7 +172,7 @@ export class GroupBillingService {
     const cap = quota.groupCapacity ?? 0;
     const message =
       quota.subscriptionTier === 'pro'
-        ? `Pro includes up to ${cap} groups. Contact us about Enterprise for more.`
+        ? `Pro includes up to ${cap} groups. Contact sales@moijia.com about Enterprise for more.`
         : `Free includes up to ${cap} groups. Upgrade to Pro in Profile > Subscription to create up to 10 groups.`;
     throw httpError(403, message, { code: 'owned_group_limit' });
   }

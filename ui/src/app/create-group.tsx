@@ -283,7 +283,7 @@ export default function CreateGroupScreen() {
         const cap = quota.groupCapacity ?? 2;
         const message =
           parseSubscriptionTier(quota.subscriptionTier) === 'pro'
-            ? `Pro includes up to ${cap} groups. Contact us about Enterprise for more.`
+            ? `Pro includes up to ${cap} groups. Contact sales@moijia.com about Enterprise for more.`
             : `Free includes up to ${cap} groups. Upgrade to Pro in Profile > Subscription to create up to 10 groups.`;
         Alert.alert('Group limit reached', message);
         return;
