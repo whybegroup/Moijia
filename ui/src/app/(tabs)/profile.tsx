@@ -121,8 +121,9 @@ function SettingsPasswordInput({
       editable={editable}
       onFocus={(e) => {
         focusedRef.current = true;
-        restore(e.target);
-        requestAnimationFrame(() => restore(e.target));
+        const target = e.target;
+        restore(target);
+        requestAnimationFrame(() => restore(target));
       }}
       onBlur={(e) => {
         focusedRef.current = false;
@@ -179,7 +180,7 @@ function ProfileHeader({
           accessibilityRole="button"
           accessibilityLabel="Support"
         >
-          <Ionicons name="help-circle-outline" size={22} color={Colors.text} />
+          <Ionicons name="headset-outline" size={18} color={Colors.text} />
         </TouchableOpacity>
         <NotificationBellButton
           showNotifs={showNotifs}

@@ -7,8 +7,8 @@ export const MAIL_FOOTER = [
   'Your right to cancel: You may cancel your subscription at any time. Cancel at least 24 hours before the end of the current billing period to avoid the next charge. Access continues through the remainder of your paid period unless otherwise noted. To cancel, open the group in the moijia app and cancel the plan, or manage the subscription in your Apple App Store or Google Play account settings. Deleting the app does not cancel a subscription. Refunds and billing disputes are handled by the store that charged you. We reserve the right to change pricing and will try to notify you in advance of a change.',
   'moijia may use your data to operate and improve the Service and to send you information about your account. You can change notification preferences in the app. We use your data as described in our Privacy Policy at https://moijia.com/privacy.',
 ];
-const MAIL_ICON_CID = 'moijia-icon';
-const MAIL_ICON_PATH = path.resolve(__dirname, '../../assets/moijia-icon.png');
+const MAIL_ICON_CID = 'favicon';
+const MAIL_ICON_PATH = path.resolve(__dirname, '../../assets/favicon.png');
 
 type MailAttachment = {
   filename: string;
@@ -21,7 +21,7 @@ function mailIconAttachment(): MailAttachment | null {
   try {
     if (!fs.existsSync(MAIL_ICON_PATH)) return null;
     return {
-      filename: 'moijia-icon.png',
+      filename: 'favicon.png',
       content: fs.readFileSync(MAIL_ICON_PATH).toString('base64'),
       content_id: MAIL_ICON_CID,
       content_type: 'image/png',

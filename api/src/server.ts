@@ -48,8 +48,8 @@ app.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-app.get('/email/moijia-icon.png', (_req: Request, res: Response) => {
-  const file = path.resolve(__dirname, '../assets/moijia-icon.png');
+app.get('/email/favicon.png', (_req: Request, res: Response) => {
+  const file = path.resolve(__dirname, '../assets/favicon.png');
   if (!fs.existsSync(file)) {
     res.status(404).end();
     return;

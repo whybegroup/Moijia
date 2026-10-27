@@ -4,6 +4,7 @@ import {
   Text,
   ScrollView,
   TouchableOpacity,
+  Pressable,
   StyleSheet,
   Modal,
   TextInput,
@@ -11,6 +12,7 @@ import {
   ActivityIndicator,
   Platform,
   Image,
+  useWindowDimensions,
 } from 'react-native';
 import { KeyboardSafeScrollView } from './KeyboardSafeScrollView';
 import * as Clipboard from 'expo-clipboard';
@@ -53,6 +55,8 @@ import { GroupStorageUsageBar } from './GroupStorageUsageBar';
 import { GroupStorageRequestForm } from './GroupStorageRequestForm';
 import { GroupFriendGroupsSection } from './GroupFriendGroupsSection';
 import { resolveGroupMaxStorageBytes } from '../utils/groupStorage';
+import { GROUP_TIERS, parseSizeTier } from '../utils/groupTiers';
+import { formatPlanDate, monthPeriodExpiresAt, parseMaybeDate } from '../utils/groupPlanPeriod';
 import { groupSubpageFromPathname } from './groupScope/useGroupSubpage';
 import { groupsTabParentHref, navigateGroupsTabTo } from '../utils/tabBreadcrumbNav';
 import { useGroupScopeNav } from './groupScope/GroupScopeNavContext';
@@ -73,6 +77,21 @@ import { groupStorageCategoryUsages } from '../utils/groupStorageCategories';
 import { ChromeHeaderTrailingRow, DetailActionIcon, RegisterChromeHeader } from './chromeHeaderSlot';
 
 const AVATAR_SIZE = 56;
+
+function paidSubscriptionEndsAt(group: {
+  graceEndsAt?: Date | string | null;
+  sizeStartedAt?: Date | string | null;
+}): Date | null {
+  const grace = parseMaybeDate(group.graceEndsAt);
+  if (grace && grace.getTime() > Date.now()) return grace;
+  const started = parseMaybeDate(group.sizeStartedAt);
+  return started ? monthPeriodExpiresAt(started) : null;
+}
+
+function wholeDaysUntil(date: Date): number {
+  const msPerDay = 24 * 60 * 60 * 1000;
+  return Math.max(0, Math.ceil((date.getTime() - Date.now()) / msPerDay));
+}
 
 /** Heuristic + newline check so long single-line copy still gets Read more. */
 function descriptionExceedsTwoLines(raw: string): boolean {
@@ -353,6 +372,7 @@ export function GroupDetailView({ groupId }: GroupDetailViewProps) {
   useMissingGroupRedirect(isError, groupError, group?.membershipStatus, '/(tabs)/groups');
   const [showLeave,   setShowLeave]   = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const { height: windowHeight } = useWindowDimensions();
   const [descExpanded, setDescExpanded] = useState(false);
   const [inviteSheetOpen, setInviteSheetOpen] = useState(false);
   const [inviteCodeCopied, setInviteCodeCopied] = useState(false);
@@ -439,6 +459,18 @@ export function GroupDetailView({ groupId }: GroupDetailViewProps) {
   const ownerId = group.ownerId ?? '';
   const admins = group.adminIds ?? [];
   const isOwner = ownerId === currentUserId;
+  const paidTier = parseSizeTier(group.sizeTier);
+  const hasPaidSubscription = paidTier === 'medium' || paidTier === 'large';
+  const paidPlanName = GROUP_TIERS[paidTier].label;
+  const paidPlanEndsAt = hasPaidSubscription ? paidSubscriptionEndsAt(group) : null;
+  const paidDaysLeft = paidPlanEndsAt ? wholeDaysUntil(paidPlanEndsAt) : null;
+  const paidRemainingLine = !paidPlanEndsAt
+    ? 'Any time left before this plan expires is forfeited the moment the group is deleted. The plan does not remain active through the rest of the billing period.'
+    : paidDaysLeft === 0
+      ? `This plan expires today (${formatPlanDate(paidPlanEndsAt)}). Deleting the group cancels it immediately, and the rest of today is forfeited.`
+      : paidDaysLeft === 1
+        ? `1 day is still left, through ${formatPlanDate(paidPlanEndsAt)}. That day is forfeited as soon as the group is deleted. The plan does not stay active until it expires.`
+        : `${paidDaysLeft} days are still left, through ${formatPlanDate(paidPlanEndsAt)}. Those days are forfeited as soon as the group is deleted. The plan does not stay active until it expires.`;
   const isAdmin = group.membershipStatus === 'admin';
   const isPending = group.membershipStatus === 'pending';
   const canEditMain = isAdmin && !isPending;
@@ -1098,7 +1130,11 @@ export function GroupDetailView({ groupId }: GroupDetailViewProps) {
                     <View style={styles.dangerIconWrap}><Ionicons name="trash-outline" size={22} color={Colors.notGoing} /></View>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.leaveTitle}>Delete Group</Text>
-                      <Text style={styles.leaveDesc}>Permanently remove the group and all members</Text>
+                      <Text style={styles.leaveDesc}>
+                        {hasPaidSubscription
+                          ? `Permanently deletes the group and cancels the ${paidPlanName} plan immediately`
+                          : 'Permanently remove the group and all members'}
+                      </Text>
                     </View>
                     {hardDeleteMutation.isPending && <ActivityIndicator size="small" color={Colors.text} />}
                   </TouchableOpacity>
@@ -1275,22 +1311,70 @@ export function GroupDetailView({ groupId }: GroupDetailViewProps) {
       {/* Delete confirm (owner) */}
       {showDeleteConfirm && (
         <Modal {...edgeToEdgeModalProps} visible transparent animationType="fade" onRequestClose={() => setShowDeleteConfirm(false)}>
-          <TouchableOpacity style={styles.menuOverlay} onPress={() => setShowDeleteConfirm(false)} activeOpacity={1}>
-            <View style={styles.confirmCard}>
-              <Text style={styles.confirmTitle}>Delete {group.name}?</Text>
-              <Text style={styles.confirmBody}>
-                This will permanently remove the group. This cannot be undone.
-              </Text>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                <TouchableOpacity onPress={() => setShowDeleteConfirm(false)} style={[styles.confirmBtn, { borderColor: Colors.border, backgroundColor: Colors.surface }]}>
-                  <Text style={{ fontFamily: Fonts.semiBold, color: Colors.text }}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={doHardDelete} style={[styles.confirmBtn, { backgroundColor: Colors.notGoing, borderColor: Colors.notGoing }]} disabled={hardDeleteMutation.isPending}>
-                  <Text style={{ fontFamily: Fonts.bold, color: '#fff' }}>Delete</Text>
-                </TouchableOpacity>
+          {hasPaidSubscription ? (
+            <View style={styles.deleteWarnOverlay}>
+              <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowDeleteConfirm(false)} />
+              <View style={styles.deleteWarnCard}>
+                <ScrollView
+                  bounces={false}
+                  showsVerticalScrollIndicator={false}
+                  style={{ maxHeight: Math.round(windowHeight * 0.78) }}
+                >
+                  <View style={styles.deleteWarnIconWrap}>
+                    <Ionicons name="warning" size={36} color={Colors.notGoing} />
+                  </View>
+                  <Text style={styles.deleteWarnKicker}>Paid subscription</Text>
+                  <Text style={styles.deleteWarnTitle}>Delete {group.name}?</Text>
+                  <View style={styles.deleteWarnCallout}>
+                    <Text style={styles.deleteWarnCalloutTitle}>
+                      This cancels the {paidPlanName} subscription immediately
+                    </Text>
+                    <Text style={styles.deleteWarnPoint}>{paidRemainingLine}</Text>
+                    <Text style={styles.deleteWarnPoint}>
+                      This is non-refundable. Charges already paid for the current period are not returned, including payments made through the App Store or Google Play.
+                    </Text>
+                  </View>
+                  <Text style={styles.deleteWarnBody}>
+                    The group, its members, events, posts, and files are permanently removed. This cannot be undone.
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => setShowDeleteConfirm(false)}
+                    style={styles.deleteWarnKeepBtn}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.deleteWarnKeepText}>Keep group</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={doHardDelete}
+                    style={styles.deleteWarnDeleteBtn}
+                    activeOpacity={0.85}
+                    disabled={hardDeleteMutation.isPending}
+                  >
+                    <Text style={styles.deleteWarnDeleteText}>
+                      {hardDeleteMutation.isPending ? 'Deleting…' : 'Delete group and cancel subscription'}
+                    </Text>
+                  </TouchableOpacity>
+                </ScrollView>
               </View>
             </View>
-          </TouchableOpacity>
+          ) : (
+            <TouchableOpacity style={styles.menuOverlay} onPress={() => setShowDeleteConfirm(false)} activeOpacity={1}>
+              <View style={styles.confirmCard}>
+                <Text style={styles.confirmTitle}>Delete {group.name}?</Text>
+                <Text style={styles.confirmBody}>
+                  This will permanently remove the group. This cannot be undone.
+                </Text>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <TouchableOpacity onPress={() => setShowDeleteConfirm(false)} style={[styles.confirmBtn, { borderColor: Colors.border, backgroundColor: Colors.surface }]}>
+                    <Text style={{ fontFamily: Fonts.semiBold, color: Colors.text }}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={doHardDelete} style={[styles.confirmBtn, { backgroundColor: Colors.notGoing, borderColor: Colors.notGoing }]} disabled={hardDeleteMutation.isPending}>
+                    <Text style={{ fontFamily: Fonts.bold, color: '#fff' }}>Delete</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </TouchableOpacity>
+          )}
         </Modal>
       )}
 
@@ -1544,6 +1628,102 @@ const styles = StyleSheet.create({
   confirmTitle:     { fontSize: 17, fontFamily: Fonts.extraBold, color: Colors.text, marginBottom: 8 },
   confirmBody:      { fontSize: 14, color: Colors.textSub, fontFamily: Fonts.regular, lineHeight: 22, marginBottom: 20 },
   confirmBtn:       { flex: 1, paddingVertical: 10, borderRadius: Radius.lg, borderWidth: 1, alignItems: 'center' },
+  deleteWarnOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  deleteWarnCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: 24,
+    padding: 24,
+    width: '100%',
+    maxWidth: 440,
+    maxHeight: '88%',
+    borderWidth: 2,
+    borderColor: Colors.notGoing,
+    ...Shadows.lg,
+  },
+  deleteWarnIconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: Colors.notGoingBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  deleteWarnKicker: {
+    fontSize: 13,
+    fontFamily: Fonts.bold,
+    color: Colors.notGoing,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    marginBottom: 6,
+  },
+  deleteWarnTitle: {
+    fontSize: 26,
+    lineHeight: 32,
+    fontFamily: Fonts.extraBold,
+    color: Colors.text,
+    marginBottom: 16,
+  },
+  deleteWarnCallout: {
+    backgroundColor: Colors.notGoingBg,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    padding: 16,
+    marginBottom: 16,
+    gap: 10,
+  },
+  deleteWarnCalloutTitle: {
+    fontSize: 18,
+    lineHeight: 24,
+    fontFamily: Fonts.extraBold,
+    color: Colors.notGoing,
+  },
+  deleteWarnPoint: {
+    fontSize: 15,
+    lineHeight: 22,
+    fontFamily: Fonts.regular,
+    color: Colors.text,
+  },
+  deleteWarnBody: {
+    fontSize: 15,
+    lineHeight: 22,
+    fontFamily: Fonts.regular,
+    color: Colors.textSub,
+    marginBottom: 20,
+  },
+  deleteWarnKeepBtn: {
+    paddingVertical: 14,
+    borderRadius: Radius.lg,
+    backgroundColor: Colors.accent,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  deleteWarnKeepText: {
+    fontSize: 16,
+    fontFamily: Fonts.bold,
+    color: Colors.accentFg,
+  },
+  deleteWarnDeleteBtn: {
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderRadius: Radius.lg,
+    backgroundColor: Colors.notGoing,
+    alignItems: 'center',
+  },
+  deleteWarnDeleteText: {
+    fontSize: 15,
+    lineHeight: 20,
+    fontFamily: Fonts.bold,
+    color: '#fff',
+    textAlign: 'center',
+  },
   dangerIconWrap:   { width: 28, alignItems: 'center', justifyContent: 'center' },
   groupPhotoLightbox: {
     flex: 1,
