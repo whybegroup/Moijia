@@ -256,6 +256,7 @@ export class GroupBillingService {
         (dateMoved(purchasedAt, storedStart) || dateMoved(storeExpires, storedExpires));
       const resumedRenewal =
         tier === 'pro' && user.subscriptionWillRenew === false && input.proRenewing && !periodAdvanced;
+      const cancelledRenewal = tier === 'pro' && user.subscriptionWillRenew === true && !input.proRenewing;
       const notice = becomingPro ? 'subscribe' : periodAdvanced ? 'renewed' : resumedRenewal ? 'resumed' : null;
       const proData = {
         subscriptionTier: 'pro',
@@ -269,6 +270,14 @@ export class GroupBillingService {
       if (notice === 'subscribe') {
         const result = await prisma.user.updateMany({
           where: { id: userId, NOT: { subscriptionTier: 'pro' } },
+          data: proData,
+        });
+        claimed = result.count > 0;
+      } else if (periodAdvanced && cancelledRenewal) {
+        const result = await prisma.user.updateMany({
+          where: dateMoved(storeExpires, storedExpires)
+            ? { id: userId, subscriptionExpiresAt: storedExpires, subscriptionWillRenew: true }
+            : { id: userId, subscriptionStartedAt: storedStart, subscriptionWillRenew: true },
           data: proData,
         });
         claimed = result.count > 0;
@@ -286,8 +295,14 @@ export class GroupBillingService {
           data: proData,
         });
         claimed = result.count > 0;
+      } else if (cancelledRenewal) {
+        const result = await prisma.user.updateMany({
+          where: { id: userId, subscriptionTier: 'pro', subscriptionWillRenew: true },
+          data: proData,
+        });
+        claimed = result.count > 0;
       }
-      if (!notice || !claimed) {
+      if ((!notice && !cancelledRenewal) || !claimed) {
         await prisma.user.update({ where: { id: userId }, data: proData });
       }
       await this.clearOwnedGrace(userId);
@@ -315,35 +330,68 @@ export class GroupBillingService {
           historyDetail: notice === 'resumed' ? 'Set to renew again' : PRO_MONTHLY_PRICE_LABEL,
         });
       }
+      if (cancelledRenewal && claimed) {
+        const through = expiresAt ? formatMailDate(expiresAt) : 'the end of this period';
+        await this.confirmProSubscription({
+          userId,
+          kind: 'cancel',
+          title: 'Pro cancelled',
+          intro: `Your moijia Pro subscription is cancelled. Pro stays active through ${through}.`,
+          expiresAt,
+          renewing: false,
+          subject: 'Your moijia Pro subscription is cancelled',
+          historyDetail: `Access through ${through}`,
+        });
+      }
       await this.applyDueGracePeriods();
       return this.getOwnedGroupQuota(userId);
     }
 
     const wasPro = tier === 'pro' || user.subscriptionProductId === PRO_PRODUCT_ID;
-    await prisma.user.update({
-      where: { id: userId },
-      data: {
-        subscriptionTier: 'free',
-        subscriptionWillRenew: false,
-        subscriptionStartedAt: startedAt,
-        subscriptionExpiresAt: expiresAt ?? user.subscriptionExpiresAt,
-        subscriptionProductId: wasPro ? PRO_PRODUCT_ID : null,
-      },
-    });
+    const endedPro = wasPro && tier === 'pro';
+    const freeData = {
+      subscriptionTier: 'free',
+      subscriptionWillRenew: false,
+      subscriptionStartedAt: startedAt,
+      subscriptionExpiresAt: expiresAt ?? user.subscriptionExpiresAt,
+      subscriptionProductId: wasPro ? PRO_PRODUCT_ID : null,
+    };
+    const ended = endedPro
+      ? await prisma.user.updateMany({
+          where: { id: userId, subscriptionTier: 'pro' },
+          data: freeData,
+        })
+      : { count: 0 };
+    if (ended.count === 0) {
+      await prisma.user.update({ where: { id: userId }, data: freeData });
+    }
 
-    if (wasPro && tier === 'pro') {
+    if (ended.count > 0) {
       const periodEnd = expiresAt ?? storedExpires ?? new Date();
       const downgradeAt = new Date(periodEnd.getTime() + downgradeGraceMs(startedAt, periodEnd));
       const downgrading = await this.scheduleDowngrade(userId, downgradeAt);
-      await recordPurchase({
-        userId,
-        kind: 'cancel',
-        title: 'Pro ended',
-        detail: downgrading
-          ? `Free plan limits apply on ${formatMailDate(downgradeAt)}`
-          : 'Switched to Free',
-        productId: PRO_PRODUCT_ID,
-      });
+      if (!downgrading) {
+        await this.confirmProSubscription({
+          userId,
+          kind: 'cancel',
+          title: 'Pro ended',
+          intro: 'Your moijia Pro subscription has ended. You are on the Free plan.',
+          expiresAt: periodEnd,
+          renewing: false,
+          subject: 'Your moijia Pro subscription has ended',
+          historyDetail: 'Switched to Free',
+          plan: 'Free',
+          price: '$0.00/mo',
+        });
+      } else {
+        await recordPurchase({
+          userId,
+          kind: 'cancel',
+          title: 'Pro ended',
+          detail: `Free plan limits apply on ${formatMailDate(downgradeAt)}`,
+          productId: PRO_PRODUCT_ID,
+        });
+      }
     }
 
     await this.applyDueGracePeriods();
@@ -855,30 +903,35 @@ export class GroupBillingService {
 
   private async confirmProSubscription(input: {
     userId: string;
+    kind?: 'subscription' | 'cancel';
+    title?: string;
     intro: string;
     expiresAt: Date | null;
     renewing: boolean;
     subject?: string;
     historyDetail: string;
+    plan?: string;
+    price?: string;
   }): Promise<void> {
+    const title = input.title ?? 'Pro subscription';
     await recordPurchase({
       userId: input.userId,
-      kind: 'subscription',
-      title: 'Pro',
+      kind: input.kind ?? 'subscription',
+      title: input.kind === 'cancel' ? title : 'Pro',
       detail: input.historyDetail,
       productId: PRO_PRODUCT_ID,
     });
     await notificationService
-      .createForUsers([input.userId], 'Pro subscription', input.intro, {
+      .createForUsers([input.userId], title, input.intro, {
         type: 'subscription',
-        icon: 'card-outline',
+        icon: 'diamond-outline',
       })
       .catch(() => undefined);
     await this.emailSubscription({
       ownerId: input.userId,
       intro: input.intro,
-      plan: 'Pro',
-      price: PRO_MONTHLY_PRICE_LABEL,
+      plan: input.plan ?? 'Pro',
+      price: input.price ?? PRO_MONTHLY_PRICE_LABEL,
       expiresAt: input.expiresAt,
       renewing: input.renewing,
       subject: input.subject,
