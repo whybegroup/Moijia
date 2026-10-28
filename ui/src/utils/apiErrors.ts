@@ -1,4 +1,5 @@
 import { ApiError } from '@moijia/client';
+import { formatNotificationBody } from './notificationDisplay';
 
 export function isNotFoundError(error: unknown): boolean {
   if (error instanceof ApiError) return error.status === 404;
@@ -71,12 +72,12 @@ export function apiErrorMessage(error: unknown, fallback = 'Please try again.'):
     if (!src) continue;
     const fromError = stringField(src.error);
     const fromMessage = stringField(src.message);
-    if (fromError && !GENERIC_HTTP_MESSAGES.has(fromError)) return fromError;
-    if (fromMessage && !GENERIC_HTTP_MESSAGES.has(fromMessage)) return fromMessage;
+    if (fromError && !GENERIC_HTTP_MESSAGES.has(fromError)) return formatNotificationBody(fromError);
+    if (fromMessage && !GENERIC_HTTP_MESSAGES.has(fromMessage)) return formatNotificationBody(fromMessage);
   }
   if (error instanceof Error) {
     const msg = error.message.trim();
-    if (msg && !GENERIC_HTTP_MESSAGES.has(msg)) return msg;
+    if (msg && !GENERIC_HTTP_MESSAGES.has(msg)) return formatNotificationBody(msg);
   }
   return fallback;
 }

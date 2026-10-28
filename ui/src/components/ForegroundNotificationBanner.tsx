@@ -17,6 +17,7 @@ import { useAppRouter as useRouter } from '../hooks/useAppRouter';
 import { useCurrentUserContext } from '../contexts/CurrentUserContext';
 import { useNotifications, useUpdateNotification } from '../hooks/api';
 import { Colors, Fonts, Radius, Shadows } from '../constants/theme';
+import { formatNotificationBody } from '../utils/notificationDisplay';
 import { navigateFromNotificationPayload } from '../utils/notificationNavigation';
 import { NotificationListIcon } from './NotificationListIcon';
 
@@ -47,7 +48,7 @@ function bannerFromPush(notification: Notifications.Notification): Banner | null
   return {
     id: payload.notificationId || notification.request.identifier,
     title: heading || 'Notification',
-    body: detail,
+    body: formatNotificationBody(detail),
     type: payload.type ?? '',
     dest: payload.dest,
     eventId: payload.eventId,
@@ -62,7 +63,7 @@ function bannerFromApi(n: ApiNotification): Banner {
   return {
     id: n.id,
     title: (n.title ?? '').trim() || 'Notification',
-    body: (n.body ?? '').trim(),
+    body: formatNotificationBody((n.body ?? '').trim()),
     type: n.type ?? '',
     dest: n.dest ?? undefined,
     eventId: n.eventId ?? undefined,

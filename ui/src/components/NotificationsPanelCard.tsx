@@ -16,7 +16,7 @@ import { getGroupColor, getDefaultGroupThemeFromName } from '../utils/helpers';
 import { NotificationListIcon } from './NotificationListIcon';
 import { useUpdateNotification, useMarkAllNotificationsRead } from '../hooks/api';
 import { navigateFromNotification } from '../utils/notificationNavigation';
-import { formatNotificationTimestamp } from '../utils/notificationDisplay';
+import { formatNotificationBody, formatNotificationTimestamp } from '../utils/notificationDisplay';
 import type { NotificationsPanelGroup } from './notificationsPanelTypes';
 
 export const NOTIFICATIONS_PANEL_WIDTH = 300;
@@ -132,7 +132,7 @@ export function NotificationsPanelCard({
                     {formatNotificationTimestamp(n.ts)}
                   </Text>
                   <Text style={{ fontSize: 12, color: Colors.textSub }} numberOfLines={2}>
-                    {n.body}
+                    {formatNotificationBody(n.body)}
                   </Text>
                 </View>
               </TouchableOpacity>

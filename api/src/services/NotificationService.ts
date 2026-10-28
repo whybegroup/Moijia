@@ -25,7 +25,8 @@ export class NotificationService {
       },
     });
     const mapped = notifications.map((n) => this.mapNotification(n));
-    return this.applyViewerTimeZoneToBodies(mapped, timeZone);
+    const withInstants = await this.embedDowngradeInstants(mapped);
+    return this.applyViewerTimeZoneToBodies(withInstants, timeZone);
   }
 
   /**
@@ -205,6 +206,67 @@ export class NotificationService {
       ...n,
       dest: n.dest as 'group' | 'event' | 'poll' | null,
     };
+  }
+
+  /**
+   * Older downgrade notices stored a server-local date string. Swap that for the
+   * UTC instant (`downgradeAt`) so the client can format it in the device zone.
+   */
+  private async embedDowngradeInstants(notifications: Notification[]): Promise<Notification[]> {
+    const titles = new Set(['Plan grace period', 'Group storage will shrink', 'Group will be deleted']);
+    const hasInstant = (body: string) =>
+      /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z/.test(body);
+    const targets = notifications.filter((n) => titles.has(n.title) && !hasInstant(n.body));
+    if (targets.length === 0) return notifications;
+
+    const ownerIds = [
+      ...new Set(
+        targets
+          .filter((n) => n.title === 'Plan grace period' && n.userId)
+          .map((n) => n.userId as string)
+      ),
+    ];
+    const groupIds = [
+      ...new Set(
+        targets.filter((n) => n.title !== 'Plan grace period' && n.groupId).map((n) => n.groupId as string)
+      ),
+    ];
+    const [users, owners] = await Promise.all([
+      ownerIds.length
+        ? prisma.user.findMany({
+            where: { id: { in: ownerIds }, downgradeAt: { not: null } },
+            select: { id: true, downgradeAt: true },
+          })
+        : Promise.resolve([]),
+      groupIds.length
+        ? prisma.groupMember.findMany({
+            where: { groupId: { in: groupIds }, role: 'owner', status: 'active' },
+            select: { groupId: true, user: { select: { downgradeAt: true } } },
+          })
+        : Promise.resolve([]),
+    ]);
+    const byUser = new Map(users.map((user) => [user.id, user.downgradeAt]));
+    const byGroup = new Map(
+      owners.filter((owner) => owner.user.downgradeAt).map((owner) => [owner.groupId, owner.user.downgradeAt])
+    );
+
+    return notifications.map((n) => {
+      if (!titles.has(n.title) || hasInstant(n.body)) return n;
+      const at =
+        n.title === 'Plan grace period'
+          ? n.userId
+            ? byUser.get(n.userId)
+            : null
+          : n.groupId
+            ? byGroup.get(n.groupId)
+            : null;
+      if (!at) return n;
+      const body = n.body.replace(
+        /\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},\s+(?:\d{1,2}:\d{2}[\s\u202f]*[AP]M|\d{4})\b/g,
+        at.toISOString()
+      );
+      return body === n.body ? n : { ...n, body };
+    });
   }
 
   private async applyViewerTimeZoneToBodies(

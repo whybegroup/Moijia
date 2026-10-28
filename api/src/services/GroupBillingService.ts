@@ -496,8 +496,9 @@ export class GroupBillingService {
     for (const group of shrinking) {
       await this.startGrace(group.id, 'small', downgradeAt);
     }
-    const when = formatMailDate(downgradeAt);
-    const body = downgradeNotice(when, keep, deleting, remove.some((group) => group.deletedAt), planName);
+    const when = downgradeAt.toISOString();
+    const alreadyDeleted = remove.some((group) => group.deletedAt);
+    const body = downgradeNotice(when, keep, deleting, alreadyDeleted, planName);
     await notificationService
       .createForUsers([userId], 'Plan grace period', body, {
         type: 'group_storage',
@@ -539,7 +540,13 @@ export class GroupBillingService {
     }
     await this.emailSubscription({
       ownerId: userId,
-      intro: body,
+      intro: downgradeNotice(
+        formatMailDate(downgradeAt),
+        keep,
+        deleting,
+        alreadyDeleted,
+        planName
+      ),
       plan: 'Free',
       price: '$0.00/mo',
       expiresAt: downgradeAt,
@@ -630,7 +637,7 @@ export class GroupBillingService {
     if (!owner || !downgradeAt || parseSubscriptionTier(owner.user.subscriptionTier) !== 'free') {
       return { kind: 'default' };
     }
-    const when = formatMailDate(downgradeAt);
+    const when = downgradeAt.toISOString();
     const { keep, remove } = await this.classifyOwnedGroups(owner.userId);
     if (remove.some((group) => group.id === groupId && !group.deletedAt)) {
       return {
