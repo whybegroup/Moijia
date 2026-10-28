@@ -1,4 +1,4 @@
-import { PrismaClient } from '../generated/prisma';
+import { PrismaClient } from '@prisma/client';
 import { groupStorage } from './GroupStorageService';
 import { NotificationService } from './NotificationService';
 import { MAIL_FOOTER, sendOwnerEmail, type ReceiptSection } from './EmailService';
@@ -612,10 +612,6 @@ export class GroupBillingService {
     for (const group of due) {
       await this.finishGrace(group.id, parseSizeTier(group.pendingSizeTier));
     }
-    await prisma.user.updateMany({
-      where: { downgradeAt: { lte: new Date() } },
-      data: { downgradeAt: null },
-    });
   }
 
   /**

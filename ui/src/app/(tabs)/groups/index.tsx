@@ -33,8 +33,8 @@ import { GroupAvatar } from '../../../components/GroupAvatar';
 import { useListGroups } from '../../../hooks/useListGroups';
 import { usePullToRefresh } from '../../../hooks/usePullToRefresh';
 import type { GroupScoped } from '@moijia/client';
-import { relocateOwnedGroup } from '../../../utils/groupOrder';
 import { downgradeIsPending, pendingDowngradeAt } from '../../../utils/downgradePlan';
+import { DowngradeNotice } from '../../../components/DowngradeNotice';
 import { FREE_OWNED_GROUP_LIMIT } from '../../../utils/groupTiers';
 import { formatPlanDate } from '../../../utils/groupPlanPeriod';
 
@@ -46,8 +46,6 @@ type ActiveGroupRowProps = {
   upcomingWeekEnd: Date;
   currentUserId: string | undefined;
   onOpenGroup: (groupId: string) => void;
-  moveLabel?: string;
-  onMove?: () => void;
   warningNote?: string;
 };
 
@@ -62,8 +60,6 @@ function GroupCard({
   onLongPress,
   isActive = false,
   showHandle,
-  moveLabel,
-  onMove,
   warningNote,
 }: ActiveGroupRowProps & {
   onLongPress?: () => void;
@@ -119,19 +115,6 @@ function GroupCard({
             {warningNote ? <Text style={styles.warningNote}>{warningNote}</Text> : null}
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            {moveLabel && onMove ? (
-              <Pressable
-                onPress={(event) => {
-                  event.stopPropagation();
-                  onMove();
-                }}
-                style={styles.moveBtn}
-                accessibilityRole="button"
-                accessibilityLabel={`${moveLabel} ${g.name}`}
-              >
-                <Text style={styles.moveBtnText}>{moveLabel}</Text>
-              </Pressable>
-            ) : null}
             {g.membershipStatus === 'pending' && (
               <View style={[styles.adminBadge, { backgroundColor: '#FEF3C7', borderColor: '#F59E0B' }]}>
                 <Text style={[styles.adminBadgeText, { color: '#B45309' }]}>Pending</Text>
@@ -159,50 +142,6 @@ function deletionWarning(group: GroupScoped): string | undefined {
   if (!group.deletionScheduledAt) return undefined;
   const date = formatPlanDate(group.deletionScheduledAt);
   return date ? `Will be deleted ${date}` : 'Will be deleted';
-}
-
-function DowngradeListNotice({
-  choosing,
-  when,
-  graceStarted,
-}: {
-  choosing: boolean;
-  when: Date | null;
-  graceStarted: boolean;
-}) {
-  const date = when ? formatPlanDate(when) : '';
-  const keptLimit = graceStarted
-    ? 'Groups under Kept are limited to 1 GB now. New uploads stop once a group is over 1 GB, and older files over that limit are removed on this date.'
-    : 'On this date, groups you keep are trimmed to 1 GB, oldest files first.';
-  return (
-    <View style={styles.notice} accessibilityRole="alert">
-      <Text style={styles.noticeTitle}>{date ? `On ${date}` : 'After this plan ends'}</Text>
-      <Text style={styles.noticeBody}>
-        {choosing
-          ? `Only the two groups under Kept stay. Everything under Will be deleted is permanently removed, including its files. Drag a group across the split, or tap Keep or Remove. ${keptLimit} You can still download, delete files, or transfer a group.`
-          : graceStarted
-            ? 'Groups you own are limited to 1 GB now. New uploads stop once a group is over 1 GB. Older files over that limit are removed on this date. You can still download, delete files, or transfer a group.'
-            : 'Groups you own become Small (1 GB). Files over that limit are removed, oldest first.'}
-      </Text>
-    </View>
-  );
-}
-
-function DowngradeGroupRow({
-  index,
-  ...props
-}: ActiveGroupRowProps & { index: number }) {
-  const drag = useReorderableDrag();
-  const isActive = useIsActive();
-  return (
-    <GroupCard
-      {...props}
-      onLongPress={drag}
-      isActive={isActive}
-      showHandle
-      moveLabel={index < FREE_OWNED_GROUP_LIMIT ? 'Remove' : 'Keep'}
-    />
-  );
 }
 
 function ActiveGroupRow(props: ActiveGroupRowProps) {
@@ -467,20 +406,6 @@ export default function GroupsScreen() {
     [commitOrder, currentUserId]
   );
 
-  const moveOwnedGroup = useCallback(
-    (groupId: string, toKept: boolean) => {
-      setOrderedActiveGroups((prev) => {
-        const isOwned = (g: GroupScoped) => g.ownerId === currentUserId;
-        const mine = prev.filter(isOwned);
-        const others = prev.filter((g) => !isOwned(g));
-        const nextMine = relocateOwnedGroup(mine, groupId, toKept, FREE_OWNED_GROUP_LIMIT);
-        if (nextMine.every((group, index) => group.id === mine[index]?.id)) return prev;
-        return commitOrder(prev, nextMine, others);
-      });
-    },
-    [commitOrder, currentUserId]
-  );
-
   const handleReorderMine = useCallback(
     ({ from, to }: ReorderableListReorderEvent) => handleReorder('mine', from, to),
     [handleReorder]
@@ -526,17 +451,6 @@ export default function GroupsScreen() {
     ({ item: g }) => <ActiveGroupRow group={g} {...rowProps} />,
     [rowProps]
   );
-  const renderDowngradeRow = useCallback<ReorderableListRenderItem<GroupScoped>>(
-    ({ item: g, index }) => (
-      <DowngradeGroupRow
-        index={index}
-        group={g}
-        {...rowProps}
-        onMove={() => moveOwnedGroup(g.id, index >= FREE_OWNED_GROUP_LIMIT)}
-      />
-    ),
-    [moveOwnedGroup, rowProps]
-  );
   const renderOtherGroupRow = useCallback<ReorderableListRenderItem<GroupScoped>>(
     ({ item: g }) => <ActiveGroupRow group={g} {...rowProps} warningNote={deletionWarning(g)} />,
     [rowProps]
@@ -560,8 +474,9 @@ export default function GroupsScreen() {
           contentContainerStyle={styles.listContent}
           refreshControl={refreshControl}
         >
+          {downgradePending ? <SectionHeader title="My Groups" count={ownedCountLabel} /> : null}
           {downgradePending ? (
-            <DowngradeListNotice
+            <DowngradeNotice
               choosing={choosingKeepers}
               when={downgradeWhen}
               graceStarted={Boolean(quota?.downgradeAt)}
@@ -581,7 +496,7 @@ export default function GroupsScreen() {
               }}
               data={myGroups}
               panGesture={myPanGesture}
-              renderItem={renderDowngradeRow}
+              renderItem={renderActiveGroupRow}
               onReorder={handleReorderMine}
               onDragStart={handleDragStart}
               onDragEnd={handleDragEnd}
@@ -591,6 +506,7 @@ export default function GroupsScreen() {
             <GroupSectionList
               title="My Groups"
               count={ownedCountLabel}
+              hideHeader={downgradePending}
               empty="Groups you create show up here."
               data={myGroups}
               panGesture={myPanGesture}
@@ -710,27 +626,7 @@ const styles = StyleSheet.create({
   },
   sectionLabelKeep: { color: Colors.going },
   sectionLabelDelete: { color: Colors.notGoing },
-  notice: {
-    marginTop: 8,
-    marginBottom: 4,
-    padding: 14,
-    borderRadius: Radius.lg,
-    backgroundColor: Colors.maybeBg,
-    borderWidth: 1,
-    borderColor: Colors.maybeBorder,
-  },
-  noticeTitle: { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.text, marginBottom: 6 },
-  noticeBody: { fontSize: 13, lineHeight: 18, fontFamily: Fonts.regular, color: Colors.textSub },
   warningNote: { marginTop: 4, fontSize: 12, fontFamily: Fonts.medium, color: Colors.notGoing },
-  moveBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: Radius.full,
-    borderWidth: 1,
-    borderColor: Colors.borderStrong,
-    backgroundColor: Colors.bg,
-  },
-  moveBtnText: { fontSize: 12, fontFamily: Fonts.semiBold, color: Colors.text },
   sectionEmpty: {
     fontSize: 14,
     fontFamily: Fonts.regular,

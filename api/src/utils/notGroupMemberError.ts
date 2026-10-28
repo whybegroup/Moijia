@@ -1,4 +1,4 @@
-import type { PrismaClient } from '../generated/prisma';
+import type { PrismaClient } from '@prisma/client';
 import { httpError, type HttpError } from './httpError';
 
 export const NOT_GROUP_MEMBER_CODE = 'NOT_GROUP_MEMBER';

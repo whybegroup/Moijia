@@ -1,4 +1,4 @@
-import { PrismaClient } from '../generated/prisma';
+import { PrismaClient } from '@prisma/client';
 import { formatShareInstant, formatShareWhenRange } from '../utils/formatNotificationEventWhen';
 import { firstImageUrlFromForumBody, GROUP_POST_ATTACHMENT_MARKER } from '../utils/groupPostBodyUploads';
 import {

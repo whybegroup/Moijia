@@ -1,4 +1,4 @@
-import { PrismaClient } from '../generated/prisma';
+import { PrismaClient } from '@prisma/client';
 import { groupFriendships } from './GroupFriendshipService';
 import { groupStorage } from './GroupStorageService';
 import { S3UploadService } from './S3UploadService';

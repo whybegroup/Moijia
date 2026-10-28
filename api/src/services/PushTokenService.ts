@@ -1,4 +1,4 @@
-import { PrismaClient } from '../generated/prisma';
+import { PrismaClient } from '@prisma/client';
 import type { PushTokenInput } from '../models/PushToken';
 
 const prisma = new PrismaClient();

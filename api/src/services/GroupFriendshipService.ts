@@ -1,4 +1,4 @@
-import { PrismaClient } from '../generated/prisma';
+import { PrismaClient } from '@prisma/client';
 import type { FriendGroup, MembershipStatus } from '../models';
 import { httpError } from '../utils/httpError';
 import { NotificationService } from './NotificationService';

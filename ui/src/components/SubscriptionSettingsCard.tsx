@@ -8,6 +8,7 @@ import { PRO_PRICE_LABEL, parseSubscriptionTier, subscriptionPlanLabel } from '.
 import { formatPlanDate } from '../utils/groupPlanPeriod';
 import { downgradeIsPending, pendingDowngradeAt } from '../utils/downgradePlan';
 import { FREE_OWNED_GROUP_LIMIT } from '../utils/groupTiers';
+import { DowngradeNotice } from './DowngradeNotice';
 import { StoragePaywall } from './StoragePaywall';
 
 export function SubscriptionSettingsCard() {
@@ -20,13 +21,17 @@ export function SubscriptionSettingsCard() {
   const periodLabel = quota?.subscriptionWillRenew ? 'Renews' : 'Expires';
   const downgradePending = downgradeIsPending(quota);
   const downgradeDate = pendingDowngradeAt(quota);
-  const downgradeWhen = downgradeDate ? formatPlanDate(downgradeDate) : '';
+  const graceStarted = Boolean(quota?.downgradeAt);
   const choosingKeepers = downgradePending && (quota?.ownedGroupCount ?? 0) > FREE_OWNED_GROUP_LIMIT;
+  const showDowngradeWarning = downgradePending;
   const subscriptionWarning = quota?.subscriptionWarning?.trim() ?? '';
 
   return (
     <>
       <Text style={styles.sectionLabel}>SUBSCRIPTION</Text>
+      {showDowngradeWarning ? (
+        <DowngradeNotice choosing={choosingKeepers} when={downgradeDate} graceStarted={graceStarted} />
+      ) : null}
       <View style={[styles.card, styles.cardGap]}>
         <View style={styles.infoRow}>
           <Text style={styles.infoLabel}>Current plan</Text>
@@ -47,15 +52,6 @@ export function SubscriptionSettingsCard() {
         {subscriptionWarning ? (
           <View style={[styles.infoRow, styles.actionRow]}>
             <Text style={styles.warning}>{subscriptionWarning}</Text>
-          </View>
-        ) : null}
-        {downgradePending ? (
-          <View style={[styles.infoRow, styles.actionRow]}>
-            <Text style={styles.notice}>
-              {choosingKeepers
-                ? `${downgradeWhen ? `On ${downgradeWhen}, only` : 'Only'} the two groups under Kept will stay. The others will be permanently deleted.`
-                : `${downgradeWhen ? `On ${downgradeWhen}, groups` : 'Groups'} you own will become Small (1 GB).`}
-            </Text>
           </View>
         ) : null}
         {tier === 'free' ? (
@@ -113,6 +109,5 @@ const styles = StyleSheet.create({
   infoValue: { fontSize: 14, fontFamily: Fonts.medium, color: Colors.text, flexShrink: 1, textAlign: 'right' },
   expires: { color: Colors.notGoing, fontFamily: Fonts.semiBold },
   actionText: { fontSize: 14, fontFamily: Fonts.semiBold, color: Colors.accent },
-  notice: { flex: 1, fontSize: 14, lineHeight: 20, fontFamily: Fonts.semiBold, color: Colors.notGoing },
   warning: { flex: 1, fontSize: 14, lineHeight: 20, fontFamily: Fonts.semiBold, color: Colors.notGoing },
 });
