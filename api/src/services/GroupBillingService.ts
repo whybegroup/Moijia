@@ -46,6 +46,12 @@ function validDate(value: Date | null | undefined): Date | null {
   return value;
 }
 
+/** True when the store moved this instant forward into a new billing period. */
+function dateMoved(next: Date | null, prev: Date | null): boolean {
+  if (!next || !prev) return false;
+  return next.getTime() > prev.getTime() + 1000;
+}
+
 function formatMailDate(date: Date): string {
   const soon = Math.abs(date.getTime() - Date.now()) < 48 * 60 * 60 * 1000;
   if (soon) {
@@ -227,6 +233,7 @@ export class GroupBillingService {
         subscriptionStartedAt: true,
         subscriptionExpiresAt: true,
         subscriptionProductId: true,
+        subscriptionWillRenew: true,
       },
     });
     if (!user) throw httpError(404, 'User not found');
@@ -244,34 +251,68 @@ export class GroupBillingService {
 
     if (inPaidPeriod) {
       const becomingPro = tier !== 'pro';
-      await prisma.user.update({
-        where: { id: userId },
-        data: {
-          subscriptionTier: 'pro',
-          subscriptionStartedAt: startedAt,
-          subscriptionExpiresAt: expiresAt,
-          subscriptionProductId: PRO_PRODUCT_ID,
-          subscriptionWillRenew: input.proRenewing,
-          downgradeAt: null,
-        },
-      });
+      const periodAdvanced =
+        tier === 'pro' &&
+        (dateMoved(purchasedAt, storedStart) || dateMoved(storeExpires, storedExpires));
+      const resumedRenewal =
+        tier === 'pro' && user.subscriptionWillRenew === false && input.proRenewing && !periodAdvanced;
+      const notice = becomingPro ? 'subscribe' : periodAdvanced ? 'renewed' : resumedRenewal ? 'resumed' : null;
+      const proData = {
+        subscriptionTier: 'pro',
+        subscriptionStartedAt: startedAt,
+        subscriptionExpiresAt: expiresAt,
+        subscriptionProductId: PRO_PRODUCT_ID,
+        subscriptionWillRenew: input.proRenewing,
+        downgradeAt: null,
+      };
+      let claimed = true;
+      if (notice === 'subscribe') {
+        const result = await prisma.user.updateMany({
+          where: { id: userId, NOT: { subscriptionTier: 'pro' } },
+          data: proData,
+        });
+        claimed = result.count > 0;
+      } else if (notice === 'renewed') {
+        const result = await prisma.user.updateMany({
+          where: dateMoved(storeExpires, storedExpires)
+            ? { id: userId, subscriptionExpiresAt: storedExpires }
+            : { id: userId, subscriptionStartedAt: storedStart },
+          data: proData,
+        });
+        claimed = result.count > 0;
+      } else if (notice === 'resumed') {
+        const result = await prisma.user.updateMany({
+          where: { id: userId, subscriptionTier: 'pro', subscriptionWillRenew: false },
+          data: proData,
+        });
+        claimed = result.count > 0;
+      }
+      if (!notice || !claimed) {
+        await prisma.user.update({ where: { id: userId }, data: proData });
+      }
       await this.clearOwnedGrace(userId);
       if (becomingPro) {
         await this.upgradeOwnedGroupsToMedium(userId);
-        await recordPurchase({
+      }
+      if (notice && claimed) {
+        const intro =
+          notice === 'subscribe'
+            ? 'Thanks for subscribing to moijia Pro. Groups you own are Medium (10 GB), and you can create up to 10.'
+            : notice === 'renewed'
+              ? 'Your moijia Pro subscription renewed. Groups you own stay Medium (10 GB), and you can create up to 10.'
+              : 'Your moijia Pro subscription is set to renew again. Groups you own stay Medium (10 GB), and you can create up to 10.';
+        await this.confirmProSubscription({
           userId,
-          kind: 'subscription',
-          title: 'Pro',
-          detail: PRO_MONTHLY_PRICE_LABEL,
-          productId: PRO_PRODUCT_ID,
-        });
-        await this.emailSubscription({
-          ownerId: userId,
-          intro: 'Thanks for subscribing to moijia Pro. Groups you own are Medium (10 GB), and you can create up to 10.',
-          plan: 'Pro',
-          price: PRO_MONTHLY_PRICE_LABEL,
+          intro,
           expiresAt,
           renewing: input.proRenewing,
+          subject:
+            notice === 'renewed'
+              ? 'Your moijia Pro subscription renewed'
+              : notice === 'resumed'
+                ? 'Your moijia Pro subscription will renew'
+                : undefined,
+          historyDetail: notice === 'resumed' ? 'Set to renew again' : PRO_MONTHLY_PRICE_LABEL,
         });
       }
       await this.applyDueGracePeriods();
@@ -810,6 +851,38 @@ export class GroupBillingService {
       select: { group: { select: { id: true, name: true, sizeTier: true } } },
     });
     return rows.map((row) => row.group);
+  }
+
+  private async confirmProSubscription(input: {
+    userId: string;
+    intro: string;
+    expiresAt: Date | null;
+    renewing: boolean;
+    subject?: string;
+    historyDetail: string;
+  }): Promise<void> {
+    await recordPurchase({
+      userId: input.userId,
+      kind: 'subscription',
+      title: 'Pro',
+      detail: input.historyDetail,
+      productId: PRO_PRODUCT_ID,
+    });
+    await notificationService
+      .createForUsers([input.userId], 'Pro subscription', input.intro, {
+        type: 'subscription',
+        icon: 'card-outline',
+      })
+      .catch(() => undefined);
+    await this.emailSubscription({
+      ownerId: input.userId,
+      intro: input.intro,
+      plan: 'Pro',
+      price: PRO_MONTHLY_PRICE_LABEL,
+      expiresAt: input.expiresAt,
+      renewing: input.renewing,
+      subject: input.subject,
+    });
   }
 
   private async emailSubscription(input: {
