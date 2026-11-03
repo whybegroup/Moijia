@@ -8,6 +8,7 @@ import { S3UploadService } from './S3UploadService';
 import { deleteRevenueCatSubscriber } from './RevenueCatService';
 import { groupBilling } from './GroupBillingService';
 import { httpError } from '../utils/httpError';
+import { normalizeTimeZone } from '../utils/timeZone';
 import { parseSubscriptionTier } from '../utils/subscriptionTiers';
 import { groupFriendships } from './GroupFriendshipService';
 
@@ -101,8 +102,18 @@ export class UserService {
    * Update a user
    */
   public async update(id: string, input: UserUpdate): Promise<User> {
-    const { notifPrefs, ...rest } = input;
+    const { notifPrefs, timeZone, ...rest } = input;
     const data: any = { ...rest };
+
+    if (timeZone !== undefined) {
+      if (timeZone === null || timeZone.trim() === '') {
+        data.timeZone = null;
+      } else {
+        const zone = normalizeTimeZone(timeZone);
+        if (!zone) throw httpError(400, 'Choose a valid time zone.');
+        data.timeZone = zone;
+      }
+    }
 
     if (notifPrefs !== undefined) {
       const existing = await prisma.user.findUnique({

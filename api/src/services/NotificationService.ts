@@ -7,6 +7,7 @@ import {
   newEventNotificationBody,
   timeSuggestionNotificationBody,
 } from '../utils/formatNotificationEventWhen';
+import { formatInstantInTimeZone } from '../utils/timeZone';
 
 const prisma = new PrismaClient();
 const pushNotificationService = new PushNotificationService();
@@ -14,8 +15,7 @@ const pushNotificationService = new PushNotificationService();
 export class NotificationService {
   /**
    * Get all notifications with optional user filtering.
-   * `timeZone` is an IANA zone from the device (`Intl…timeZone`) so event times in
-   * notification bodies match the rest of the app.
+   * A saved profile time zone wins. `timeZone` is the device zone, used until one is saved.
    */
   public async getAll(userId?: string, timeZone?: string): Promise<Notification[]> {
     const notifications = await prisma.notification.findMany({
@@ -26,7 +26,9 @@ export class NotificationService {
     });
     const mapped = notifications.map((n) => this.mapNotification(n));
     const withInstants = await this.embedDowngradeInstants(mapped);
-    return this.applyViewerTimeZoneToBodies(withInstants, timeZone);
+    const zone = await this.viewerTimeZone(userId, timeZone);
+    const formatted = zone ? this.formatIsoInstants(withInstants, zone) : withInstants;
+    return this.applyViewerTimeZoneToBodies(formatted, zone);
   }
 
   /**
@@ -140,6 +142,45 @@ export class NotificationService {
       dest: options?.dest,
       navigable: !!(options?.groupId || options?.eventId || options?.pollId || options?.postId),
     });
+  }
+
+  /**
+   * Same title for each user, with the body written in that user's saved time zone.
+   */
+  public async createForUsersInTheirTimeZone(
+    userIds: string[],
+    title: string,
+    bodyForZone: (timeZone: string | null) => string,
+    options?: {
+      type?: string;
+      icon?: string;
+      groupId?: string;
+      eventId?: string;
+      pollId?: string;
+      postId?: string;
+      commentId?: string;
+      dest?: 'group' | 'event' | 'poll';
+    }
+  ): Promise<Notification[]> {
+    if (userIds.length === 0) return [];
+    const rows = await prisma.user.findMany({
+      where: { id: { in: userIds } },
+      select: { id: true, timeZone: true },
+    });
+    const zoneById = new Map(rows.map((row) => [row.id, row.timeZone?.trim() || null]));
+    const groups = new Map<string, string[]>();
+    for (const id of userIds) {
+      const key = zoneById.get(id) ?? '';
+      const list = groups.get(key) ?? [];
+      list.push(id);
+      groups.set(key, list);
+    }
+    const created: Notification[] = [];
+    for (const [key, ids] of groups) {
+      const batch = await this.createForUsers(ids, title, bodyForZone(key || null), options);
+      created.push(...batch);
+    }
+    return created;
   }
 
   /**
@@ -262,10 +303,36 @@ export class NotificationService {
             : null;
       if (!at) return n;
       const body = n.body.replace(
-        /\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},\s+(?:\d{1,2}:\d{2}[\s\u202f]*[AP]M|\d{4})\b/g,
+        /\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},\s+(?:\d{1,2}:\d{2}[\s\u202f]*[AP]M(?:\s+\([^)]+\))?|\d{4})\b/g,
         at.toISOString()
       );
       return body === n.body ? n : { ...n, body };
+    });
+  }
+
+  private async viewerTimeZone(userId?: string, deviceTimeZone?: string): Promise<string | undefined> {
+    if (userId) {
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { timeZone: true },
+      });
+      const stored = user?.timeZone?.trim();
+      if (stored) return stored;
+    }
+    const device = deviceTimeZone?.trim();
+    return device || undefined;
+  }
+
+  private formatIsoInstants(notifications: Notification[], timeZone: string): Notification[] {
+    return notifications.map((notification) => {
+      const body = notification.body.replace(
+        /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z/g,
+        (iso) => {
+          const date = new Date(iso);
+          return Number.isNaN(date.getTime()) ? iso : formatInstantInTimeZone(date, timeZone);
+        }
+      );
+      return body === notification.body ? notification : { ...notification, body };
     });
   }
 

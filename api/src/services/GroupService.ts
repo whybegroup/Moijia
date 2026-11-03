@@ -35,7 +35,7 @@ import {
   storageBytesToDb,
   storageCapForTier,
 } from '../utils/groupStorageLimits';
-import { parseSubscriptionTier } from '../utils/subscriptionTiers';
+import { parseSubscriptionTier, subscriptionRank } from '../utils/subscriptionTiers';
 import { httpError } from '../utils/httpError';
 import {
   extractMentionTokens,
@@ -317,10 +317,17 @@ export class GroupService {
       base.inviteCode = group.inviteCode;
       base.ownerId = owner?.userId;
       if (owner?.userId === userId) {
-        base.memberPlans = activeMembers.map((m: any) => ({
-          userId: m.userId,
-          subscriptionTier: parseSubscriptionTier(m.user?.subscriptionTier),
-        }));
+        const ownerTier = parseSubscriptionTier(
+          activeMembers.find((member: { userId: string }) => member.userId === owner.userId)?.user?.subscriptionTier
+        );
+        base.memberPlans = activeMembers.map((m: any) => {
+          const subscriptionTier = parseSubscriptionTier(m.user?.subscriptionTier);
+          return {
+            userId: m.userId,
+            subscriptionTier,
+            canReceiveOwnership: subscriptionRank(subscriptionTier) >= subscriptionRank(ownerTier),
+          };
+        });
       }
       base.adminIds = admins.map((m: any) => m.userId);
       base.memberIds = activeMembers.map((m: any) => m.userId);

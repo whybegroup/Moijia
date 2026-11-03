@@ -9,7 +9,6 @@ export const PRO_OFFERING_ID = 'offering_group_subscriptions';
 export const PRO_PRODUCT_ID = 'pro_subscription';
 export const PRO_ENTITLEMENT_ID = 'entitlement_subscription_pro';
 export const PRO_PACKAGE_ID = 'offering_subscription_pro';
-export const PRO_PRICE_LABEL = '$19.99/month';
 
 export function getRevenueCatApiKey(): string {
   const shared = process.env.EXPO_PUBLIC_REVENUECAT_API_KEY?.trim();

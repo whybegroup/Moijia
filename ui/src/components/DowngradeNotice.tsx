@@ -9,7 +9,7 @@ export function DowngradeNotice({
   graceStarted,
 }: {
   choosing: boolean;
-  when: Date | null;
+  when: Date | string | null;
   graceStarted: boolean;
 }) {
   const date = when ? formatPlanDate(when) : '';

@@ -4,10 +4,7 @@ import { Colors, Fonts } from '../constants/theme';
 import { useCurrentUserContext } from '../contexts/CurrentUserContext';
 import { usePurchases } from '../contexts/PurchasesContext';
 import { useOwnedGroupQuota } from '../hooks/api/useUsers';
-import { PRO_PRICE_LABEL, parseSubscriptionTier, subscriptionPlanLabel } from '../utils/subscriptionTiers';
 import { formatPlanDate } from '../utils/groupPlanPeriod';
-import { downgradeIsPending, pendingDowngradeAt } from '../utils/downgradePlan';
-import { FREE_OWNED_GROUP_LIMIT } from '../utils/groupTiers';
 import { DowngradeNotice } from './DowngradeNotice';
 import { StoragePaywall } from './StoragePaywall';
 
@@ -16,37 +13,35 @@ export function SubscriptionSettingsCard() {
   const { data: quota } = useOwnedGroupQuota(userId ?? '');
   const { presentCustomerCenter } = usePurchases();
   const [paywallOpen, setPaywallOpen] = useState(false);
-  const tier = parseSubscriptionTier(quota?.subscriptionTier);
   const periodDate = quota?.subscriptionExpiresAt ? formatPlanDate(quota.subscriptionExpiresAt) : '';
-  const periodLabel = quota?.subscriptionWillRenew ? 'Renews' : 'Expires';
-  const downgradePending = downgradeIsPending(quota);
-  const downgradeDate = pendingDowngradeAt(quota);
-  const graceStarted = Boolean(quota?.downgradeAt);
-  const choosingKeepers = downgradePending && (quota?.ownedGroupCount ?? 0) > FREE_OWNED_GROUP_LIMIT;
-  const showDowngradeWarning = downgradePending;
+  const downgradeDate = quota?.plannedDowngradeAt ?? null;
   const subscriptionWarning = quota?.subscriptionWarning?.trim() ?? '';
 
   return (
     <>
       <Text style={styles.sectionLabel}>SUBSCRIPTION</Text>
-      {showDowngradeWarning ? (
-        <DowngradeNotice choosing={choosingKeepers} when={downgradeDate} graceStarted={graceStarted} />
+      {quota?.downgradePending ? (
+        <DowngradeNotice
+          choosing={quota.choosingKeepers}
+          when={downgradeDate}
+          graceStarted={quota.graceStarted}
+        />
       ) : null}
       <View style={[styles.card, styles.cardGap]}>
         <View style={styles.infoRow}>
           <Text style={styles.infoLabel}>Current plan</Text>
-          <Text style={styles.infoValue}>{subscriptionPlanLabel(tier)}</Text>
+          <Text style={styles.infoValue}>{quota?.planLabel ?? ''}</Text>
         </View>
-        {tier === 'pro' ? (
+        {quota?.priceLabel ? (
           <View style={[styles.infoRow, styles.actionRow]}>
             <Text style={styles.infoLabel}>Price</Text>
-            <Text style={styles.infoValue}>{PRO_PRICE_LABEL}</Text>
+            <Text style={styles.infoValue}>{quota.priceLabel}</Text>
           </View>
         ) : null}
-        {tier === 'pro' && periodDate ? (
+        {quota?.periodLabel && periodDate ? (
           <View style={[styles.infoRow, styles.actionRow]}>
-            <Text style={[styles.infoLabel, !quota?.subscriptionWillRenew && styles.expires]}>{periodLabel}</Text>
-            <Text style={[styles.infoValue, !quota?.subscriptionWillRenew && styles.expires]}>{periodDate}</Text>
+            <Text style={[styles.infoLabel, quota.periodLabel === 'Expires' && styles.expires]}>{quota.periodLabel}</Text>
+            <Text style={[styles.infoValue, quota.periodLabel === 'Expires' && styles.expires]}>{periodDate}</Text>
           </View>
         ) : null}
         {subscriptionWarning ? (
@@ -54,7 +49,7 @@ export function SubscriptionSettingsCard() {
             <Text style={styles.warning}>{subscriptionWarning}</Text>
           </View>
         ) : null}
-        {tier === 'free' ? (
+        {quota?.showUpgrade ? (
           <TouchableOpacity
             style={[styles.infoRow, styles.actionRow]}
             onPress={() => setPaywallOpen(true)}
@@ -64,7 +59,7 @@ export function SubscriptionSettingsCard() {
             <Text style={styles.actionText}>Upgrade to Pro</Text>
           </TouchableOpacity>
         ) : null}
-        {tier === 'pro' ? (
+        {quota?.showManage ? (
           <TouchableOpacity
             style={[styles.infoRow, styles.actionRow]}
             onPress={() => void presentCustomerCenter().catch(() => undefined)}

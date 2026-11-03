@@ -26,7 +26,6 @@ import { useCreateGroup, useGroup, useUpdateGroup } from '../hooks/api/useGroups
 import { useOwnedGroupQuota } from '../hooks/api/useUsers';
 import { useAuth } from '../contexts/AuthContext';
 import { GROUP_TIERS, type GroupSizeTier } from '../utils/groupTiers';
-import { parseSubscriptionTier } from '../utils/subscriptionTiers';
 import { useCurrentUserContext } from '../contexts/CurrentUserContext';
 import { GroupAvatar } from '../components/GroupAvatar';
 import { AvatarPickerModal } from '../components/AvatarPickerModal';
@@ -87,8 +86,7 @@ export default function CreateGroupScreen() {
   const updateGroup = useUpdateGroup(editId ?? '', currentUserId ?? '');
   const actorIdForQuota = (currentUserId ?? user?.uid ?? '').trim();
   const { data: groupQuota, refetch: refetchQuota } = useOwnedGroupQuota(actorIdForQuota);
-  const subscriptionTier = parseSubscriptionTier(groupQuota?.subscriptionTier);
-  const isEnterprise = subscriptionTier === 'enterprise';
+  const isEnterprise = groupQuota?.canChooseGroupSize === true;
   const { data: editingGroup } = useGroup(editId ?? '', currentUserId ?? '', { enabled: isEditing });
   const [newGroupId] = useState(() => Crypto.randomUUID());
   const groupId = editId ?? newGroupId;
@@ -279,13 +277,8 @@ export default function CreateGroupScreen() {
       }
 
       const quota = groupQuota ?? (await refetchQuota()).data;
-      if (quota && !quota.canCreateGroup) {
-        const cap = quota.groupCapacity ?? 2;
-        const message =
-          parseSubscriptionTier(quota.subscriptionTier) === 'pro'
-            ? `Pro includes up to ${cap} groups. Contact sales@moijia.com about Enterprise for more.`
-            : `Free includes up to ${cap} groups. Upgrade to Pro in Profile > Subscription to create up to 10 groups.`;
-        Alert.alert('Group limit reached', message);
+      if (quota?.createLimitMessage) {
+        Alert.alert('Group limit reached', quota.createLimitMessage);
         return;
       }
 

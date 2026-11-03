@@ -6,6 +6,7 @@ import { RegisterRoutes } from './generated/routes';
 import { registerSharePreviewRoutes } from './sharePreviewRoutes';
 import { registerMediaShareRoutes } from './mediaShareRoutes';
 import { startGroupBillingJobs } from './jobs/groupBillingJobs';
+import { registerRevenueCatWebhook } from './revenueCatWebhook';
 import { apiReference } from '@scalar/express-api-reference';
 import * as fs from 'fs';
 import * as yaml from 'js-yaml';
@@ -21,6 +22,7 @@ registerSharePreviewRoutes(app);
 registerMediaShareRoutes(app);
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+registerRevenueCatWebhook(app);
 
 // Register tsoa routes
 RegisterRoutes(app);

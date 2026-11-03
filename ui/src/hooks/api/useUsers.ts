@@ -35,9 +35,12 @@ export function useUpdateUser(id: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (update: UserUpdate) => UsersService.updateUser(id, update),
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.users.all });
       queryClient.setQueryData(queryKeys.users.detail(data.id), data);
+      if (variables.timeZone !== undefined) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.notifications.all });
+      }
     },
   });
 }

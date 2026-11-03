@@ -1,4 +1,4 @@
-import { formatPlanDate } from './groupPlanPeriod';
+import { formatPlanDate, formatZonedTimestamp } from './groupPlanPeriod';
 
 /**
  * Heading shown in notification lists. Mention alerts always use this copy
@@ -17,7 +17,7 @@ export function notificationListTitle(n: {
   return n.title;
 }
 
-/** UTC instants stored in notification copy. The device formats these when rendering. */
+/** UTC instants left in notification copy, shown in the profile time zone. */
 export function formatNotificationBody(body: string): string {
   return body.replace(
     /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z/g,
@@ -25,14 +25,7 @@ export function formatNotificationBody(body: string): string {
   );
 }
 
-/** Same local-timezone clock as comments / posts (`toLocaleString(undefined, …)`). */
+/** Arrival time in the profile time zone, or the device zone until one is saved. */
 export function formatNotificationTimestamp(value: string | Date | number): string {
-  const date = typeof value === 'string' || typeof value === 'number' ? new Date(value) : value;
-  if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
+  return formatZonedTimestamp(value);
 }

@@ -9,7 +9,6 @@ import Purchases, {
 } from 'react-native-purchases';
 import { Platform } from 'react-native';
 import {
-  PRO_ENTITLEMENT_ID,
   PRO_OFFERING_ID,
   PRO_PACKAGE_ID,
   PRO_PRODUCT_ID,
@@ -63,39 +62,6 @@ export function purchasesErrorMessage(error: unknown, fallback = 'Something went
   if (isPurchasesError(error) && error.message) return error.message;
   if (error instanceof Error && error.message) return error.message;
   return fallback;
-}
-
-export function proEntitlementActive(customerInfo: CustomerInfo | null | undefined): boolean {
-  if (!customerInfo) return false;
-  if (customerInfo.entitlements.active[PRO_ENTITLEMENT_ID]?.isActive) return true;
-  return customerInfo.activeSubscriptions.includes(PRO_PRODUCT_ID);
-}
-
-export function billingSnapshot(customerInfo: CustomerInfo | null | undefined): {
-  proActive: boolean;
-  proRenewing: boolean;
-  expiresAt: string | null;
-  purchasedAt: string | null;
-} {
-  const proActive = proEntitlementActive(customerInfo);
-  const entitlement =
-    customerInfo?.entitlements.active[PRO_ENTITLEMENT_ID] ??
-    customerInfo?.entitlements.all[PRO_ENTITLEMENT_ID];
-  const expiresAt =
-    entitlement?.expirationDate ??
-    customerInfo?.allExpirationDates?.[PRO_PRODUCT_ID] ??
-    null;
-  const purchasedAt =
-    entitlement?.latestPurchaseDate ??
-    entitlement?.originalPurchaseDate ??
-    customerInfo?.allPurchaseDates?.[PRO_PRODUCT_ID] ??
-    null;
-  return {
-    proActive,
-    proRenewing: proActive && entitlement?.willRenew !== false,
-    expiresAt,
-    purchasedAt,
-  };
 }
 
 export async function configureRevenueCat(appUserID: string): Promise<void> {

@@ -33,7 +33,7 @@ import { utcInstantFromClient } from '../utils/utcInstantFromClient';
 import { notGroupMemberError } from '../utils/notGroupMemberError';
 import { seriesOccurrenceStartEndFromForm } from '../utils/seriesOccurrenceScheduleFromForm';
 import {
-  formatNotificationEventWhen,
+  eventTimeUpdatedNotificationBody,
   newEventNotificationBody,
   timeSuggestionNotificationBody,
 } from '../utils/formatNotificationEventWhen';
@@ -431,15 +431,10 @@ export class EventService {
       );
     }
     if (changes.timeChanged) {
-      const when = formatNotificationEventWhen(
-        new Date(changes.start),
-        changes.timeZone,
-        changes.isAllDay
-      );
-      await notificationService.createForUsers(
+      await notificationService.createForUsersInTheirTimeZone(
         recipientIds,
         'Event time updated',
-        `"${name}" is now ${when}`,
+        (timeZone) => eventTimeUpdatedNotificationBody(name, new Date(changes.start), timeZone, changes.isAllDay),
         {
           type: 'event_time_changed',
           icon: '🕐',
@@ -707,13 +702,6 @@ export class EventService {
     }
 
     // Create in-app notifications for all group members
-    const whenBody = newEventNotificationBody(
-      event.name,
-      start,
-      viewerTimeZone,
-      !!eventData.isAllDay
-    );
-    
     // Get all active group members
     const members = await prisma.groupMember.findMany({
       where: {
@@ -724,10 +712,10 @@ export class EventService {
     });
 
     // Create notification for each member (creator already knows they created it)
-    await notificationService.createForUsers(
+    await notificationService.createForUsersInTheirTimeZone(
       members.map((m) => m.userId).filter((uid) => uid !== createdBy),
       'New Event Created',
-      whenBody,
+      (timeZone) => newEventNotificationBody(event.name, start, timeZone, !!eventData.isAllDay),
       {
         type: 'event_created',
         icon: '📅',
@@ -1947,12 +1935,16 @@ export class EventService {
     });
     if (event.createdBy !== input.userId) {
       const suggester = await prisma.user.findUnique({ where: { id: input.userId } });
+      const owner = await prisma.user.findUnique({
+        where: { id: event.createdBy },
+        select: { timeZone: true },
+      });
       if (suggester) {
         const startStrBody = timeSuggestionNotificationBody(
           suggester.displayName,
           start,
           event.name,
-          input.viewerTimeZone
+          owner?.timeZone
         );
         void notificationService
           .createForUser(

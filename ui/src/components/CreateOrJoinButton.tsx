@@ -21,7 +21,6 @@ import { useAppRouter as useRouter } from '../hooks/useAppRouter';
 import { useGuardedPress } from '../hooks/useGuardedPress';
 import { Colors, Fonts, Radius } from '../constants/theme';
 import { useJoinByInviteCode, useOwnedGroupQuota } from '../hooks/api';
-import { parseSubscriptionTier } from '../utils/subscriptionTiers';
 import { showJoinGroupToast } from '../utils/joinGroupToast';
 import { withReturnTo } from '../utils/navigationReturn';
 import { NoGroupForActionModal } from './NoGroupForActionModal';
@@ -87,13 +86,9 @@ export function CreateOrJoinButton({
     if (!quota && userId) {
       quota = (await refetchQuota()).data;
     }
-    if (quota && !quota.canCreateGroup) {
+    if (quota?.createLimitMessage) {
       closeMenu();
-      const cap = quota.groupCapacity ?? 2;
-      const message =
-        parseSubscriptionTier(quota.subscriptionTier) === 'pro'
-          ? `Pro includes up to ${cap} groups. Contact sales@moijia.com about Enterprise for more.`
-          : `Free includes up to ${cap} groups. Upgrade to Pro in Profile > Subscription to create up to 10 groups.`;
+      const message = quota.createLimitMessage;
       setTimeout(() => Alert.alert('Group limit reached', message), 50);
       return;
     }

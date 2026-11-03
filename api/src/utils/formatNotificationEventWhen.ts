@@ -1,10 +1,7 @@
-/**
- * Format an event instant for notification copy in a specific IANA zone
- * (same wall clock the client uses via `toLocaleString(undefined, …)`).
- */
-function localeZone(timeZone?: string | null): { timeZone: string } | Record<string, never> {
-  const tz = timeZone?.trim();
-  return tz ? { timeZone: tz } : {};
+import { formatEventWhen, formatZonedClock } from './timeZone';
+
+function localeZone(timeZone?: string | null): { timeZone: string } {
+  return { timeZone: timeZone?.trim() || 'UTC' };
 }
 
 export function formatNotificationEventWhen(
@@ -12,19 +9,7 @@ export function formatNotificationEventWhen(
   timeZone?: string | null,
   isAllDay?: boolean | null
 ): string {
-  const zone = localeZone(timeZone);
-  const dateStr = instant.toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    ...zone,
-  });
-  if (isAllDay) return dateStr;
-  const timeStr = instant.toLocaleTimeString('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-    ...zone,
-  });
-  return `${dateStr} at ${timeStr}`;
+  return formatEventWhen(instant, timeZone, isAllDay);
 }
 
 /** Weekday + date (+ time) for share cards, in the given IANA zone when set. */
@@ -41,12 +26,7 @@ export function formatShareInstant(
     ...zone,
   });
   if (isAllDay) return dateStr;
-  const timeStr = instant.toLocaleTimeString('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-    ...zone,
-  });
-  return `${dateStr} at ${timeStr}`;
+  return `${dateStr} at ${formatZonedClock(instant, timeZone)}`;
 }
 
 export function formatShareWhenRange(
@@ -61,12 +41,7 @@ export function formatShareWhenRange(
   const startLabel = formatShareInstant(start, timeZone, isAllDay);
   if (startDay === endDay) {
     if (isAllDay) return startLabel;
-    const endTime = end.toLocaleTimeString('en-US', {
-      hour: 'numeric',
-      minute: '2-digit',
-      ...zone,
-    });
-    return `${startLabel} – ${endTime}`;
+    return `${startLabel} – ${formatZonedClock(end, timeZone)}`;
   }
   return `${startLabel} – ${formatShareInstant(end, timeZone, isAllDay)}`;
 }

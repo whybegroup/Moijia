@@ -52,7 +52,6 @@ import { ImageLightboxModal } from './ImageLightboxModal';
 import { dropLightboxItem } from './ForumPostMarkdownBody';
 import { GroupStorageUsageBar } from './GroupStorageUsageBar';
 import { GroupDowngradeBanner } from './GroupDowngradeBanner';
-import { useGroupDeletionAt } from '../hooks/useGroupDeletionAt';
 import { GroupFriendGroupsSection } from './GroupFriendGroupsSection';
 import { groupSubpageFromPathname } from './groupScope/useGroupSubpage';
 import { groupsTabParentHref, navigateGroupsTabTo } from '../utils/tabBreadcrumbNav';
@@ -210,7 +209,7 @@ export function GroupDetailView({ groupId }: GroupDetailViewProps) {
   const { userId: currentUserId } = useCurrentUserContext();
 
   const { data: group, isError, error: groupError, refetch: refetchGroup } = useGroup(groupId, currentUserId ?? '');
-  const deletionScheduledAt = useGroupDeletionAt(currentUserId, groupId, group?.deletionScheduledAt);
+  const deletionScheduledAt = group?.deletionScheduledAt;
   const { data: quota } = useOwnedGroupQuota(currentUserId ?? '');
   const { data: memberColorData, refetch: refetchMemberColor } = useGroupMemberColor(
     groupId,
@@ -968,7 +967,7 @@ export function GroupDetailView({ groupId }: GroupDetailViewProps) {
             pendingSizeTier={group.pendingSizeTier}
             graceEndsAt={group.graceEndsAt}
             deletionScheduledAt={deletionScheduledAt}
-            uploadsClosed={Boolean(quota?.downgradeAt)}
+            uploadsClosed={quota?.graceStarted === true}
           />
         ) : null}
 

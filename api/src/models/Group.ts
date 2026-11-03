@@ -229,17 +229,8 @@ export interface GroupPostReactionInput {
 export interface MemberPlan {
   userId: string;
   subscriptionTier: 'free' | 'pro' | 'enterprise';
-}
-
-export interface GroupBillingSyncInput {
-  /** True while the store still entitles this user to Pro. */
-  proActive: boolean;
-  /** False when Pro is cancelled but the paid period has not ended. */
-  proRenewing?: boolean;
-  /** When the provider says the current period ends. */
-  expiresAt?: string | null;
-  /** When the provider says the current period started. */
-  purchasedAt?: string | null;
+  /** Server decision: this member's plan can take ownership from the current owner. */
+  canReceiveOwnership?: boolean;
 }
 
 export interface SubscriptionCancelGroup {
@@ -258,16 +249,38 @@ export interface SubscriptionCancelCheck {
 export interface OwnedGroupQuota {
   ownedGroupCount: number;
   subscriptionTier: 'free' | 'pro' | 'enterprise';
+  planLabel: string;
+  /** Shown on the current plan when it has a price. */
+  priceLabel: string | null;
+  /** Pro price for the paywall. */
+  proPriceLabel: string;
+  /** Renews or Expires while a paid period has an end date. */
+  periodLabel: 'Renews' | 'Expires' | null;
   /** Null on Enterprise, which has no group cap. */
   groupCapacity: number | null;
   canCreateGroup: boolean;
+  /** Why creating a group is blocked. Null when it is allowed. */
+  createLimitMessage: string | null;
+  canChooseGroupSize: boolean;
+  showUpgrade: boolean;
+  showManage: boolean;
   subscriptionExpiresAt?: Date | null;
   /** Start of the current provider period. Grace after it ends is half of this span. */
   subscriptionStartedAt?: Date | null;
   /** False when Pro is cancelled and access continues until subscriptionExpiresAt. */
   subscriptionWillRenew?: boolean;
-  /** When extra owned groups are deleted and the groups that stay become Small. */
+  /** Set once the paid period has ended and the grace clock is running. */
   downgradeAt?: Date | null;
+  /** True while a plan is ending or the grace period has started. */
+  downgradePending: boolean;
+  /** True after the paid period has ended and free-plan limits are in the grace window. */
+  graceStarted: boolean;
+  /** True when extra owned groups will be deleted and the owner can reorder which two stay. */
+  choosingKeepers: boolean;
+  /** Date extra groups are deleted. Null when a downgrade is not pending. */
+  plannedDowngradeAt: Date | null;
+  /** Split My Groups at this index while the owner is choosing which groups stay. */
+  ownershipKeepCount: number | null;
   /** Developer notice when a subscription is at risk, such as a failed payment. */
   subscriptionWarning?: string | null;
 }

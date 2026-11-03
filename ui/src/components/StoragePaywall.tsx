@@ -17,8 +17,9 @@ import { WEB_APP_MAX_WIDTH } from '../constants/webAppMaxWidth';
 import { edgeToEdgeModalProps } from './edgeToEdgeModalProps';
 import { AppToastMount } from './AppToastMount';
 import { usePurchases } from '../contexts/PurchasesContext';
+import { useCurrentUserContext } from '../contexts/CurrentUserContext';
+import { useOwnedGroupQuota } from '../hooks/api/useUsers';
 import { isPurchaseCancelled, purchasesErrorMessage } from '../services/revenueCat';
-import { PRO_PRICE_LABEL } from '../config/revenueCat';
 
 const PERKS = [
   { icon: 'people-outline' as const, text: 'Create up to 10 groups' },
@@ -34,6 +35,8 @@ export function StoragePaywall({
   onClose: () => void;
 }) {
   const { purchasePro, restorePurchases, presentCustomerCenter } = usePurchases();
+  const { userId } = useCurrentUserContext();
+  const { data: quota } = useOwnedGroupQuota(userId ?? '');
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const [purchasing, setPurchasing] = useState(false);
@@ -93,7 +96,7 @@ export function StoragePaywall({
             contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 16 }]}
             showsVerticalScrollIndicator={false}
           >
-            <Text style={styles.price}>{PRO_PRICE_LABEL}</Text>
+            <Text style={styles.price}>{quota?.proPriceLabel ?? ''}</Text>
             <Text style={styles.blurb}>
               A monthly plan for the groups you own. Free stays at 2 Small groups. Enterprise is arranged with us
               outside the app.
@@ -116,7 +119,7 @@ export function StoragePaywall({
               {purchasing ? (
                 <ActivityIndicator color={Colors.accentFg} />
               ) : (
-                <Text style={styles.ctaText}>Subscribe · {PRO_PRICE_LABEL}</Text>
+                <Text style={styles.ctaText}>Subscribe · {quota?.proPriceLabel ?? ''}</Text>
               )}
             </TouchableOpacity>
             <View style={styles.links}>

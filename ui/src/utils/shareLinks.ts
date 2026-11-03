@@ -1,4 +1,5 @@
 import { INVITE_LINK_ORIGIN } from './inviteLink';
+import { displayTimeZoneOrDevice } from './groupPlanPeriod';
 
 export function eventSharePath(eventId: string): string {
   return `/event/${eventId.trim()}`;
@@ -27,7 +28,7 @@ export function postShareLink(groupId: string, postId: string): string {
 /** So link unfurls format dates in the sender's timezone. */
 export function withShareTimeZone(url: string): string {
   try {
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const tz = displayTimeZoneOrDevice();
     if (!tz) return url;
     const parsed = new URL(url);
     parsed.searchParams.set('tz', tz);

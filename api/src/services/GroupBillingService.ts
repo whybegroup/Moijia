@@ -6,6 +6,7 @@ import { httpError } from '../utils/httpError';
 import { parseGroupOrderJson, partitionByOrder } from '../utils/groupOrder';
 import { purgeGroupCompletely } from './groupPurge';
 import { recordPurchase } from './PurchaseHistoryService';
+import { fetchProSnapshot } from './RevenueCatService';
 import type { OwnedGroupQuota, SubscriptionCancelCheck } from '../models/Group';
 import {
   FREE_OWNED_GROUP_LIMIT,
@@ -18,6 +19,7 @@ import {
   type GroupSizeTier,
 } from '../utils/groupStorageLimits';
 import {
+  PRO_DISPLAY_PRICE_LABEL,
   PRO_MONTHLY_PRICE_LABEL,
   PRO_PRODUCT_ID,
   downgradeGraceMs,
@@ -29,6 +31,7 @@ import {
   tierAllowsSize,
   type SubscriptionTier,
 } from '../utils/subscriptionTiers';
+import { formatInstantInTimeZone as formatMailDate } from '../utils/timeZone';
 
 const prisma = new PrismaClient();
 const notificationService = new NotificationService();
@@ -50,19 +53,6 @@ function validDate(value: Date | null | undefined): Date | null {
 function dateMoved(next: Date | null, prev: Date | null): boolean {
   if (!next || !prev) return false;
   return next.getTime() > prev.getTime() + 1000;
-}
-
-function formatMailDate(date: Date): string {
-  const soon = Math.abs(date.getTime() - Date.now()) < 48 * 60 * 60 * 1000;
-  if (soon) {
-    return date.toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    });
-  }
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 type OwnedGroupRow = { id: string; name: string; sizeTier: string; deletedAt: Date | null };
@@ -159,28 +149,107 @@ export class GroupBillingService {
     ]);
     const subscriptionTier = parseSubscriptionTier(user?.subscriptionTier);
     const groupCapacity = ownedGroupCapacity(subscriptionTier);
+    const canCreateGroup = groupCapacity == null || ownedGroupCount < groupCapacity;
+    const subscriptionWillRenew = user?.subscriptionWillRenew ?? false;
+    const downgradeAt = user?.downgradeAt ?? null;
+    const graceStarted = !!downgradeAt;
+    const downgradePending = this.subscriptionEnding({
+      subscriptionTier,
+      subscriptionWillRenew,
+      subscriptionExpiresAt: user?.subscriptionExpiresAt ?? null,
+      downgradeAt,
+    });
+    let choosingKeepers = false;
+    let ownershipKeepCount: number | null = null;
+    if (downgradePending) {
+      const { remove } = await this.classifyOwnedGroups(userId);
+      choosingKeepers = remove.some((group) => !group.deletedAt);
+      ownershipKeepCount = choosingKeepers ? FREE_OWNED_GROUP_LIMIT : null;
+    }
+    const periodLabel =
+      subscriptionTier === 'pro' && user?.subscriptionExpiresAt
+        ? subscriptionWillRenew
+          ? 'Renews'
+          : 'Expires'
+        : null;
     return {
       ownedGroupCount,
       subscriptionTier,
+      planLabel: planLabel(subscriptionTier),
+      priceLabel: subscriptionTier === 'pro' ? PRO_DISPLAY_PRICE_LABEL : null,
+      proPriceLabel: PRO_DISPLAY_PRICE_LABEL,
+      periodLabel,
       groupCapacity,
-      canCreateGroup: groupCapacity == null || ownedGroupCount < groupCapacity,
+      canCreateGroup,
+      createLimitMessage: canCreateGroup
+        ? null
+        : this.ownedGroupLimitMessage(subscriptionTier, groupCapacity ?? 0),
+      canChooseGroupSize: subscriptionTier === 'enterprise',
+      showUpgrade: subscriptionTier === 'free',
+      showManage: subscriptionTier === 'pro',
       subscriptionExpiresAt: user?.subscriptionExpiresAt ?? null,
       subscriptionStartedAt: user?.subscriptionStartedAt ?? null,
-      subscriptionWillRenew: user?.subscriptionWillRenew ?? false,
-      downgradeAt: user?.downgradeAt ?? null,
+      subscriptionWillRenew,
+      downgradeAt,
+      downgradePending,
+      graceStarted,
+      choosingKeepers,
+      plannedDowngradeAt: this.effectiveDowngradeAt({
+        subscriptionTier,
+        subscriptionWillRenew,
+        subscriptionStartedAt: user?.subscriptionStartedAt ?? null,
+        subscriptionExpiresAt: user?.subscriptionExpiresAt ?? null,
+        downgradeAt,
+      }),
+      ownershipKeepCount,
       subscriptionWarning: user?.subscriptionWarning?.trim() || null,
     };
+  }
+
+  /** Read the store and apply it. The client does not send entitlement math. */
+  public async refreshSubscriptionFromStore(userId: string): Promise<OwnedGroupQuota> {
+    const snapshot = await fetchProSnapshot(userId);
+    if (!snapshot) return this.getOwnedGroupQuota(userId);
+    return this.syncSubscription(userId, snapshot);
   }
 
   public async assertCanCreateOwnedGroup(userId: string): Promise<OwnedGroupQuota> {
     const quota = await this.getOwnedGroupQuota(userId);
     if (quota.canCreateGroup) return quota;
-    const cap = quota.groupCapacity ?? 0;
-    const message =
-      quota.subscriptionTier === 'pro'
-        ? `Pro includes up to ${cap} groups. Contact sales@moijia.com about Enterprise for more.`
-        : `Free includes up to ${cap} groups. Upgrade to Pro in Profile > Subscription to create up to 10 groups.`;
-    throw httpError(403, message, { code: 'owned_group_limit' });
+    throw httpError(403, quota.createLimitMessage ?? 'Group limit reached.', { code: 'owned_group_limit' });
+  }
+
+  private ownedGroupLimitMessage(tier: SubscriptionTier, cap: number): string {
+    return tier === 'pro'
+      ? `Pro includes up to ${cap} groups. Contact sales@moijia.com about Enterprise for more.`
+      : `Free includes up to ${cap} groups. Upgrade to Pro in Profile > Subscription to create up to 10 groups.`;
+  }
+
+  private subscriptionEnding(user: {
+    subscriptionTier: SubscriptionTier;
+    subscriptionWillRenew: boolean;
+    subscriptionExpiresAt: Date | null;
+    downgradeAt: Date | null;
+  }): boolean {
+    if (user.downgradeAt) return true;
+    if (user.subscriptionTier === 'enterprise' && user.subscriptionExpiresAt) return true;
+    return user.subscriptionTier === 'pro' && user.subscriptionWillRenew === false;
+  }
+
+  private effectiveDowngradeAt(user: {
+    subscriptionTier: SubscriptionTier;
+    subscriptionWillRenew: boolean;
+    subscriptionStartedAt: Date | null;
+    subscriptionExpiresAt: Date | null;
+    downgradeAt: Date | null;
+  }): Date | null {
+    if (!this.subscriptionEnding(user)) return null;
+    if (user.downgradeAt) return user.downgradeAt;
+    if (!user.subscriptionExpiresAt) return null;
+    return new Date(
+      user.subscriptionExpiresAt.getTime() +
+        downgradeGraceMs(user.subscriptionStartedAt, user.subscriptionExpiresAt)
+    );
   }
 
   public async assertCanReceiveGroup(input: {
@@ -331,7 +400,8 @@ export class GroupBillingService {
         });
       }
       if (cancelledRenewal && claimed) {
-        const through = expiresAt ? formatMailDate(expiresAt) : 'the end of this period';
+        const timeZone = await this.timeZoneFor(userId);
+        const through = expiresAt ? formatMailDate(expiresAt, timeZone) : 'the end of this period';
         await this.confirmProSubscription({
           userId,
           kind: 'cancel',
@@ -388,7 +458,7 @@ export class GroupBillingService {
           userId,
           kind: 'cancel',
           title: 'Pro ended',
-          detail: `Free plan limits apply on ${formatMailDate(downgradeAt)}`,
+          detail: `Free plan limits apply on ${formatMailDate(downgradeAt, await this.timeZoneFor(userId))}`,
           productId: PRO_PRODUCT_ID,
         });
       }
@@ -488,7 +558,7 @@ export class GroupBillingService {
         subscriptionTier: 'enterprise',
         subscriptionExpiresAt: { lte: new Date() },
       },
-      select: { id: true, subscriptionStartedAt: true, subscriptionExpiresAt: true },
+      select: { id: true, timeZone: true, subscriptionStartedAt: true, subscriptionExpiresAt: true },
     });
     for (const user of due) {
       const periodEnd = user.subscriptionExpiresAt ?? new Date();
@@ -510,7 +580,7 @@ export class GroupBillingService {
         kind: 'cancel',
         title: 'Enterprise ended',
         detail: scheduled
-          ? `Free plan limits apply on ${formatMailDate(downgradeAt)}`
+          ? `Free plan limits apply on ${formatMailDate(downgradeAt, user.timeZone)}`
           : 'Switched to Free',
         productId: null,
       });
@@ -585,14 +655,15 @@ export class GroupBillingService {
     for (const group of shrinking) {
       await this.startGrace(group.id, 'small', downgradeAt);
     }
-    const when = downgradeAt.toISOString();
     const alreadyDeleted = remove.some((group) => group.deletedAt);
-    const body = downgradeNotice(when, keep, deleting, alreadyDeleted, planName);
+    const whenFor = (timeZone: string | null) => formatMailDate(downgradeAt, timeZone);
     await notificationService
-      .createForUsers([userId], 'Plan grace period', body, {
-        type: 'group_storage',
-        icon: 'warning-outline',
-      })
+      .createForUsersInTheirTimeZone(
+        [userId],
+        'Plan grace period',
+        (timeZone) => downgradeNotice(whenFor(timeZone), keep, deleting, alreadyDeleted, planName),
+        { type: 'group_storage', icon: 'warning-outline' }
+      )
       .catch(() => undefined);
     for (const group of keep) {
       if (parseSizeTier(group.sizeTier) === 'small') continue;
@@ -603,10 +674,13 @@ export class GroupBillingService {
       const ids = members.map((member) => member.userId);
       if (ids.length === 0) continue;
       await notificationService
-        .createForUsers(
+        .createForUsersInTheirTimeZone(
           ids,
           'Group storage will shrink',
-          `${group.name} becomes Small (1 GB) on ${when}. New uploads stop once it is over 1 GB. Older files over that limit are removed on ${when}. Download anything you need before then.`,
+          (timeZone) => {
+            const when = whenFor(timeZone);
+            return `${group.name} becomes Small (1 GB) on ${when}. New uploads stop once it is over 1 GB. Older files over that limit are removed on ${when}. Download anything you need before then.`;
+          },
           { type: 'group_storage', icon: 'warning-outline', groupId: group.id, dest: 'group' }
         )
         .catch(() => undefined);
@@ -619,18 +693,20 @@ export class GroupBillingService {
       const ids = members.map((member) => member.userId);
       if (ids.length === 0) continue;
       await notificationService
-        .createForUsers(
+        .createForUsersInTheirTimeZone(
           ids,
           'Group will be deleted',
-          `${group.name} will be permanently deleted on ${when} unless its owner moves it into Kept before then.`,
+          (timeZone) =>
+            `${group.name} will be permanently deleted on ${whenFor(timeZone)} unless its owner moves it into Kept before then.`,
           { type: 'group_storage', icon: 'warning-outline', groupId: group.id, dest: 'group' }
         )
         .catch(() => undefined);
     }
+    const ownerZone = await this.timeZoneFor(userId);
     await this.emailSubscription({
       ownerId: userId,
       intro: downgradeNotice(
-        formatMailDate(downgradeAt),
+        formatMailDate(downgradeAt, ownerZone),
         keep,
         deleting,
         alreadyDeleted,
@@ -756,14 +832,28 @@ export class GroupBillingService {
     const userIds = [...new Set(owners.map((owner) => owner.userId))];
     if (userIds.length === 0) return result;
     const users = await prisma.user.findMany({
-      where: { id: { in: userIds }, downgradeAt: { not: null } },
-      select: { id: true, downgradeAt: true },
+      where: { id: { in: userIds } },
+      select: {
+        id: true,
+        subscriptionTier: true,
+        subscriptionWillRenew: true,
+        subscriptionStartedAt: true,
+        subscriptionExpiresAt: true,
+        downgradeAt: true,
+      },
     });
     for (const user of users) {
-      if (!user.downgradeAt) continue;
+      const at = this.effectiveDowngradeAt({
+        subscriptionTier: parseSubscriptionTier(user.subscriptionTier),
+        subscriptionWillRenew: user.subscriptionWillRenew,
+        subscriptionStartedAt: user.subscriptionStartedAt,
+        subscriptionExpiresAt: user.subscriptionExpiresAt,
+        downgradeAt: user.downgradeAt,
+      });
+      if (!at) continue;
       const { remove } = await this.classifyOwnedGroups(user.id);
       for (const group of remove) {
-        if (!group.deletedAt) result.set(group.id, user.downgradeAt);
+        if (!group.deletedAt) result.set(group.id, at);
       }
     }
     return result;
@@ -949,7 +1039,7 @@ export class GroupBillingService {
   }): Promise<void> {
     const owner = await prisma.user.findUnique({
       where: { id: input.ownerId },
-      select: { email: true },
+      select: { email: true, timeZone: true },
     });
     const to = owner?.email?.includes('@') ? owner.email : null;
     const sections: ReceiptSection[] = [
@@ -960,7 +1050,7 @@ export class GroupBillingService {
           { label: 'Price', value: input.price },
           {
             label: input.renewing ? 'Renews' : 'Access through',
-            value: input.expiresAt ? formatMailDate(input.expiresAt) : 'None',
+            value: input.expiresAt ? formatMailDate(input.expiresAt, owner?.timeZone) : 'None',
           },
         ],
       },
@@ -984,6 +1074,14 @@ export class GroupBillingService {
     }).catch((err) => {
       console.warn('[mail] subscription update failed', err);
     });
+  }
+
+  private async timeZoneFor(userId: string): Promise<string | null> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { timeZone: true },
+    });
+    return user?.timeZone ?? null;
   }
 
   private async notifyOwnerAndAdmins(groupId: string, title: string, body: string): Promise<void> {

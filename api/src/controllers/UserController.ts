@@ -12,7 +12,7 @@ import {
   SuccessResponse,
   Response,
 } from 'tsoa';
-import { User, UserInput, UserUpdate, GroupOrderInput, GroupBillingSyncInput, OwnedGroupQuota, PurchaseHistoryEntry, SubscriptionCancelCheck } from '../models';
+import { User, UserInput, UserUpdate, GroupOrderInput, OwnedGroupQuota, PurchaseHistoryEntry, SubscriptionCancelCheck } from '../models';
 import type { PushTokenInput } from '../models/PushToken';
 import { UserService } from '../services/UserService';
 import { PushTokenService } from '../services/PushTokenService';
@@ -97,31 +97,12 @@ export class UserController extends Controller {
   }
 
   /**
-   * Reconcile the App Store Pro subscription with this account.
-   * Enterprise is left unchanged. After Pro expires, groups stay for half of that billing period.
-   * Then only the top two in My Groups are kept and become Small. The rest are deleted.
+   * Read this account's Pro subscription from the store and apply it.
+   * Enterprise is left unchanged. The client does not send entitlement state.
    */
   @Post('{id}/billing-sync')
-  public async syncBilling(
-    @Path() id: string,
-    @Body() body: GroupBillingSyncInput
-  ): Promise<OwnedGroupQuota> {
-    const expiresAt = body.expiresAt ? new Date(body.expiresAt) : null;
-    if (body.expiresAt && expiresAt && Number.isNaN(expiresAt.getTime())) {
-      this.setStatus(400);
-      throw new Error('expiresAt is invalid');
-    }
-    const purchasedAt = body.purchasedAt ? new Date(body.purchasedAt) : null;
-    if (body.purchasedAt && purchasedAt && Number.isNaN(purchasedAt.getTime())) {
-      this.setStatus(400);
-      throw new Error('purchasedAt is invalid');
-    }
-    return groupBilling.syncSubscription(id, {
-      proActive: !!body.proActive,
-      proRenewing: !!body.proActive && body.proRenewing !== false,
-      expiresAt,
-      purchasedAt,
-    });
+  public async syncBilling(@Path() id: string): Promise<OwnedGroupQuota> {
+    return groupBilling.refreshSubscriptionFromStore(id);
   }
 
   /**

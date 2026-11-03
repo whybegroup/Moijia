@@ -18,6 +18,8 @@ export interface User {
   subscriptionTier?: 'free' | 'pro' | 'enterprise';
   /** Global in-app notification toggles (applies to all groups, AND with per-group prefs) */
   notifPrefs?: NotifPrefs;
+  /** IANA time zone used for emails and notifications. Null until the app saves the device zone. */
+  timeZone?: string | null;
   /** Timestamp when the user was created */
   createdAt: Date;
   /** Timestamp when the user was last updated */
@@ -49,4 +51,6 @@ export interface UserUpdate {
   email?: string | null;
   /** Merged into existing global notification preferences */
   notifPrefs?: NotifPrefsPartial;
+  /** IANA time zone, such as America/Los_Angeles. Null clears the saved zone. */
+  timeZone?: string | null;
 }

@@ -20,6 +20,7 @@ import { useAppRouter as useRouter } from '../../hooks/useAppRouter';
 import { SUPPORT_PATH } from '../../constants/legal';
 import { UserAvatar } from '../../components/UserAvatar';
 import { SubscriptionSettingsCard } from '../../components/SubscriptionSettingsCard';
+import { TimezoneSetting } from '../../components/TimezoneSetting';
 import { NotificationBellButton } from '../../components/NotificationBellButton';
 import { NotificationsPanelModal } from '../../components/NotificationsPanelModal';
 import { AvatarPickerModal } from '../../components/AvatarPickerModal';
@@ -640,6 +641,7 @@ export default function ProfileScreen() {
             <Text style={styles.infoLabelMuted}>Sign-in</Text>
             <Text style={styles.infoValueMuted}>{signInProviderLabels(firebaseUser)}</Text>
           </View>
+          <TimezoneSetting />
         </View>
 
         <SubscriptionSettingsCard />

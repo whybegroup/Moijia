@@ -17,7 +17,6 @@ import { usePullToRefresh } from '../hooks/usePullToRefresh';
 import { useMissingGroupRedirect } from '../hooks/useMissingResourceAlert';
 import { GroupStorageUsageBar } from './GroupStorageUsageBar';
 import { GroupDowngradeBanner } from './GroupDowngradeBanner';
-import { useGroupDeletionAt } from '../hooks/useGroupDeletionAt';
 import { formatStorageBytes, resolveGroupMaxStorageBytes } from '../utils/groupStorage';
 import { parseFromEventId, buildGroupStorageCategoryUrl } from '../utils/breadcrumbUrl';
 import {
@@ -41,7 +40,7 @@ export function GroupManageStorageView({ groupId }: { groupId: string }) {
     groupId,
     currentUserId ?? ''
   );
-  const deletionScheduledAt = useGroupDeletionAt(currentUserId, groupId, group?.deletionScheduledAt);
+  const deletionScheduledAt = group?.deletionScheduledAt;
   const { data: quota } = useOwnedGroupQuota(currentUserId ?? '');
   const isMember =
     group?.membershipStatus === 'member' || group?.membershipStatus === 'admin';
@@ -91,7 +90,7 @@ export function GroupManageStorageView({ groupId }: { groupId: string }) {
             pendingSizeTier={group.pendingSizeTier}
             graceEndsAt={group.graceEndsAt}
             deletionScheduledAt={deletionScheduledAt}
-            uploadsClosed={Boolean(quota?.downgradeAt)}
+            uploadsClosed={quota?.graceStarted === true}
           />
           <GroupStorageUsageBar
             usedBytes={usedBytes}

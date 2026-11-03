@@ -4,14 +4,11 @@ import type { CustomerInfo } from 'react-native-purchases';
 import { useAuth } from './AuthContext';
 import {
   addCustomerInfoListener,
-  billingSnapshot,
   getCustomerInfo,
-  invalidateCustomerInfoCache,
   identifyRevenueCatUser,
   isAlreadyPurchased,
   isPurchaseCancelled,
   logOutRevenueCat,
-  proEntitlementActive,
   purchasePro as purchaseProRc,
   purchasesErrorMessage,
   restorePurchases as restoreRevenueCatPurchases,
@@ -22,13 +19,10 @@ import { queryClient, queryKeys } from '../config/queryClient';
 
 type PurchasesContextValue = {
   ready: boolean;
-  customerInfo: CustomerInfo | null;
-  isPro: boolean;
   presentPaywall: () => Promise<ProPaywallOutcome>;
   presentCustomerCenter: () => Promise<void>;
   purchasePro: () => Promise<CustomerInfo | null>;
   restorePurchases: () => Promise<CustomerInfo>;
-  refresh: () => Promise<CustomerInfo | null>;
 };
 
 const PurchasesContext = createContext<PurchasesContextValue | null>(null);
@@ -46,38 +40,17 @@ export const PurchasesProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [ready, setReady] = useState(false);
   const [customerInfo, setCustomerInfo] = useState<CustomerInfo | null>(null);
 
-  const syncBilling = useCallback(
-    async (info: CustomerInfo | null) => {
-      if (!user?.uid || !info) return;
-      const snapshot = billingSnapshot(info);
-      try {
-        await UsersService.syncBilling(user.uid, {
-          proActive: snapshot.proActive,
-          proRenewing: snapshot.proRenewing,
-          expiresAt: snapshot.expiresAt,
-          purchasedAt: snapshot.purchasedAt,
-        });
-        await queryClient.invalidateQueries({ queryKey: queryKeys.groups._base });
-        await queryClient.invalidateQueries({ queryKey: queryKeys.users.quota(user.uid) });
-        await queryClient.invalidateQueries({ queryKey: queryKeys.users.detail(user.uid) });
-      } catch {
-        /* quota sync is best-effort */
-      }
-    },
-    [user?.uid]
-  );
-
-  const refresh = useCallback(async (): Promise<CustomerInfo | null> => {
+  const refreshBilling = useCallback(async () => {
+    if (!user?.uid) return;
     try {
-      await invalidateCustomerInfoCache().catch(() => undefined);
-      const info = await getCustomerInfo();
-      setCustomerInfo(info);
-      await syncBilling(info);
-      return info;
+      await UsersService.syncBilling(user.uid);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.groups._base });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.users.quota(user.uid) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.users.detail(user.uid) });
     } catch {
-      return null;
+      /* store refresh is best-effort */
     }
-  }, [syncBilling]);
+  }, [user?.uid]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -102,7 +75,7 @@ export const PurchasesProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           setCustomerInfo(info);
           setReady(true);
         }
-        await syncBilling(info);
+        await refreshBilling();
       } catch {
         if (!cancelled) {
           setCustomerInfo(null);
@@ -115,94 +88,76 @@ export const PurchasesProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return () => {
       cancelled = true;
     };
-  }, [authLoading, user, syncBilling]);
+  }, [authLoading, user, refreshBilling]);
 
   useEffect(() => {
-    return addCustomerInfoListener((info) => {
-      setCustomerInfo(info);
-      void syncBilling(info);
+    return addCustomerInfoListener(() => {
+      void refreshBilling();
     });
-  }, [syncBilling]);
+  }, [refreshBilling]);
 
   useEffect(() => {
     if (!user) return;
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') void refresh();
+      if (state === 'active') void refreshBilling();
     });
-    const interval = setInterval(() => {
-      if (AppState.currentState === 'active') void refresh();
-    }, 15_000);
     const onVisible = () => {
-      if (document.visibilityState === 'visible') void refresh();
+      if (document.visibilityState === 'visible') void refreshBilling();
     };
     if (Platform.OS === 'web') document.addEventListener('visibilitychange', onVisible);
     return () => {
       sub.remove();
-      clearInterval(interval);
       if (Platform.OS === 'web') document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [refresh, user]);
+  }, [refreshBilling, user]);
 
   const presentPaywall = useCallback(async (): Promise<ProPaywallOutcome> => {
     const outcome = await presentCurrentPaywall();
-    await refresh();
+    await refreshBilling();
     return outcome;
-  }, [refresh]);
+  }, [refreshBilling]);
 
   const presentCustomerCenter = useCallback(async () => {
-    let info = customerInfo;
-    if (!info) {
-      info = await getCustomerInfo().catch(() => null);
-      if (info) setCustomerInfo(info);
-    }
-    await presentMoijiaCustomerCenter((info) => {
-      setCustomerInfo(info);
-      void syncBilling(info);
+    const info = customerInfo ?? (await getCustomerInfo().catch(() => null));
+    if (info) setCustomerInfo(info);
+    await presentMoijiaCustomerCenter(() => {
+      void refreshBilling();
     });
-    await refresh();
-  }, [customerInfo, refresh, syncBilling]);
+    await refreshBilling();
+  }, [customerInfo, refreshBilling]);
 
   const purchasePro = useCallback(async (): Promise<CustomerInfo | null> => {
     try {
       const info = await purchaseProRc();
       setCustomerInfo(info);
-      await syncBilling(info);
+      await refreshBilling();
       return info;
     } catch (error) {
       if (isPurchaseCancelled(error)) return null;
       if (isAlreadyPurchased(error)) {
-        const info = await getCustomerInfo().catch(() => null);
-        if (info) {
-          setCustomerInfo(info);
-          await syncBilling(info);
-        }
-        return info;
+        await refreshBilling();
+        return getCustomerInfo().catch(() => null);
       }
       throw new Error(purchasesErrorMessage(error, 'Could not complete purchase.'));
     }
-  }, [syncBilling]);
+  }, [refreshBilling]);
 
   const restorePurchases = useCallback(async () => {
     const info = await restoreRevenueCatPurchases();
     setCustomerInfo(info);
-    await syncBilling(info);
+    await refreshBilling();
     return info;
-  }, [syncBilling]);
-
-  const isPro = proEntitlementActive(customerInfo);
+  }, [refreshBilling]);
 
   const value = useMemo<PurchasesContextValue>(
     () => ({
       ready,
-      customerInfo,
-      isPro,
       presentPaywall,
       presentCustomerCenter,
       purchasePro,
       restorePurchases,
-      refresh,
     }),
-    [ready, customerInfo, isPro, presentPaywall, presentCustomerCenter, purchasePro, restorePurchases, refresh]
+    [ready, presentPaywall, presentCustomerCenter, purchasePro, restorePurchases]
   );
 
   return <PurchasesContext.Provider value={value}>{children}</PurchasesContext.Provider>;

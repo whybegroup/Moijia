@@ -17,6 +17,7 @@ CREATE TABLE "users" (
     "subscriptionWillRenew" BOOLEAN NOT NULL DEFAULT false,
     "downgradeAt" DATETIME,
     "email" TEXT,
+    "timeZone" TEXT,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL
 );

@@ -4,6 +4,7 @@ export type SubscriptionTier = 'free' | 'pro' | 'enterprise';
 
 export const PRO_PRODUCT_ID = 'pro_subscription';
 export const PRO_MONTHLY_PRICE_LABEL = '$19.99/mo';
+export const PRO_DISPLAY_PRICE_LABEL = '$19.99/month';
 
 /** Half of the provider period, from its start to its expiration. */
 export function downgradeGraceMs(startedAt: Date | null, expiresAt: Date | null): number {

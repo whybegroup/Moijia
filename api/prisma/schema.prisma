@@ -44,6 +44,8 @@ model User {
   downgradeAt DateTime?
   /// Email from the auth provider, used for billing notices.
   email      String?
+  /// IANA zone for emails and notifications, such as America/Los_Angeles.
+  timeZone   String?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 

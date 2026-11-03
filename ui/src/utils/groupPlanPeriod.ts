@@ -1,61 +1,90 @@
-/** Keep the purchase day-of-month when adding months (clamp to the last day). */
-export function addCalendarMonths(from: Date, months: number): Date {
-  const year = from.getFullYear();
-  const month = from.getMonth();
-  const day = from.getDate();
-  const targetMonthIndex = month + months;
-  const lastDay = new Date(year, targetMonthIndex + 1, 0).getDate();
-  return new Date(
-    year,
-    targetMonthIndex,
-    Math.min(day, lastDay),
-    from.getHours(),
-    from.getMinutes(),
-    from.getSeconds(),
-    from.getMilliseconds()
-  );
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+let displayTimeZone: string | null = null;
+
+/** Saved profile zone. Date formatters read this during render. */
+export function setDisplayTimeZone(timeZone: string | null | undefined) {
+  displayTimeZone = timeZone?.trim() || null;
 }
 
-export function parseMaybeDate(raw: unknown): Date | null {
-  if (raw == null || raw === '') return null;
-  const date = raw instanceof Date ? raw : new Date(String(raw));
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-/** Next billing date: same day of month as `startedAt`, strictly after `now`. */
-export function nextMonthlyAnniversary(startedAt: Date, now = new Date()): Date {
-  if (startedAt.getTime() > now.getTime()) return new Date(startedAt.getTime());
-  let months = 1;
-  let next = addCalendarMonths(startedAt, months);
-  while (next.getTime() <= now.getTime() && months < 240) {
-    months += 1;
-    next = addCalendarMonths(startedAt, months);
+export function displayTimeZoneOrDevice(): string | undefined {
+  if (displayTimeZone) return displayTimeZone;
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone;
+  } catch {
+    return undefined;
   }
-  return next;
 }
 
-export function addCalendarDays(from: Date, days: number): Date {
-  const next = new Date(from.getTime());
-  next.setDate(next.getDate() + days);
-  return next;
+type ZonedParts = {
+  month: number;
+  day: number;
+  year: number;
+  hour24: number;
+  minute: number;
+  zoneName: string;
+};
+
+function zonedParts(date: Date, timeZone: string): ZonedParts | null {
+  try {
+    const fmt = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+      timeZoneName: 'short',
+    });
+    const map = new Map(fmt.formatToParts(date).map((part) => [part.type, part.value]));
+    let hour24 = Number(map.get('hour'));
+    if (hour24 === 24) hour24 = 0;
+    if (!Number.isFinite(hour24)) return null;
+    return {
+      month: Number(map.get('month')),
+      day: Number(map.get('day')),
+      year: Number(map.get('year')),
+      hour24,
+      minute: Number(map.get('minute')),
+      zoneName: map.get('timeZoneName') ?? '',
+    };
+  } catch {
+    return null;
+  }
 }
 
-/** Paid access ends the day before the next billing anniversary. */
-export function monthPeriodExpiresAt(startedAt: Date, now = new Date()): Date {
-  return addCalendarDays(nextMonthlyAnniversary(startedAt, now), -1);
+function clock(hour24: number, minute: number): string {
+  const suffix = hour24 >= 12 ? 'PM' : 'AM';
+  const hour12 = hour24 % 12 || 12;
+  return `${hour12}:${String(minute).padStart(2, '0')} ${suffix}`;
 }
 
-export function formatPlanDate(raw: Date | string): string {
+function formatParts(date: Date, parts: ZonedParts, alwaysTime: boolean): string {
+  const day = `${MONTHS[parts.month - 1] ?? ''} ${parts.day}`;
+  const soon = alwaysTime || Math.abs(date.getTime() - Date.now()) < 48 * 60 * 60 * 1000;
+  if (!soon) return `${day}, ${parts.year}`;
+  const time = clock(parts.hour24, parts.minute);
+  const zoned = parts.zoneName ? `${time} (${parts.zoneName})` : time;
+  return alwaysTime ? `${day}, ${zoned}` : `${day}, ${zoned}`;
+}
+
+/** Profile time zone when one is saved, otherwise the device zone. */
+export function formatPlanDate(raw: Date | string, timeZone?: string | null): string {
   const date = raw instanceof Date ? raw : new Date(raw);
   if (Number.isNaN(date.getTime())) return '';
-  const soon = Math.abs(date.getTime() - Date.now()) < 48 * 60 * 60 * 1000;
-  if (soon) {
-    return date.toLocaleString(undefined, {
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    });
-  }
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  const zone = timeZone?.trim() || displayTimeZoneOrDevice();
+  const parts = zone ? zonedParts(date, zone) : null;
+  if (!parts || !Number.isFinite(parts.month)) return '';
+  return formatParts(date, parts, false);
+}
+
+/** Notification arrival time, always with a clock. */
+export function formatZonedTimestamp(raw: Date | string | number, timeZone?: string | null): string {
+  const date = raw instanceof Date ? raw : new Date(raw);
+  if (Number.isNaN(date.getTime())) return '';
+  const zone = timeZone?.trim() || displayTimeZoneOrDevice();
+  const parts = zone ? zonedParts(date, zone) : null;
+  if (!parts || !Number.isFinite(parts.month)) return '';
+  return formatParts(date, parts, true);
 }

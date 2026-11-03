@@ -33,9 +33,7 @@ import { GroupAvatar } from '../../../components/GroupAvatar';
 import { useListGroups } from '../../../hooks/useListGroups';
 import { usePullToRefresh } from '../../../hooks/usePullToRefresh';
 import type { GroupScoped } from '@moijia/client';
-import { downgradeIsPending, pendingDowngradeAt } from '../../../utils/downgradePlan';
 import { DowngradeNotice } from '../../../components/DowngradeNotice';
-import { FREE_OWNED_GROUP_LIMIT } from '../../../utils/groupTiers';
 import { formatPlanDate } from '../../../utils/groupPlanPeriod';
 
 type ActiveGroupRowProps = {
@@ -441,11 +439,12 @@ export default function GroupsScreen() {
     onOpenGroup: openGroup,
   };
 
-  const downgradePending = downgradeIsPending(quota);
-  const keptGroups = downgradePending ? myGroups.slice(0, FREE_OWNED_GROUP_LIMIT) : [];
-  const removedGroups = downgradePending ? myGroups.slice(FREE_OWNED_GROUP_LIMIT) : [];
-  const choosingKeepers = removedGroups.length > 0;
-  const downgradeWhen = pendingDowngradeAt(quota);
+  const downgradePending = quota?.downgradePending === true;
+  const keepCount = quota?.ownershipKeepCount ?? null;
+  const choosingKeepers = quota?.choosingKeepers === true && keepCount != null;
+  const keptGroups = choosingKeepers ? myGroups.slice(0, keepCount) : [];
+  const removedGroups = choosingKeepers ? myGroups.slice(keepCount) : [];
+  const downgradeWhen = quota?.plannedDowngradeAt ?? null;
 
   const renderActiveGroupRow = useCallback<ReorderableListRenderItem<GroupScoped>>(
     ({ item: g }) => <ActiveGroupRow group={g} {...rowProps} />,
@@ -479,7 +478,7 @@ export default function GroupsScreen() {
             <DowngradeNotice
               choosing={choosingKeepers}
               when={downgradeWhen}
-              graceStarted={Boolean(quota?.downgradeAt)}
+              graceStarted={quota?.graceStarted === true}
             />
           ) : null}
           {choosingKeepers ? (
@@ -489,7 +488,7 @@ export default function GroupsScreen() {
               tone="keep"
               empty="The top two groups you own stay here."
               pinnedSplit={{
-                at: FREE_OWNED_GROUP_LIMIT,
+                at: keepCount,
                 title: 'Will be deleted',
                 count: String(removedGroups.length),
                 tone: 'delete',
