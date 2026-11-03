@@ -32,6 +32,7 @@ import { NavigationGuardReset } from '../components/NavigationGuardReset';
 import { firstSearchParam, parseReturnToParam, withReturnTo } from '../utils/navigationReturn';
 import { isPublicAppSegment } from '../constants/legal';
 import { needsEmailVerification } from '../config/firebase';
+import { initMobileAds } from '../services/mobileAds';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -159,6 +160,10 @@ export default function RootLayout() {
 
   useEffect(() => {
     prefetchTwemojiAssets();
+  }, []);
+
+  useEffect(() => {
+    initMobileAds();
   }, []);
 
   // Refetch visible data when returning from background (native only).

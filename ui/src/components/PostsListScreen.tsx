@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
+import { Fragment, useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -48,6 +48,9 @@ import { useCreateGroupPost } from '../hooks/api/useGroupPosts';
 import { useCurrentUserContext } from '../contexts/CurrentUserContext';
 import { usePullToRefresh } from '../hooks/usePullToRefresh';
 import { KeyboardSafeScrollView } from './KeyboardSafeScrollView';
+import { ListAdCard } from './ListAdCard';
+import { shouldInsertListAdAfter } from '../config/ads';
+import { useAdsEnabled } from '../hooks/useAdsEnabled';
 import { UserAvatar } from './UserAvatar';
 import { GroupAvatar } from './GroupAvatar';
 import { formSectionTitleStyle } from './ui';
@@ -223,6 +226,7 @@ function appendMarkdownLink(text: string, fileName: string, url: string): string
 
 export function PostsListScreen() {
   const { userId: currentUserId } = useCurrentUserContext();
+  const adsEnabled = useAdsEnabled();
   const scrollRef = useRef<ScrollView | null>(null);
   const scrollViewportYRef = useRef(0);
   const scrollOffsetYRef = useRef(0);
@@ -1316,15 +1320,17 @@ export function PostsListScreen() {
               </View>
             </View>
           ) : filtered.length === 0 ? (
-            <View style={styles.card}>
-              <View style={styles.cardPad}>
-                <Text style={styles.emptyText}>
-                  {hasFilters ? 'No posts match your filters' : 'No posts yet'}
-                </Text>
+            <>
+              <View style={styles.card}>
+                <View style={styles.cardPad}>
+                  <Text style={styles.emptyText}>
+                    {hasFilters ? 'No posts match your filters' : 'No posts yet'}
+                  </Text>
+                </View>
               </View>
-            </View>
+            </>
           ) : (
-            filtered.map((post) => {
+            filtered.map((post, postIndex) => {
               const group = groups.find(g => g.id === post.groupId);
               const userColorHex = groupColors[post.groupId] || getDefaultGroupThemeFromName(group?.name || '');
               const p = getGroupColor(userColorHex);
@@ -1339,10 +1345,11 @@ export function PostsListScreen() {
                 resourceOwnerId: post.userId,
               });
               
+              const showAd = adsEnabled && shouldInsertListAdAfter(postIndex + 1, filtered.length);
               return (
+                <Fragment key={post.id}>
                 <View
-                  key={post.id}
-                  style={[styles.card, { marginBottom: 14 }]}
+                  style={[styles.card, { marginBottom: showAd ? 0 : 14 }]}
                   onLayout={(e) => {
                     postTopByIdRef.current[post.id] = e.nativeEvent.layout.y;
                   }}
@@ -1971,6 +1978,8 @@ export function PostsListScreen() {
                     </View>
                   </View>
                 </View>
+                {showAd ? <ListAdCard /> : null}
+                </Fragment>
               );
             })
           )}
@@ -2174,6 +2183,7 @@ export function PostsListScreen() {
             : undefined
         }
       />
+      {adsEnabled ? <ListAdCard docked /> : null}
     </View>
   );
 }
@@ -2217,7 +2227,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 20,
     paddingTop: 4,
-    paddingBottom: 110,
+    paddingBottom: 140,
   },
   card: {
     backgroundColor: Colors.surface,

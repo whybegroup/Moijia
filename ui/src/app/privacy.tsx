@@ -38,6 +38,12 @@ export function PrivacyPolicyContent({ onOpenTerms }: { onOpenTerms: () => void 
         your full payment-card number.
       </LegalP>
       <LegalP>
+        Advertising. On the free plan, the iOS app may show banner ads from Google AdMob
+        among groups, events, polls, and posts. Google may receive a device advertising
+        identifier and technical data to deliver and measure those ads. Pro and Enterprise
+        subscribers are not shown these ads, and the website does not show them.
+      </LegalP>
+      <LegalP>
         Device and usage. We collect technical data needed to run the Service, such as app
         version, device type, crash or error logs, and push-notification tokens if you allow
         notifications.
@@ -59,8 +65,8 @@ export function PrivacyPolicyContent({ onOpenTerms }: { onOpenTerms: () => void 
       <LegalP>
         Service providers. We use vendors that process data on our behalf, including Google
         Firebase (authentication), Amazon Web Services (file storage), RevenueCat (in-app
-        purchases), and Apple or Google (sign-in and store billing). They may process data
-        only as needed to provide those services.
+        purchases), Google AdMob (advertising), and Apple or Google (sign-in and store
+        billing). They may process data only as needed to provide those services.
       </LegalP>
       <LegalP>
         Legal. We may disclose information if we believe it is required by law, to protect

@@ -34,6 +34,9 @@ import { useListGroups } from '../../../hooks/useListGroups';
 import { usePullToRefresh } from '../../../hooks/usePullToRefresh';
 import type { GroupScoped } from '@moijia/client';
 import { DowngradeNotice } from '../../../components/DowngradeNotice';
+import { ListAdCard } from '../../../components/ListAdCard';
+import { shouldInsertListAdAfter } from '../../../config/ads';
+import { useAdsEnabled } from '../../../hooks/useAdsEnabled';
 import { formatPlanDate } from '../../../utils/groupPlanPeriod';
 
 type ActiveGroupRowProps = {
@@ -150,6 +153,22 @@ function ActiveGroupRow(props: ActiveGroupRowProps) {
 
 function GroupItemGap() {
   return <View style={styles.groupItemGap} />;
+}
+
+function GroupRowWithAd({
+  index,
+  offset,
+  total,
+  ...rowProps
+}: ActiveGroupRowProps & { index: number; offset: number; total: number }) {
+  const adsEnabled = useAdsEnabled();
+  const showAd = adsEnabled && shouldInsertListAdAfter(offset + index + 1, total);
+  return (
+    <View>
+      <ActiveGroupRow {...rowProps} />
+      {showAd ? <ListAdCard /> : null}
+    </View>
+  );
 }
 
 function SectionHeader({
@@ -322,6 +341,7 @@ function GroupSectionList({
 export default function GroupsScreen() {
   const router = useRouter();
   const { userId: currentUserId } = useCurrentUserContext();
+  const adsEnabled = useAdsEnabled();
   const [isDragging, setIsDragging] = useState(false);
 
   const { listGroups, refetch: refetchGroups } = useListGroups(currentUserId ?? '', false);
@@ -446,13 +466,25 @@ export default function GroupsScreen() {
   const removedGroups = choosingKeepers ? myGroups.slice(keepCount) : [];
   const downgradeWhen = quota?.plannedDowngradeAt ?? null;
 
+  const groupAdTotal = myGroups.length + otherGroups.length;
   const renderActiveGroupRow = useCallback<ReorderableListRenderItem<GroupScoped>>(
-    ({ item: g }) => <ActiveGroupRow group={g} {...rowProps} />,
-    [rowProps]
+    ({ item: g, index }) => (
+      <GroupRowWithAd index={index} offset={0} total={groupAdTotal} group={g} {...rowProps} />
+    ),
+    [groupAdTotal, rowProps]
   );
   const renderOtherGroupRow = useCallback<ReorderableListRenderItem<GroupScoped>>(
-    ({ item: g }) => <ActiveGroupRow group={g} {...rowProps} warningNote={deletionWarning(g)} />,
-    [rowProps]
+    ({ item: g, index }) => (
+      <GroupRowWithAd
+        index={index}
+        offset={myGroups.length}
+        total={groupAdTotal}
+        group={g}
+        {...rowProps}
+        warningNote={deletionWarning(g)}
+      />
+    ),
+    [groupAdTotal, myGroups.length, rowProps]
   );
 
   return (
@@ -529,9 +561,10 @@ export default function GroupsScreen() {
             onDragEnd={handleDragEnd}
             dragLocked={isDragging}
           />
-          <View style={styles.listBottomPad} />
+          <View style={{ height: adsEnabled ? 140 : 100 }} />
         </ScrollViewContainer>
       )}
+      {adsEnabled ? <ListAdCard docked /> : null}
     </View>
   );
 }
@@ -540,7 +573,6 @@ const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: Colors.bg },
   listContainer: { flex: 1 },
   listContent: { paddingHorizontal: 16, flexGrow: 1 },
-  listBottomPad: { height: 100 },
   groupItemCard: {
     backgroundColor: Colors.surface,
     borderRadius: 16,

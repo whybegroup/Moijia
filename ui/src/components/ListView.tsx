@@ -12,7 +12,10 @@ import {
 import { Colors, Fonts, Radius } from '../constants/theme';
 import { dayShort, fmtDateShort } from '../utils/helpers';
 import { EventRow } from './EventRow';
+import { ListAdCard } from './ListAdCard';
+import { shouldInsertListAdAfter } from '../config/ads';
 import { useUsers } from '../hooks/api';
+import { useAdsEnabled } from '../hooks/useAdsEnabled';
 import { useCurrentUserContext } from '../contexts/CurrentUserContext';
 import type { EventDetailed, GroupScoped } from '@moijia/client';
 
@@ -32,11 +35,14 @@ interface ListViewProps {
   toolbarEnd?: ReactNode;
   /** Rendered under the toolbar (e.g. expanded filters). */
   belowToolbar?: ReactNode;
+  /** In-feed banners on the events tab. Group event lists leave this off. */
+  showAds?: boolean;
 }
 
 type Row =
   | { key: string; type: 'dateDivider'; date: Date }
-  | { key: string; type: 'event'; event: EventDetailed };
+  | { key: string; type: 'event'; event: EventDetailed }
+  | { key: string; type: 'ad' };
 
 function startDateKeyLocal(d: Date): string {
   const y = d.getFullYear();
@@ -78,9 +84,12 @@ export function ListView({
   refreshControl,
   toolbarEnd,
   belowToolbar,
+  showAds = false,
 }: ListViewProps) {
   const { data: allUsers = [] } = useUsers();
   const { userId: meId } = useCurrentUserContext();
+  const adsEnabled = useAdsEnabled();
+  const insertAds = showAds && adsEnabled && variant !== 'embedded';
 
   const groupsMap = useMemo(() => {
     const map: Record<string, GroupScoped> = {};
@@ -110,6 +119,7 @@ export function ListView({
     const dayKeys = insertTodayInOrder([...buckets.keys()].sort(), todayKey);
 
     const r: Row[] = [];
+    let eventCount = 0;
     for (const dayKey of dayKeys) {
       const dividerDate = dateFromLocalKey(dayKey);
       r.push({ key: `div-${dayKey}`, type: 'dateDivider', date: dividerDate });
@@ -119,10 +129,14 @@ export function ListView({
           type: 'event',
           event: ev,
         });
+        eventCount += 1;
+        if (insertAds && shouldInsertListAdAfter(eventCount, sorted.length)) {
+          r.push({ key: `ad-${ev.id}`, type: 'ad' });
+        }
       }
     }
     return r;
-  }, [events]);
+  }, [events, insertAds]);
 
   const listRef = useRef<FlatList<Row>>(null);
   const todayIndex = useMemo(
@@ -157,6 +171,7 @@ export function ListView({
   );
 
   const renderItem = ({ item }: { item: Row }) => {
+    if (item.type === 'ad') return <ListAdCard />;
     if (item.type === 'dateDivider') {
       const d = item.date;
       const label = `${dayShort(d)} · ${fmtDateShort(d)}, ${d.getFullYear()}`;
@@ -222,7 +237,7 @@ export function ListView({
         showsVerticalScrollIndicator={false}
         maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
         onScrollToIndexFailed={onScrollToIndexFailed}
-        ListFooterComponent={<View style={{ height: 100 }} />}
+        ListFooterComponent={<View style={{ height: insertAds ? 140 : 100 }} />}
         refreshControl={refreshControl}
       />
     </View>

@@ -14,6 +14,8 @@ import {
   getDefaultGroupThemeFromName,
 } from '../utils/helpers';
 import { ListView } from './ListView';
+import { ListAdCard } from './ListAdCard';
+import { useAdsEnabled } from '../hooks/useAdsEnabled';
 import { CalendarView } from './CalendarView';
 import { Pill } from './ui';
 import { EventsListFiltersPanel } from './EventsListFiltersPanel';
@@ -38,6 +40,7 @@ import { withReturnTo } from '../utils/navigationReturn';
 
 export function EventsListScreen() {
   const router = useRouter();
+  const adsEnabled = useAdsEnabled();
   const pathname = usePathname();
   const { viewMode, setViewMode, setFromEventId } = useEventScopeNav();
   const { userId: currentUserId } = useCurrentUserContext();
@@ -361,6 +364,7 @@ export function EventsListScreen() {
             </>
           ) : (
             <ListView
+              showAds
               events={filtered}
               groups={groups}
               groupColors={groupColors}
@@ -401,6 +405,7 @@ export function EventsListScreen() {
             calendarScrollPrefsReady={prefsReady}
           />
         )}
+        {adsEnabled ? <ListAdCard docked /> : null}
       </View>
         )}
       </EventsListFiltersPanel>
