@@ -3,6 +3,7 @@ import * as Calendar from 'expo-calendar';
 import { File, Paths } from 'expo-file-system';
 import * as WebBrowser from 'expo-web-browser';
 import Toast from 'react-native-toast-message';
+import { requestPermissionPrompt } from './permissions';
 import { eventLocationShareLabel, stripHtmlToText } from './sharePreviewCopy';
 import { eventShareLink, withShareTimeZone } from './shareLinks';
 
@@ -431,24 +432,22 @@ function calendarEventDialogPayload(eventId: string, details: EventCalendarDetai
   };
 }
 
-function isCalendarPermissionError(e: unknown): boolean {
-  const msg = e instanceof Error ? e.message : String(e ?? '');
-  return /permission/i.test(msg);
-}
-
 async function presentSystemCalendarComposer(
   eventId: string,
   details: EventCalendarDetails,
-): Promise<void> {
+): Promise<boolean> {
+  const allowed = await requestPermissionPrompt(
+    () => Calendar.getCalendarPermissionsAsync(),
+    () => Calendar.requestCalendarPermissionsAsync(),
+    {
+      title: 'Calendar',
+      message: 'Allow calendar access in Settings to add this event.',
+    },
+  );
+  if (!allowed) return false;
   const payload = calendarEventDialogPayload(eventId, details);
-  try {
-    await Calendar.createEventInCalendarAsync(payload);
-  } catch (e) {
-    if (!isCalendarPermissionError(e)) throw e;
-    const perm = await Calendar.requestCalendarPermissionsAsync();
-    if (perm.status !== 'granted') throw e;
-    await Calendar.createEventInCalendarAsync(payload);
-  }
+  await Calendar.createEventInCalendarAsync(payload);
+  return true;
 }
 
 async function writeIcsCacheFile(ics: string, filename: string): Promise<string> {
@@ -527,7 +526,8 @@ export async function addEventToDeviceCalendar(
       downloadIcsOnWeb(buildEventIcs(eventId, details), eventIcsFileName(details.name));
       return;
     }
-    await presentSystemCalendarComposer(eventId, details);
+    const added = await presentSystemCalendarComposer(eventId, details);
+    if (!added) return;
   } catch (e: unknown) {
     if (isShareCanceled(e)) return;
     try {

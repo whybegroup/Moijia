@@ -6,6 +6,7 @@ import { RegisterRoutes } from './generated/routes';
 import { registerSharePreviewRoutes } from './sharePreviewRoutes';
 import { registerMediaShareRoutes } from './mediaShareRoutes';
 import { startGroupBillingJobs } from './jobs/groupBillingJobs';
+import { startEventReminderJobs } from './jobs/eventReminderJobs';
 import { registerRevenueCatWebhook } from './revenueCatWebhook';
 import { apiReference } from '@scalar/express-api-reference';
 import * as fs from 'fs';
@@ -84,6 +85,7 @@ app.listen(PORT, () => {
   console.log(`📚 API docs available at http://localhost:${PORT}/docs`);
   console.log(`💚 Health check at http://localhost:${PORT}/health`);
   startGroupBillingJobs();
+  startEventReminderJobs();
 });
 
 export default app;

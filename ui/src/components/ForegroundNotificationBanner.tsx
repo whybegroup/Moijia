@@ -22,6 +22,13 @@ import { navigateFromNotificationPayload } from '../utils/notificationNavigation
 import { NotificationListIcon } from './NotificationListIcon';
 
 const SHOW_MS = 5000;
+const SHOW_MS_MAX = 12000;
+
+function visibleMs(body: string): number {
+  const extra = Math.max(0, body.length - 80) * 25;
+  return Math.min(SHOW_MS_MAX, SHOW_MS + extra);
+}
+
 const SLIDE = 14;
 const DISMISS_Y = -36;
 const DISMISS_VY = -650;
@@ -127,7 +134,7 @@ export function ForegroundNotificationBanner() {
       Animated.timing(opacity, { toValue: 1, duration: 220, useNativeDriver: true }),
       Animated.timing(translateY, { toValue: 0, duration: 220, useNativeDriver: true }),
     ]).start();
-    hideTimer.current = setTimeout(() => hideRef.current(), SHOW_MS);
+    hideTimer.current = setTimeout(() => hideRef.current(), visibleMs(next.body));
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
   };
   showRef.current = show;
@@ -169,7 +176,10 @@ export function ForegroundNotificationBanner() {
     }
     Animated.spring(dragY, { toValue: 0, useNativeDriver: true, bounciness: 0, speed: 20 }).start();
     clearHideTimer();
-    hideTimer.current = setTimeout(() => hideRef.current(), SHOW_MS);
+    hideTimer.current = setTimeout(
+      () => hideRef.current(),
+      visibleMs(bannerRef.current?.body ?? '')
+    );
   };
 
   const fireOpen = () => {
@@ -257,11 +267,7 @@ export function ForegroundNotificationBanner() {
               <Text style={styles.title} numberOfLines={1}>
                 {banner.title}
               </Text>
-              {banner.body ? (
-                <Text style={styles.body} numberOfLines={2}>
-                  {banner.body}
-                </Text>
-              ) : null}
+              {banner.body ? <Text style={styles.body}>{banner.body}</Text> : null}
             </View>
           </View>
         </Animated.View>

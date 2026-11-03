@@ -5,7 +5,7 @@ import { parseGroupOrderJson, serializeGroupOrderJson } from '../utils/groupOrde
 import type { GroupOrderInput } from '../models/GroupOrder';
 import { groupStorage } from './GroupStorageService';
 import { S3UploadService } from './S3UploadService';
-import { deleteRevenueCatSubscriber } from './RevenueCatService';
+import { deleteRevenueCatSubscriber, setRevenueCatEmail } from './RevenueCatService';
 import { groupBilling } from './GroupBillingService';
 import { httpError } from '../utils/httpError';
 import { normalizeTimeZone } from '../utils/timeZone';
@@ -69,6 +69,7 @@ export class UserService {
         email: input.email ?? null,
       },
     });
+    void setRevenueCatEmail(row.id, row.email);
     return this.mapUser(row);
   }
 
@@ -95,6 +96,7 @@ export class UserService {
         ...(input.email !== undefined ? { email: input.email } : {}),
       },
     });
+    void setRevenueCatEmail(row.id, row.email);
     return this.mapUser(row);
   }
 
@@ -128,6 +130,7 @@ export class UserService {
       where: { id },
       data,
     });
+    if (input.email !== undefined) void setRevenueCatEmail(row.id, row.email);
     return this.mapUser(row);
   }
 

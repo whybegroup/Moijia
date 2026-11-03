@@ -19,3 +19,9 @@ alwaysApply: true
 - Keep responses brief and to the point
 - Focus on the actual work, not explanations
 - Let the code speak for itself
+
+## Concise Thinking
+- Think in the fewest tokens that still reach a correct action
+- Skip restating the request, recapping context, and weighing options already ruled out
+- One short pass: what matters, what to do, do it
+- Do not narrate tool use, plans, or checklists in thought unless a real branch remains

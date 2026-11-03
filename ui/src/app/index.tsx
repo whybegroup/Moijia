@@ -8,7 +8,7 @@ import { Colors, Fonts, Radius } from '../constants/theme';
 import { PRIVACY_PATH, SUPPORT_PATH, TERMS_PATH } from '../constants/legal';
 
 const PURPOSE =
-  'moijia is a group workspace. People in a group plan events, run polls, post updates and comments, and keep photos, videos, and files in shared storage.';
+  'Moijia is a group workspace. People in a group plan events, run polls, post updates and comments, and keep photos, videos, and files in shared storage.';
 
 export default function Index() {
   const { user, loading } = useAuth();
@@ -24,16 +24,16 @@ export default function Index() {
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right', 'bottom']}>
       <Head>
-        <title>moijia</title>
+        <title>Moijia</title>
         <meta name="description" content={PURPOSE} />
       </Head>
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         <Image
           source={require('../../assets/favicon.png')}
           style={styles.logo}
-          accessibilityLabel="moijia"
+          accessibilityLabel="Moijia"
         />
-        <Text style={styles.name}>moijia</Text>
+        <Text style={styles.name}>Moijia</Text>
         <Text style={styles.lead}>{PURPOSE}</Text>
 
         <View style={styles.list}>

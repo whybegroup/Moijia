@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import * as Location from 'expo-location';
+import { requestPermissionPrompt } from '../utils/permissions';
 import {
   searchLocationSuggestions,
   type GeoCoords,
@@ -54,6 +55,7 @@ export function useLocationSuggestions(query: string, enabled = true) {
   const [panelOpen, setPanelOpen] = useState(false);
   const coordsRef = useRef<GeoCoords | null>(null);
   const coordsPromiseRef = useRef<Promise<GeoCoords | null> | null>(null);
+  const locationPromptedRef = useRef(false);
 
   const ensureCoords = () => {
     if (coordsRef.current) {
@@ -65,14 +67,20 @@ export function useLocationSuggestions(query: string, enabled = true) {
 
     coordsPromiseRef.current = (async () => {
       try {
-        const existing = await Location.getForegroundPermissionsAsync();
-        let status = existing.status;
-        if (status !== Location.PermissionStatus.GRANTED) {
-          const requested = await Location.requestForegroundPermissionsAsync();
-          status = requested.status;
-        }
-        if (status !== Location.PermissionStatus.GRANTED) {
-          return null;
+        if (!locationPromptedRef.current) {
+          locationPromptedRef.current = true;
+          const allowed = await requestPermissionPrompt(
+            () => Location.getForegroundPermissionsAsync(),
+            () => Location.requestForegroundPermissionsAsync(),
+            {
+              title: 'Location',
+              message: 'Allow location access in Settings to suggest nearby places.',
+            },
+          );
+          if (!allowed) return null;
+        } else {
+          const existing = await Location.getForegroundPermissionsAsync();
+          if (!existing.granted) return null;
         }
         const coords = await resolveDeviceCoords();
         if (coords) coordsRef.current = coords;

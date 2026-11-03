@@ -83,6 +83,7 @@ export function PhotoUrlOrUploadModal({
 
   const handleNativeUpload = async () => {
     if (!(await ensureGroupCanUpload(userId, groupId))) return;
+    onClose();
     setBusy(true);
     const previewIds: string[] = [];
     try {

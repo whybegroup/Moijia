@@ -8,6 +8,11 @@ export type StoreSubscriptionSnapshot = {
   proRenewing: boolean;
   expiresAt: Date | null;
   purchasedAt: Date | null;
+  /**
+   * False on a RENEWAL event. A repeat of a period already stored as cancelled
+   * must not turn auto-renew back on. A later period still can.
+   */
+  resumeRenewal?: boolean;
 };
 
 export type RevenueCatWebhookEvent = {
@@ -52,6 +57,82 @@ export async function deleteRevenueCatSubscriber(appUserId: string): Promise<voi
 
 function secretKey(): string {
   return process.env.REVENUECAT_SECRET_API_KEY?.trim() ?? '';
+}
+
+const pushedEmails = new Set<string>();
+const readySubscribers = new Set<string>();
+
+function rejectAnonymousId(appUserId: string): boolean {
+  if (!appUserId.startsWith('$')) return false;
+  console.warn(`[revenuecat] refusing anonymous customer ${appUserId}`);
+  return true;
+}
+
+/**
+ * RevenueCat creates the customer on GET when the id is new.
+ * Attribute updates 404 until that customer exists.
+ */
+export async function ensureRevenueCatSubscriber(appUserId: string): Promise<boolean> {
+  const secret = secretKey();
+  const id = appUserId.trim();
+  if (!secret || !id || rejectAnonymousId(id)) return false;
+  if (readySubscribers.has(id)) return true;
+  const url = `https://api.revenuecat.com/v1/subscribers/${encodeURIComponent(id)}`;
+  try {
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${secret}` } });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      console.warn(`[revenuecat] ensure subscriber ${res.status} for ${id}: ${body.slice(0, 200)}`);
+      return false;
+    }
+    readySubscribers.add(id);
+    if (res.status === 201) console.log(`[revenuecat] created customer ${id}`);
+    else console.log(`[revenuecat] subscriber ${id} ready`);
+    return true;
+  } catch (e) {
+    console.warn(`[revenuecat] ensure subscriber failed for ${id}`, e);
+    return false;
+  }
+}
+
+/** Sets the RevenueCat `$email` attribute shown on the customers page. */
+export async function setRevenueCatEmail(appUserId: string, email: string | null | undefined): Promise<void> {
+  const secret = secretKey();
+  const id = appUserId?.trim() ?? '';
+  const value = email?.trim() ?? '';
+  if (!secret || !id || rejectAnonymousId(id)) return;
+  if (!(await ensureRevenueCatSubscriber(id))) return;
+  if (!value.includes('@')) {
+    const skip = `${id}\0`;
+    if (pushedEmails.has(skip)) return;
+    pushedEmails.add(skip);
+    console.log(`[revenuecat] skip $email for ${id}: no address on the user`);
+    return;
+  }
+  const key = `${id}\0${value.toLowerCase()}`;
+  if (pushedEmails.has(key)) return;
+  pushedEmails.add(key);
+  const url = `https://api.revenuecat.com/v1/subscribers/${encodeURIComponent(id)}/attributes`;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${secret}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ attributes: { $email: { value } } }),
+    });
+    if (!res.ok) {
+      pushedEmails.delete(key);
+      const body = await res.text().catch(() => '');
+      console.warn(`[revenuecat] set $email ${res.status} for ${id}: ${body.slice(0, 200)}`);
+      return;
+    }
+    console.log(`[revenuecat] set $email for ${id} to ${value}`);
+  } catch (e) {
+    pushedEmails.delete(key);
+    console.warn(`[revenuecat] set $email failed for ${id}`, e);
+  }
 }
 
 function safeEqual(actual: string, expected: string): boolean {
@@ -129,9 +210,11 @@ export function proSnapshotFromWebhookEvent(
   if (type === 'CANCELLATION' || type === 'SUBSCRIPTION_PAUSED' || type === 'NON_RENEWING_PURCHASE') {
     return { proActive: stillActive, proRenewing: false, expiresAt, purchasedAt };
   }
+  if (type === 'RENEWAL') {
+    return { proActive: stillActive, proRenewing: stillActive, expiresAt, purchasedAt, resumeRenewal: false };
+  }
   if (
     type === 'INITIAL_PURCHASE' ||
-    type === 'RENEWAL' ||
     type === 'UNCANCELLATION' ||
     type === 'PRODUCT_CHANGE' ||
     type === 'SUBSCRIPTION_EXTENDED' ||
@@ -181,14 +264,20 @@ export function proSnapshotFromSubscriber(subscriber: unknown, now = Date.now())
   };
 }
 
+export function formatStoreSnapshot(snapshot: StoreSubscriptionSnapshot, productId?: string | null): string {
+  return `active=${snapshot.proActive} renewing=${snapshot.proRenewing} product=${productId?.trim() || 'none'} purchased=${snapshot.purchasedAt?.toISOString() ?? 'none'} expires=${snapshot.expiresAt?.toISOString() ?? 'none'}`;
+}
+
 /** Null when the REST secret is unset. Throws when RevenueCat returns an error. */
 export async function fetchProSnapshot(appUserId: string): Promise<StoreSubscriptionSnapshot | null> {
   const secret = secretKey();
   const id = appUserId.trim();
-  if (!secret || !id) return null;
+  if (!secret || !id || rejectAnonymousId(id)) return null;
+  if (!(await ensureRevenueCatSubscriber(id))) return null;
   const url = `https://api.revenuecat.com/v1/subscribers/${encodeURIComponent(id)}`;
   const res = await fetch(url, { headers: { Authorization: `Bearer ${secret}` } });
   if (res.status === 404) {
+    console.log(`[revenuecat] synced ${id}: no subscriber`);
     return { proActive: false, proRenewing: false, expiresAt: null, purchasedAt: null };
   }
   if (!res.ok) {
@@ -196,5 +285,14 @@ export async function fetchProSnapshot(appUserId: string): Promise<StoreSubscrip
     throw new Error(`revenuecat ${res.status}: ${body.slice(0, 200)}`);
   }
   const json = (await res.json()) as { subscriber?: unknown };
-  return proSnapshotFromSubscriber(json.subscriber);
+  const snapshot = proSnapshotFromSubscriber(json.subscriber);
+  const record = json.subscriber && typeof json.subscriber === 'object' ? (json.subscriber as Record<string, unknown>) : {};
+  const subscriptions = (record.subscriptions ?? {}) as Record<string, RcSubscription>;
+  const entitlements = (record.entitlements ?? {}) as Record<string, RcEntitlement>;
+  const productId =
+    (subscriptions[PRO_PRODUCT_ID] ? PRO_PRODUCT_ID : null) ??
+    entitlements[PRO_ENTITLEMENT_ID]?.product_identifier ??
+    null;
+  console.log(`[revenuecat] synced ${id}: ${formatStoreSnapshot(snapshot, productId)}`);
+  return snapshot;
 }

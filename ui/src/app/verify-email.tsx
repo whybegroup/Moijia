@@ -86,7 +86,7 @@ export default function VerifyEmailScreen() {
         <Text style={styles.title}>Verify your email</Text>
         <Text style={styles.body}>
           We sent a verification link to{user?.email ? ` ${user.email}` : ' your email'}. Open it
-          before using moijia.
+          before using Moijia.
         </Text>
         <TouchableOpacity
           onPress={() => void handleChecked()}

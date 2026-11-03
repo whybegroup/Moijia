@@ -42,6 +42,11 @@ export interface ProSubscriptionSnapshot {
   expiresAt: Date | null;
   /** Start of the current provider period. */
   purchasedAt: Date | null;
+  /**
+   * False on a RENEWAL event. A repeat of a period already stored as cancelled
+   * must not turn auto-renew back on. A later period still can.
+   */
+  resumeRenewal?: boolean;
 }
 
 function validDate(value: Date | null | undefined): Date | null {
@@ -95,6 +100,40 @@ function downgradeNotice(
     lines.push('Groups you already deleted are permanently removed on that date and cannot be restored.');
   }
   return lines.join(' ');
+}
+
+/** Plain note for the grace window. No receipt, price, or legal footer. */
+function endedPlanMail(input: {
+  planName: string;
+  when: string;
+  keep: OwnedGroupRow[];
+  deleting: OwnedGroupRow[];
+  hasAlreadyDeleted: boolean;
+}): { subject: string; body: string } {
+  const kept = input.keep.map((group) => group.name).join(', ') || 'None';
+  const removed = input.deleting.map((group) => group.name).join(', ');
+  const lines = [
+    `Your Moijia ${input.planName} subscription has ended. The groups you own stay as they are until ${input.when}.`,
+    '',
+    `Groups you keep: ${kept}`,
+  ];
+  if (removed) lines.push(`Will be deleted on ${input.when}: ${removed}`);
+  lines.push('');
+  if (removed) {
+    lines.push(
+      `Before ${input.when}, open Groups and move a group between Kept and Will be deleted if you want a different two to remain.`
+    );
+  }
+  lines.push(
+    `You can download files, delete files, or transfer a group until ${input.when}. After that date the groups you keep hold 1 GB. Older files over that limit are removed, and new uploads stop once a group is over 1 GB.`
+  );
+  if (input.hasAlreadyDeleted) {
+    lines.push(`Groups you already deleted are removed on ${input.when} and cannot be restored.`);
+  }
+  return {
+    subject: `Your Moijia ${input.planName} subscription has ended`,
+    body: lines.join('\n'),
+  };
 }
 
 export class GroupBillingService {
@@ -323,16 +362,22 @@ export class GroupBillingService {
       const periodAdvanced =
         tier === 'pro' &&
         (dateMoved(purchasedAt, storedStart) || dateMoved(storeExpires, storedExpires));
-      const resumedRenewal =
-        tier === 'pro' && user.subscriptionWillRenew === false && input.proRenewing && !periodAdvanced;
-      const cancelledRenewal = tier === 'pro' && user.subscriptionWillRenew === true && !input.proRenewing;
-      const notice = becomingPro ? 'subscribe' : periodAdvanced ? 'renewed' : resumedRenewal ? 'resumed' : null;
+      const samePeriod = !dateMoved(purchasedAt, storedStart) && !dateMoved(storeExpires, storedExpires);
+      const keepCancelled =
+        input.resumeRenewal === false &&
+        tier === 'pro' &&
+        user.subscriptionWillRenew === false &&
+        samePeriod;
+      const renewing = input.proRenewing && !keepCancelled;
+      const resumedRenewal = tier === 'pro' && user.subscriptionWillRenew === false && renewing && !periodAdvanced;
+      const cancelledRenewal = tier === 'pro' && user.subscriptionWillRenew === true && !renewing;
+      const notice = becomingPro ? 'subscribe' : periodAdvanced && renewing ? 'renewed' : resumedRenewal ? 'resumed' : null;
       const proData = {
         subscriptionTier: 'pro',
         subscriptionStartedAt: startedAt,
         subscriptionExpiresAt: expiresAt,
         subscriptionProductId: PRO_PRODUCT_ID,
-        subscriptionWillRenew: input.proRenewing,
+        subscriptionWillRenew: renewing,
         downgradeAt: null,
       };
       let claimed = true;
@@ -381,20 +426,20 @@ export class GroupBillingService {
       if (notice && claimed) {
         const intro =
           notice === 'subscribe'
-            ? 'Thanks for subscribing to moijia Pro. Groups you own are Medium (10 GB), and you can create up to 10.'
+            ? 'Thanks for subscribing to Moijia Pro. Groups you own are Medium (10 GB), and you can create up to 10.'
             : notice === 'renewed'
-              ? 'Your moijia Pro subscription renewed. Groups you own stay Medium (10 GB), and you can create up to 10.'
-              : 'Your moijia Pro subscription is set to renew again. Groups you own stay Medium (10 GB), and you can create up to 10.';
+              ? 'Your Moijia Pro subscription renewed. Groups you own stay Medium (10 GB), and you can create up to 10.'
+              : 'Your Moijia Pro subscription is set to renew again. Groups you own stay Medium (10 GB), and you can create up to 10.';
         await this.confirmProSubscription({
           userId,
           intro,
           expiresAt,
-          renewing: input.proRenewing,
+          renewing,
           subject:
             notice === 'renewed'
-              ? 'Your moijia Pro subscription renewed'
+              ? 'Your Moijia Pro subscription renewed'
               : notice === 'resumed'
-                ? 'Your moijia Pro subscription will renew'
+                ? 'Your Moijia Pro subscription will renew'
                 : undefined,
           historyDetail: notice === 'resumed' ? 'Set to renew again' : PRO_MONTHLY_PRICE_LABEL,
         });
@@ -406,10 +451,10 @@ export class GroupBillingService {
           userId,
           kind: 'cancel',
           title: 'Pro cancelled',
-          intro: `Your moijia Pro subscription is cancelled. Pro stays active through ${through}.`,
+          intro: `Your Moijia Pro subscription is cancelled. Pro stays active through ${through}.`,
           expiresAt,
           renewing: false,
-          subject: 'Your moijia Pro subscription is cancelled',
+          subject: 'Your Moijia Pro subscription is cancelled',
           historyDetail: `Access through ${through}`,
         });
       }
@@ -441,17 +486,26 @@ export class GroupBillingService {
       const downgradeAt = new Date(periodEnd.getTime() + downgradeGraceMs(startedAt, periodEnd));
       const downgrading = await this.scheduleDowngrade(userId, downgradeAt);
       if (!downgrading) {
+        const owned = await this.ownedGroups(userId);
+        const names = owned.map((group) => group.name);
+        const groups = names.length
+          ? `Groups you own: ${names.join(', ')}. They already fit the current limits, so none will be deleted or made smaller.`
+          : 'You do not own any groups, so none will be deleted or made smaller.';
         await this.confirmProSubscription({
           userId,
           kind: 'cancel',
           title: 'Pro ended',
-          intro: 'Your moijia Pro subscription has ended. You are on the Free plan.',
+          intro:
+            'Your Moijia Pro subscription has ended. You are on the Free plan. The groups you own already fit Free, so none will be deleted or reduced in size.',
           expiresAt: periodEnd,
           renewing: false,
-          subject: 'Your moijia Pro subscription has ended',
           historyDetail: 'Switched to Free',
           plan: 'Free',
           price: '$0.00/mo',
+          mail: {
+            subject: 'Your Moijia Pro subscription has ended',
+            body: `Your Moijia Pro subscription has ended. ${groups}`,
+          },
         });
       } else {
         await recordPurchase({
@@ -703,20 +757,23 @@ export class GroupBillingService {
         .catch(() => undefined);
     }
     const ownerZone = await this.timeZoneFor(userId);
+    const when = formatMailDate(downgradeAt, ownerZone);
+    const mail = endedPlanMail({
+      planName,
+      when,
+      keep,
+      deleting,
+      hasAlreadyDeleted: alreadyDeleted,
+    });
     await this.emailSubscription({
       ownerId: userId,
-      intro: downgradeNotice(
-        formatMailDate(downgradeAt, ownerZone),
-        keep,
-        deleting,
-        alreadyDeleted,
-        planName
-      ),
+      intro: mail.body,
       plan: 'Free',
       price: '$0.00/mo',
       expiresAt: downgradeAt,
       renewing: false,
-      subject: `Your moijia ${planName} plan has ended`,
+      subject: mail.subject,
+      body: mail.body,
     });
     return true;
   }
@@ -999,9 +1056,12 @@ export class GroupBillingService {
     expiresAt: Date | null;
     renewing: boolean;
     subject?: string;
+    dateLabel?: string;
     historyDetail: string;
     plan?: string;
     price?: string;
+    /** Plain email. Skips the receipt and the legal footer. */
+    mail?: { subject: string; body: string };
   }): Promise<void> {
     const title = input.title ?? 'Pro subscription';
     await recordPurchase({
@@ -1024,7 +1084,9 @@ export class GroupBillingService {
       price: input.price ?? PRO_MONTHLY_PRICE_LABEL,
       expiresAt: input.expiresAt,
       renewing: input.renewing,
-      subject: input.subject,
+      dateLabel: input.dateLabel,
+      subject: input.mail?.subject ?? input.subject,
+      body: input.mail?.body,
     });
   }
 
@@ -1036,12 +1098,27 @@ export class GroupBillingService {
     expiresAt: Date | null;
     renewing: boolean;
     subject?: string;
+    dateLabel?: string;
+    extraSections?: ReceiptSection[];
+    note?: string;
+    /** Plain text only. Skips the receipt, the image, and the legal footer. */
+    body?: string;
   }): Promise<void> {
     const owner = await prisma.user.findUnique({
       where: { id: input.ownerId },
       select: { email: true, timeZone: true },
     });
     const to = owner?.email?.includes('@') ? owner.email : null;
+    const subject = input.subject ?? 'Your Moijia subscription confirmation';
+    if (input.body) {
+      console.log(
+        `[mail] subscription ${input.ownerId} to=${to ?? 'none'} plan=${input.plan} renewing=${input.renewing} through=${input.expiresAt?.toISOString() ?? 'none'} — ${subject}`
+      );
+      await sendOwnerEmail({ to, subject, text: input.body }).catch((err) => {
+        console.warn('[mail] subscription update failed', err);
+      });
+      return;
+    }
     const sections: ReceiptSection[] = [
       {
         heading: 'YOUR SUBSCRIPTION',
@@ -1049,11 +1126,12 @@ export class GroupBillingService {
           { label: 'Plan', value: input.plan },
           { label: 'Price', value: input.price },
           {
-            label: input.renewing ? 'Renews' : 'Access through',
+            label: input.dateLabel ?? (input.renewing ? 'Renews' : 'Access through'),
             value: input.expiresAt ? formatMailDate(input.expiresAt, owner?.timeZone) : 'None',
           },
         ],
       },
+      ...(input.extraSections ?? []),
     ];
     const text = [
       input.intro,
@@ -1063,14 +1141,19 @@ export class GroupBillingService {
         ...section.rows.map((row) => `${row.label}: ${row.value}`),
         '',
       ]),
+      ...(input.note ? [input.note, ''] : []),
       MAIL_FOOTER.join('\n\n'),
     ].join('\n');
+    console.log(
+      `[mail] subscription ${input.ownerId} to=${to ?? 'none'} plan=${input.plan} price=${input.price} renewing=${input.renewing} through=${input.expiresAt?.toISOString() ?? 'none'} — ${subject}`
+    );
     await sendOwnerEmail({
       to,
-      subject: input.subject ?? 'Your moijia subscription confirmation',
+      subject,
       text,
       intro: input.intro,
       sections,
+      note: input.note,
     }).catch((err) => {
       console.warn('[mail] subscription update failed', err);
     });

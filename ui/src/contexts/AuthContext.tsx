@@ -9,6 +9,8 @@ import {
   signOut as firebaseSignOut,
 } from '../config/firebase';
 import { UsersService } from '@moijia/client';
+import { queryClient } from '../config/queryClient';
+import { logOutRevenueCat } from '../services/revenueCat';
 
 interface AuthContextType {
   user: User | null;
@@ -87,6 +89,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [applyUser]);
 
   const signOut = useCallback(async () => {
+    await logOutRevenueCat();
+    queryClient.clear();
     await firebaseSignOut();
     applyUser(null);
   }, [applyUser]);

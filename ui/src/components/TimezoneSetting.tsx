@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -12,30 +12,25 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { getTimeZones, rawTimeZones, type TimeZone } from '@vvo/tzdb';
 import { Colors, Fonts, Radius } from '../constants/theme';
 import { useCurrentUserContext } from '../contexts/CurrentUserContext';
 import { useUpdateUser } from '../hooks/api/useUsers';
 import { apiErrorMessage } from '../utils/apiErrors';
 
-const FALLBACK_ZONES = [
-  'Pacific/Honolulu',
-  'America/Anchorage',
-  'America/Los_Angeles',
-  'America/Denver',
-  'America/Chicago',
-  'America/New_York',
-  'America/Sao_Paulo',
-  'UTC',
-  'Europe/London',
-  'Europe/Paris',
-  'Europe/Berlin',
-  'Africa/Cairo',
-  'Asia/Dubai',
-  'Asia/Kolkata',
-  'Asia/Singapore',
-  'Asia/Tokyo',
-  'Australia/Sydney',
-];
+const ROW_HEIGHT = 64;
+
+type ZoneRow = {
+  id: string;
+  group: string[];
+  offsetMinutes: number;
+  offsetLabel: string;
+  title: string;
+  cities: string[];
+  country: string;
+  abbreviation: string;
+  search: string;
+};
 
 function deviceTimeZone(): string {
   try {
@@ -45,55 +40,153 @@ function deviceTimeZone(): string {
   }
 }
 
-function zoneOptions(): string[] {
-  const intl = Intl as typeof Intl & { supportedValuesOf?: (key: string) => string[] };
-  try {
-    const zones = intl.supportedValuesOf?.('timeZone');
-    if (zones && zones.length > 0) return [...zones];
-  } catch {
-    /* use the fallback list */
-  }
-  return FALLBACK_ZONES;
+function formatOffset(minutes: number): string {
+  const sign = minutes >= 0 ? '+' : '-';
+  const abs = Math.abs(minutes);
+  const hours = String(Math.floor(abs / 60)).padStart(2, '0');
+  const mins = String(abs % 60).padStart(2, '0');
+  return `GMT${sign}${hours}:${mins}`;
 }
 
-function zoneTitle(timeZone: string): string {
-  try {
-    const name = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'longGeneric' })
-      .formatToParts(new Date())
-      .find((part) => part.type === 'timeZoneName')?.value;
-    if (name) return name;
-  } catch {
-    /* show the id */
-  }
-  return timeZone.replace(/_/g, ' ');
+function fold(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/_/g, ' ')
+    .replace(/['’.]/g, '');
 }
 
-function zoneCity(timeZone: string): string {
-  const city = timeZone.split('/').pop() || timeZone;
-  return city.replace(/_/g, ' ');
+function offsetSearch(minutes: number): string {
+  const sign = minutes >= 0 ? '+' : '-';
+  const abs = Math.abs(minutes);
+  const hours = Math.floor(abs / 60);
+  const mins = abs % 60;
+  const hh = String(hours).padStart(2, '0');
+  const mm = String(mins).padStart(2, '0');
+  const clock = mins === 0 ? `${sign}${hours}` : `${sign}${hours}:${mm}`;
+  return `gmt${sign}${hh}:${mm} gmt${clock} utc${sign}${hh}:${mm} utc${clock} ${sign}${hh}:${mm}`;
+}
+
+function toRow(zone: TimeZone): ZoneRow {
+  const utc = zone.group.includes('UTC');
+  const cities = utc ? [] : zone.mainCities.filter(Boolean);
+  const title = utc ? 'Coordinated Universal Time' : zone.alternativeName;
+  const offsetLabel = formatOffset(zone.currentTimeOffsetInMinutes);
+  const search = [
+    offsetLabel,
+    offsetSearch(zone.currentTimeOffsetInMinutes),
+    title,
+    zone.alternativeName,
+    zone.abbreviation,
+    zone.dstAbbreviation,
+    zone.currentAbbreviation,
+    ...cities,
+    zone.countryName,
+    zone.continentName,
+    ...zone.group,
+  ]
+    .filter(Boolean)
+    .join(' ');
+  return {
+    id: utc ? 'UTC' : zone.name,
+    group: zone.group,
+    offsetMinutes: zone.currentTimeOffsetInMinutes,
+    offsetLabel,
+    title,
+    cities,
+    country: zone.countryName,
+    abbreviation: zone.currentAbbreviation,
+    search: fold(search),
+  };
+}
+
+function catalog(): ZoneRow[] {
+  const live = getTimeZones({ includeUtc: true });
+  const known = new Set(live.map((zone) => zone.name));
+  const missing: TimeZone[] = rawTimeZones
+    .filter((zone) => !known.has(zone.name))
+    .map((zone) => ({
+      ...zone,
+      currentTimeOffsetInMinutes: zone.rawOffsetInMinutes,
+      currentTimeFormat: zone.rawFormat,
+      currentAbbreviation: zone.abbreviation,
+    }));
+  const rows = [...live, ...missing].map(toRow);
+  if (missing.length > 0) {
+    rows.sort(
+      (a, b) =>
+        a.offsetMinutes - b.offsetMinutes ||
+        a.title.localeCompare(b.title) ||
+        (a.cities[0] || '').localeCompare(b.cities[0] || '')
+    );
+  }
+  return rows;
+}
+
+let cachedZones: ZoneRow[] | null = null;
+function allZones(): ZoneRow[] {
+  if (!cachedZones) cachedZones = catalog();
+  return cachedZones;
+}
+
+function matches(row: ZoneRow, timeZone: string): boolean {
+  return row.id === timeZone || row.group.includes(timeZone);
+}
+
+function primaryLabel(row: ZoneRow): string {
+  const city = row.cities[0];
+  if (!city) return `(${row.offsetLabel}) ${row.title}`;
+  return `(${row.offsetLabel}) ${row.title} — ${city}`;
+}
+
+function secondaryLabel(row: ZoneRow): string {
+  const rest = row.cities.slice(1).join(', ');
+  const abbr = row.abbreviation && !/^GMT/i.test(row.abbreviation) && row.abbreviation !== 'UTC'
+    ? row.abbreviation
+    : '';
+  return [rest, row.country, abbr].filter(Boolean).join(' · ');
+}
+
+function closedValue(row: ZoneRow | undefined, selected: string): string {
+  if (!row) return selected.replace(/_/g, ' ');
+  const city = row.cities[0];
+  return city ? `${city} · ${row.title}` : row.title;
 }
 
 export function TimezoneSetting() {
   const insets = useSafeAreaInsets();
   const { user, userId } = useCurrentUserContext();
   const updateUser = useUpdateUser(userId ?? '');
+  const listRef = useRef<FlatList<ZoneRow>>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [error, setError] = useState('');
   const [pendingZone, setPendingZone] = useState<string | null>(null);
   const selected = user?.timeZone?.trim() || deviceTimeZone();
-  const zones = useMemo(() => zoneOptions(), []);
+  const zones = useMemo(() => allZones(), []);
+  const selectedRow = useMemo(
+    () => zones.find((zone) => matches(zone, selected)),
+    [zones, selected]
+  );
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = fold(query.trim());
     if (!q) return zones;
-    return zones.filter((zone) => {
-      const haystack = `${zone} ${zoneTitle(zone)} ${zoneCity(zone)}`.toLowerCase();
-      return haystack.includes(q);
-    });
+    return zones.filter((zone) => zone.search.includes(q));
   }, [query, zones]);
 
+  useEffect(() => {
+    if (!open || query) return;
+    const index = zones.findIndex((zone) => matches(zone, selected));
+    if (index <= 0) return;
+    const frame = requestAnimationFrame(() => {
+      listRef.current?.scrollToIndex({ index, viewPosition: 0.3, animated: false });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [open, query, zones, selected]);
+
   const choose = async (timeZone: string) => {
-    if (!userId || timeZone === selected) {
+    if (!userId || timeZone === selected || zones.some((zone) => zone.id === timeZone && matches(zone, selected))) {
       setOpen(false);
       return;
     }
@@ -123,12 +216,14 @@ export function TimezoneSetting() {
         <View style={styles.rowText}>
           <Text style={styles.label}>Time zone</Text>
           <Text style={styles.value} numberOfLines={1}>
-            {zoneTitle(selected)}
+            {closedValue(selectedRow, selected)}
           </Text>
         </View>
-        <Text style={styles.city} numberOfLines={1}>
-          {zoneCity(selected)}
-        </Text>
+        {selectedRow ? (
+          <Text style={styles.offset} numberOfLines={1}>
+            {selectedRow.offsetLabel}
+          </Text>
+        ) : null}
         <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
       </TouchableOpacity>
 
@@ -143,7 +238,7 @@ export function TimezoneSetting() {
           <TextInput
             value={query}
             onChangeText={setQuery}
-            placeholder="Search cities"
+            placeholder="Search cities, countries, or offsets"
             placeholderTextColor={Colors.textMuted}
             style={styles.search}
             autoCapitalize="none"
@@ -152,22 +247,39 @@ export function TimezoneSetting() {
           />
           {error ? <Text style={styles.error}>{error}</Text> : null}
           <FlatList
+            ref={listRef}
+            style={styles.list}
             data={filtered}
-            keyExtractor={(item) => item}
+            keyExtractor={(item) => item.id}
             keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            getItemLayout={(_, index) => ({ length: ROW_HEIGHT, offset: ROW_HEIGHT * index, index })}
+            onScrollToIndexFailed={(info) => {
+              listRef.current?.scrollToOffset({
+                offset: info.averageItemLength * info.index,
+                animated: false,
+              });
+            }}
             renderItem={({ item }) => {
-              const active = item === selected;
+              const active = matches(item, selected);
+              const secondary = secondaryLabel(item);
               return (
                 <TouchableOpacity
                   style={styles.option}
-                  onPress={() => void choose(item)}
+                  onPress={() => void choose(item.id)}
                   disabled={pendingZone !== null}
                 >
                   <View style={styles.rowText}>
-                    <Text style={styles.optionTitle}>{zoneTitle(item)}</Text>
-                    <Text style={styles.optionId}>{item}</Text>
+                    <Text style={styles.optionTitle} numberOfLines={2}>
+                      {primaryLabel(item)}
+                    </Text>
+                    {secondary ? (
+                      <Text style={styles.optionId} numberOfLines={1}>
+                        {secondary}
+                      </Text>
+                    ) : null}
                   </View>
-                  {pendingZone === item ? (
+                  {pendingZone === item.id ? (
                     <ActivityIndicator size="small" color={Colors.textSub} />
                   ) : active ? (
                     <Ionicons name="checkmark" size={18} color={Colors.text} />
@@ -194,7 +306,12 @@ const styles = StyleSheet.create({
   rowText: { flex: 1, minWidth: 0, gap: 2 },
   label: { fontSize: 14, fontFamily: Fonts.regular, color: Colors.textMuted, opacity: 0.65 },
   value: { fontSize: 14, fontFamily: Fonts.medium, color: Colors.text },
-  city: { fontSize: 14, fontFamily: Fonts.medium, color: Colors.textMuted, maxWidth: 120 },
+  offset: {
+    fontSize: 13,
+    fontFamily: Fonts.medium,
+    color: Colors.textSub,
+    fontVariant: ['tabular-nums'],
+  },
   modal: { flex: 1, backgroundColor: Colors.bg },
   modalHeader: {
     flexDirection: 'row',
@@ -218,11 +335,12 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   error: { color: Colors.notGoing, fontFamily: Fonts.regular, fontSize: 13, paddingHorizontal: 16, paddingBottom: 8 },
+  list: { flex: 1 },
   option: {
+    height: ROW_HEIGHT,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    paddingVertical: 12,
     paddingHorizontal: 16,
     borderTopWidth: 1,
     borderTopColor: Colors.border,

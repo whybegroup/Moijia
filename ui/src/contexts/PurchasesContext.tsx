@@ -8,14 +8,24 @@ import {
   identifyRevenueCatUser,
   isAlreadyPurchased,
   isPurchaseCancelled,
-  logOutRevenueCat,
   purchasePro as purchaseProRc,
   purchasesErrorMessage,
   restorePurchases as restoreRevenueCatPurchases,
 } from '../services/revenueCat';
 import { presentCurrentPaywall, presentMoijiaCustomerCenter, type ProPaywallOutcome } from '../services/revenueCatUi';
-import { UsersService } from '@moijia/client';
+import { UsersService, type OwnedGroupQuota } from '@moijia/client';
 import { queryClient, queryKeys } from '../config/queryClient';
+
+function logBilling(action: string, userId: string, quota: OwnedGroupQuota) {
+  const at = (value: Date | string | null | undefined) => {
+    if (!value) return 'none';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? 'none' : date.toISOString();
+  };
+  console.log(
+    `[billing] ${action} ${userId}: plan=${quota.planLabel} tier=${quota.subscriptionTier} price=${quota.priceLabel ?? 'none'} ${quota.periodLabel ?? 'period'}=${at(quota.subscriptionExpiresAt)} started=${at(quota.subscriptionStartedAt)} renewing=${quota.subscriptionWillRenew ?? false} downgrade=${at(quota.plannedDowngradeAt)} grace=${quota.graceStarted}`
+  );
+}
 
 type PurchasesContextValue = {
   ready: boolean;
@@ -40,15 +50,16 @@ export const PurchasesProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [ready, setReady] = useState(false);
   const [customerInfo, setCustomerInfo] = useState<CustomerInfo | null>(null);
 
-  const refreshBilling = useCallback(async () => {
+  const refreshBilling = useCallback(async (action = 'sync') => {
     if (!user?.uid) return;
     try {
-      await UsersService.syncBilling(user.uid);
+      const quota = await UsersService.syncBilling(user.uid);
+      logBilling(action, user.uid, quota);
       await queryClient.invalidateQueries({ queryKey: queryKeys.groups._base });
       await queryClient.invalidateQueries({ queryKey: queryKeys.users.quota(user.uid) });
       await queryClient.invalidateQueries({ queryKey: queryKeys.users.detail(user.uid) });
-    } catch {
-      /* store refresh is best-effort */
+    } catch (err) {
+      console.warn(`[billing] ${action} failed for ${user.uid}`, err);
     }
   }, [user?.uid]);
 
@@ -58,7 +69,7 @@ export const PurchasesProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     const run = async () => {
       if (!user) {
-        await logOutRevenueCat().catch(() => undefined);
+        console.log('[billing] signed out');
         if (!cancelled) {
           setCustomerInfo(null);
           setReady(false);
@@ -67,15 +78,20 @@ export const PurchasesProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
 
       try {
-        const info = await identifyRevenueCatUser({
-          appUserID: user.uid,
-          email: user.email,
+        console.log(`[billing] sign-in ${user.uid}`);
+        const name = user.displayName || user.email?.split('@')[0] || 'User';
+        await UsersService.syncUser({
+          id: user.uid,
+          name,
+          displayName: name,
+          email: user.email ?? null,
         });
+        const info = await identifyRevenueCatUser(user.uid);
         if (!cancelled) {
           setCustomerInfo(info);
           setReady(true);
         }
-        await refreshBilling();
+        await refreshBilling('sign-in');
       } catch {
         if (!cancelled) {
           setCustomerInfo(null);
@@ -92,17 +108,17 @@ export const PurchasesProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   useEffect(() => {
     return addCustomerInfoListener(() => {
-      void refreshBilling();
+      void refreshBilling('store update');
     });
   }, [refreshBilling]);
 
   useEffect(() => {
     if (!user) return;
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') void refreshBilling();
+      if (state === 'active') void refreshBilling('foreground');
     });
     const onVisible = () => {
-      if (document.visibilityState === 'visible') void refreshBilling();
+      if (document.visibilityState === 'visible') void refreshBilling('foreground');
     };
     if (Platform.OS === 'web') document.addEventListener('visibilitychange', onVisible);
     return () => {
@@ -113,29 +129,31 @@ export const PurchasesProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const presentPaywall = useCallback(async (): Promise<ProPaywallOutcome> => {
     const outcome = await presentCurrentPaywall();
-    await refreshBilling();
+    console.log(`[billing] paywall ${outcome}`);
+    await refreshBilling('paywall');
     return outcome;
   }, [refreshBilling]);
 
   const presentCustomerCenter = useCallback(async () => {
     const info = customerInfo ?? (await getCustomerInfo().catch(() => null));
     if (info) setCustomerInfo(info);
+    console.log('[billing] customer center');
     await presentMoijiaCustomerCenter(() => {
-      void refreshBilling();
+      void refreshBilling('customer center');
     });
-    await refreshBilling();
+    await refreshBilling('customer center');
   }, [customerInfo, refreshBilling]);
 
   const purchasePro = useCallback(async (): Promise<CustomerInfo | null> => {
     try {
       const info = await purchaseProRc();
       setCustomerInfo(info);
-      await refreshBilling();
+      await refreshBilling('purchase');
       return info;
     } catch (error) {
       if (isPurchaseCancelled(error)) return null;
       if (isAlreadyPurchased(error)) {
-        await refreshBilling();
+        await refreshBilling('purchase');
         return getCustomerInfo().catch(() => null);
       }
       throw new Error(purchasesErrorMessage(error, 'Could not complete purchase.'));
@@ -145,7 +163,7 @@ export const PurchasesProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const restorePurchases = useCallback(async () => {
     const info = await restoreRevenueCatPurchases();
     setCustomerInfo(info);
-    await refreshBilling();
+    await refreshBilling('restore');
     return info;
   }, [refreshBilling]);
 

@@ -1,6 +1,6 @@
-# moijia API
+# Moijia API
 
-REST API for moijia - A social event planning platform for groups.
+REST API for Moijia - A social event planning platform for groups.
 
 ## EC2
 
@@ -69,7 +69,7 @@ npm start
 
 ## Architecture Overview
 
-moijia uses a **code-first approach** with TypeScript as the single source of truth:
+Moijia uses a **code-first approach** with TypeScript as the single source of truth:
 
 1. **TypeScript Models**: Define data structures once in TypeScript interfaces
 2. **Controllers**: Define API endpoints with tsoa decorators
@@ -665,7 +665,7 @@ Controls API generation:
     "outputDirectory": ".",
     "specVersion": 3,
     "yaml": true,
-    "name": "moijia API",
+    "name": "Moijia API",
     "version": "1.0.0"
   },
   "routes": {

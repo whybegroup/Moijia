@@ -29,7 +29,7 @@ const plugins = [
     },
   ],
   'expo-web-browser',
-  ['expo-audio', { microphonePermission: 'moijia can record video with sound.', recordAudioAndroid: true }],
+  ['expo-audio', { microphonePermission: 'Moijia can record video with sound.', recordAudioAndroid: true }],
   'expo-video',
   [
     'expo-build-properties',
@@ -55,23 +55,23 @@ const plugins = [
   [
     'expo-image-picker',
     {
-      photosPermission: 'moijia needs access to your photos and videos to upload them.',
-      cameraPermission: 'moijia can use the camera to add photos and videos.',
-      microphonePermission: 'moijia can record video with sound.',
+      photosPermission: 'Moijia needs access to your photos and videos to upload them.',
+      cameraPermission: 'Moijia can use the camera to add photos and videos.',
+      microphonePermission: 'Moijia can record video with sound.',
     },
   ],
   [
     'expo-location',
     {
       locationWhenInUsePermission:
-        'moijia uses your location to suggest nearby places when setting an event location.',
+        'Moijia uses your location to suggest nearby places when setting an event location.',
     },
   ],
   [
     'expo-calendar',
     {
-      calendarPermission: 'moijia can add this event to Apple Calendar.',
-      remindersPermission: 'moijia can add this event to Apple Calendar.',
+      calendarPermission: 'Moijia can add this event to Apple Calendar.',
+      remindersPermission: 'Moijia can add this event to Apple Calendar.',
     },
   ],
 ];
@@ -81,7 +81,7 @@ if (iosUrlScheme) {
 
 module.exports = {
   expo: {
-    name: 'moijia',
+    name: 'Moijia',
     slug: 'moijia',
     version: '1.0.0',
     orientation: 'portrait',
@@ -100,12 +100,12 @@ module.exports = {
       associatedDomains: ['applinks:moijia.com', 'applinks:moijia.com?mode=developer'],
       useFrameworks: 'static',
       infoPlist: {
-        NSCalendarsUsageDescription: 'moijia can add this event to Apple Calendar.',
-        NSCalendarsFullAccessUsageDescription: 'moijia can add this event to Apple Calendar.',
+        NSCalendarsUsageDescription: 'Moijia can add this event to Apple Calendar.',
+        NSCalendarsFullAccessUsageDescription: 'Moijia can add this event to Apple Calendar.',
         NSCalendarsWriteOnlyAccessUsageDescription:
-          'moijia can add this event to Apple Calendar.',
-        NSRemindersUsageDescription: 'moijia can add this event to Apple Calendar.',
-        NSRemindersFullAccessUsageDescription: 'moijia can add this event to Apple Calendar.',
+          'Moijia can add this event to Apple Calendar.',
+        NSRemindersUsageDescription: 'Moijia can add this event to Apple Calendar.',
+        NSRemindersFullAccessUsageDescription: 'Moijia can add this event to Apple Calendar.',
         ITSAppUsesNonExemptEncryption: false,
       },
     },

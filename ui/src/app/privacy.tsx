@@ -16,8 +16,8 @@ export function PrivacyPolicyContent({ onOpenTerms }: { onOpenTerms: () => void 
   return (
     <>
       <LegalP>
-        This Privacy Policy explains how moijia (“moijia,” “we,” “us”) collects, uses, and
-        shares information when you use the moijia apps, website, and related services (the
+        This Privacy Policy explains how Moijia (“Moijia,” “we,” “us”) collects, uses, and
+        shares information when you use the Moijia apps, website, and related services (the
         “Service”).
       </LegalP>
 
@@ -45,7 +45,7 @@ export function PrivacyPolicyContent({ onOpenTerms }: { onOpenTerms: () => void 
 
       <LegalHeading>How we use information</LegalHeading>
       <LegalP>
-        We use this information to operate and improve moijia: authenticate you, show your
+        We use this information to operate and improve Moijia: authenticate you, show your
         groups and content, apply storage limits, process subscriptions, send notifications
         you opt into, keep the Service secure, and comply with law. We do not sell your
         personal information.
@@ -64,7 +64,7 @@ export function PrivacyPolicyContent({ onOpenTerms }: { onOpenTerms: () => void 
       </LegalP>
       <LegalP>
         Legal. We may disclose information if we believe it is required by law, to protect
-        moijia or our users, or in connection with a merger, sale, or similar transaction.
+        Moijia or our users, or in connection with a merger, sale, or similar transaction.
       </LegalP>
 
       <LegalHeading>Retention</LegalHeading>

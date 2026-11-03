@@ -131,9 +131,7 @@ export function NotificationsPanelCard({
                   <Text style={styles.ts} numberOfLines={1}>
                     {formatNotificationTimestamp(n.ts)}
                   </Text>
-                  <Text style={{ fontSize: 12, color: Colors.textSub }} numberOfLines={2}>
-                    {formatNotificationBody(n.body)}
-                  </Text>
+                  <Text style={styles.body}>{formatNotificationBody(n.body)}</Text>
                 </View>
               </TouchableOpacity>
             );
@@ -200,4 +198,5 @@ const styles = StyleSheet.create({
   },
   unreadDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: Colors.notGoing },
   ts: { fontSize: 11, fontFamily: Fonts.regular, color: Colors.textMuted, marginBottom: 2 },
+  body: { fontSize: 12, lineHeight: 17, color: Colors.textSub },
 });

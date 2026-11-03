@@ -17,6 +17,23 @@ import {
 
 let configureLock: Promise<void> | null = null;
 
+function rejectAnonymous(appUserID: string): void {
+  if (!appUserID.trim() || appUserID.startsWith('$')) {
+    throw new Error('RevenueCat requires a signed-in user. Refusing an anonymous customer.');
+  }
+}
+
+async function assertIdentifiedUser(): Promise<void> {
+  if (!(await Purchases.isConfigured())) {
+    throw new Error('RevenueCat requires a signed-in user. Refusing an anonymous customer.');
+  }
+  const appUserID = await Purchases.getAppUserID();
+  const anonymous = await Purchases.isAnonymous();
+  if (anonymous || !appUserID || appUserID.startsWith('$')) {
+    throw new Error(`RevenueCat is signed in as an anonymous customer (${appUserID || 'none'}).`);
+  }
+}
+
 function isPurchasesError(error: unknown): error is PurchasesError {
   return (
     typeof error === 'object' &&
@@ -39,6 +56,32 @@ export function isAlreadyPurchased(error: unknown): boolean {
   return /already (been )?purchased|already subscribed|already owned|product_already_purchased/i.test(
     message
   );
+}
+
+function errorText(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'object' && error !== null && 'message' in error) {
+    return String((error as { message: unknown }).message);
+  }
+  return '';
+}
+
+/** StoreKit handed back an expired sandbox transaction. The next purchase succeeds. */
+function isInvalidReceipt(error: unknown): boolean {
+  if (isPurchasesError(error) && error.code === PURCHASES_ERROR_CODE.INVALID_RECEIPT_ERROR) {
+    return true;
+  }
+  return /receipt is not valid|missing in the receipt|invalid_receipt/i.test(errorText(error));
+}
+
+async function purchaseOnceMore<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    if (isPurchaseCancelled(error) || !isInvalidReceipt(error)) throw error;
+    console.warn('[revenuecat] StoreKit returned an expired receipt. Purchasing again.');
+    return run();
+  }
 }
 
 export function isPurchaseCancelled(error: unknown): boolean {
@@ -64,12 +107,39 @@ export function purchasesErrorMessage(error: unknown, fallback = 'Something went
   return fallback;
 }
 
+function installRevenueCatLogHandler(): void {
+  Purchases.setLogHandler((logLevel, message) => {
+    if (/purchase(s)? (was )?cancelled|user cancelled/i.test(message)) {
+      console.log(`[RevenueCat] ${message}`);
+      return;
+    }
+    switch (logLevel) {
+      case LOG_LEVEL.DEBUG:
+        console.debug(`[RevenueCat] ${message}`);
+        break;
+      case LOG_LEVEL.INFO:
+        console.info(`[RevenueCat] ${message}`);
+        break;
+      case LOG_LEVEL.WARN:
+        console.warn(`[RevenueCat] ${message}`);
+        break;
+      case LOG_LEVEL.ERROR:
+        console.error(`[RevenueCat] ${message}`);
+        break;
+      default:
+        console.log(`[RevenueCat] ${message}`);
+    }
+  });
+}
+
 export async function configureRevenueCat(appUserID: string): Promise<void> {
+  rejectAnonymous(appUserID);
+  installRevenueCatLogHandler();
   if (configureLock) {
     await configureLock;
   } else {
     configureLock = (async () => {
-      await Purchases.setLogLevel(__DEV__ ? LOG_LEVEL.DEBUG : LOG_LEVEL.ERROR);
+      await Purchases.setLogLevel(__DEV__ ? LOG_LEVEL.INFO : LOG_LEVEL.WARN);
       if (await Purchases.isConfigured()) return;
       Purchases.configure({
         apiKey: getRevenueCatApiKey(),
@@ -89,17 +159,12 @@ export async function configureRevenueCat(appUserID: string): Promise<void> {
   }
 }
 
-export async function identifyRevenueCatUser(input: {
-  appUserID: string;
-  email?: string | null;
-}): Promise<CustomerInfo> {
-  await configureRevenueCat(input.appUserID);
-  const { customerInfo } = await Purchases.logIn(input.appUserID);
-  const email = input.email?.trim() || '';
-  if (email) {
-    await Purchases.setAttributes({ $email: email }).catch(() => undefined);
-    await Purchases.setEmail(email).catch(() => undefined);
-  }
+export async function identifyRevenueCatUser(appUserID: string): Promise<CustomerInfo> {
+  rejectAnonymous(appUserID);
+  await configureRevenueCat(appUserID);
+  const { customerInfo, created } = await Purchases.logIn(appUserID);
+  if (created) console.log(`[revenuecat] created customer ${appUserID}`);
+  await assertIdentifiedUser();
   if (Platform.OS === 'ios' || Platform.OS === 'android') {
     try {
       await Purchases.showInAppMessages();
@@ -110,17 +175,27 @@ export async function identifyRevenueCatUser(input: {
   return customerInfo;
 }
 
+/**
+ * Drop the cached customer without calling `Purchases.logOut()`.
+ * That call always mints a `$RCAnonymousID` and then posts attributes such as
+ * `$attConsentStatus`. RevenueCat returns "subscriber was not found" for that
+ * id, including while the login screen is waiting for an account.
+ * The next sign-in calls `Purchases.logIn` with the chosen user id.
+ */
 export async function logOutRevenueCat(): Promise<void> {
   if (!(await Purchases.isConfigured())) return;
-  try {
-    await Purchases.logOut();
-  } catch (error) {
-    if (purchasesErrorMessage(error, '').toLowerCase().includes('anonymous')) return;
-    throw error;
+  const appUserID = await Purchases.getAppUserID();
+  if (!appUserID || appUserID.startsWith('$') || (await Purchases.isAnonymous())) {
+    throw new Error(
+      `RevenueCat cannot log out because the user id does not exist (${appUserID || 'none'}).`
+    );
   }
+  await Purchases.invalidateCustomerInfoCache();
+  configureLock = null;
 }
 
 export async function getCustomerInfo(): Promise<CustomerInfo> {
+  await assertIdentifiedUser();
   return Purchases.getCustomerInfo();
 }
 
@@ -159,10 +234,12 @@ function packageForPro(offering: PurchasesOffering): PurchasesPackage | null {
 }
 
 export async function purchasePro(): Promise<CustomerInfo> {
+  await assertIdentifiedUser();
   const products = await Purchases.getProducts([PRO_PRODUCT_ID]);
   const product = products[0];
   if (product) {
-    const { customerInfo } = await Purchases.purchaseStoreProduct(product);
+    const { customerInfo } = await purchaseOnceMore(() => Purchases.purchaseStoreProduct(product));
+    await assertIdentifiedUser();
     return customerInfo;
   }
   const offering = await getProOffering();
@@ -172,10 +249,14 @@ export async function purchasePro(): Promise<CustomerInfo> {
       'Pro is not available from the App Store. In RevenueCat, attach Apple product pro_subscription to the current offering.'
     );
   }
-  const { customerInfo } = await Purchases.purchasePackage(pkg);
+  const { customerInfo } = await purchaseOnceMore(() => Purchases.purchasePackage(pkg));
+  await assertIdentifiedUser();
   return customerInfo;
 }
 
 export async function restorePurchases(): Promise<CustomerInfo> {
-  return Purchases.restorePurchases();
+  await assertIdentifiedUser();
+  const customerInfo = await Purchases.restorePurchases();
+  await assertIdentifiedUser();
+  return customerInfo;
 }

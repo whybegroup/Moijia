@@ -16,14 +16,14 @@ export function TermsOfServiceContent({ onOpenPrivacy }: { onOpenPrivacy: () => 
   return (
     <>
       <LegalP>
-        These Terms of Service (“Terms”) are an agreement between you and moijia (“moijia,”
-        “we,” “us”) for use of the moijia apps, website, and related services (the “Service”).
+        These Terms of Service (“Terms”) are an agreement between you and Moijia (“Moijia,”
+        “we,” “us”) for use of the Moijia apps, website, and related services (the “Service”).
         By creating an account or using the Service, you agree to these Terms.
       </LegalP>
 
       <LegalHeading>The Service</LegalHeading>
       <LegalP>
-        moijia is a group workspace for events, polls, posts, comments, and shared media
+        Moijia is a group workspace for events, polls, posts, comments, and shared media
         storage. Features may change as we improve the product.
       </LegalP>
 
@@ -38,7 +38,7 @@ export function TermsOfServiceContent({ onOpenPrivacy }: { onOpenPrivacy: () => 
       <LegalHeading>Groups and content</LegalHeading>
       <LegalP>
         You retain ownership of content you post (text, photos, videos, files, and similar
-        material). You grant moijia a limited license to host, store, display, and transmit
+        material). You grant Moijia a limited license to host, store, display, and transmit
         that content so we can operate the Service, including sharing it with other members
         of groups you join or create.
       </LegalP>
@@ -83,12 +83,12 @@ export function TermsOfServiceContent({ onOpenPrivacy }: { onOpenPrivacy: () => 
       <LegalP>
         You may not misuse the Service, including by attempting to break into accounts or
         systems, scraping at a scale that harms the Service, uploading malware, or using
-        moijia to send spam. We may rate-limit or block traffic that threatens the Service.
+        Moijia to send spam. We may rate-limit or block traffic that threatens the Service.
       </LegalP>
 
       <LegalHeading>Intellectual property</LegalHeading>
       <LegalP>
-        The Service, including the moijia name, design, and software, is owned by us or our
+        The Service, including the Moijia name, design, and software, is owned by us or our
         licensors. These Terms do not give you a right to copy or resell the Service.
       </LegalP>
 
@@ -102,7 +102,7 @@ export function TermsOfServiceContent({ onOpenPrivacy }: { onOpenPrivacy: () => 
 
       <LegalHeading>Limitation of liability</LegalHeading>
       <LegalP>
-        To the fullest extent allowed by law, moijia is not liable for indirect, incidental,
+        To the fullest extent allowed by law, Moijia is not liable for indirect, incidental,
         special, consequential, or punitive damages, or for lost data, profits, or goodwill.
         Our total liability for any claim relating to the Service is limited to the greater
         of (a) the amounts you paid us for the Service in the 12 months before the claim or

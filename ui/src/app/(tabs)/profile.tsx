@@ -29,11 +29,13 @@ import { deleteManagedUploadFireAndForget } from '../../services/managedUploadDe
 import {
   changePassword,
   deleteCurrentUser,
+  signOut as firebaseSignOut,
   hasPasswordProvider,
   oauthPasswordHint,
   signInProviderLabels,
 } from '../../config/firebase';
 import { apiErrorMessage } from '../../utils/apiErrors';
+import { queryClient } from '../../config/queryClient';
 import { logOutRevenueCat } from '../../services/revenueCat';
 
 function alertMessage(title: string, message: string) {
@@ -332,14 +334,15 @@ export default function ProfileScreen() {
 
   const performDeleteAccount = async () => {
     try {
+      await logOutRevenueCat();
+      queryClient.clear();
       if (userId) {
         await deleteUser.mutateAsync(userId);
       }
-      await logOutRevenueCat().catch(() => undefined);
       try {
         await deleteCurrentUser();
       } catch {
-        await signOut();
+        await firebaseSignOut();
       }
     } catch (e) {
       const msg = apiErrorMessage(e, 'Failed to delete account');

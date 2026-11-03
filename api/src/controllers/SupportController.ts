@@ -17,7 +17,7 @@ function recentSends(email: string): number[] {
 export class SupportController extends Controller {
   /**
    * Send a support message
-   * @summary Delivers the support form to the moijia inbox
+   * @summary Delivers the support form to the Moijia inbox
    */
   @Post()
   @Response(400, 'Invalid request')

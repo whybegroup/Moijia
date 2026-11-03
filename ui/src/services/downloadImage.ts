@@ -18,7 +18,7 @@ function extensionFromUrl(url: string): string {
 
 function fileNameFromUrl(url: string): string {
   const ext = extensionFromUrl(url);
-  return `moijia-${Date.now()}.${ext}`;
+  return `Moijia-${Date.now()}.${ext}`;
 }
 
 async function resolveDownloadUri(

@@ -1,4 +1,5 @@
 import { Alert, Image, Platform } from 'react-native';
+import { getRecordingPermissionsAsync, requestRecordingPermissionsAsync } from 'expo-audio';
 import { File as ExpoFile } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
@@ -23,6 +24,7 @@ import {
   setUploadFileFraction,
   withUploadSession,
 } from './uploadProgress';
+import { requestPermissionPrompt, settlePresentingModal } from '../utils/permissions';
 
 export type UploadOpts = { groupId?: string };
 
@@ -260,14 +262,20 @@ export async function pickImagesFromLibrary(opts?: {
   userId?: string;
   groupId?: string;
 }): Promise<PickedImageAsset[]> {
+  await settlePresentingModal();
   if (!(await ensureGroupCanUpload(opts?.userId, opts?.groupId))) {
     throw new Error('cancelled');
   }
   const multiple = opts?.multiple ?? true;
-  const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-  if (perm.status !== 'granted') {
-    throw new Error('Photo library access is required to upload photos and videos.');
-  }
+  const allowed = await requestPermissionPrompt(
+    () => ImagePicker.getMediaLibraryPermissionsAsync(),
+    () => ImagePicker.requestMediaLibraryPermissionsAsync(),
+    {
+      title: 'Photo library',
+      message: 'Allow photo library access in Settings to upload photos and videos.',
+    },
+  );
+  if (!allowed) throw new Error('cancelled');
 
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ['images', 'videos'],
@@ -301,12 +309,28 @@ async function androidCameraMediaType(): Promise<'images' | 'videos'> {
 
 /** Opens the camera; throws `cancelled` if the user backs out. */
 export async function pickImageFromCamera(): Promise<PickedImageAsset> {
-  const perm = await ImagePicker.requestCameraPermissionsAsync();
-  if (perm.status !== 'granted') {
-    throw new Error('Camera access is required to take photos and videos.');
-  }
+  await settlePresentingModal();
+  const cameraAllowed = await requestPermissionPrompt(
+    () => ImagePicker.getCameraPermissionsAsync(),
+    () => ImagePicker.requestCameraPermissionsAsync(),
+    {
+      title: 'Camera',
+      message: 'Allow camera access in Settings to take photos and videos.',
+    },
+  );
+  if (!cameraAllowed) throw new Error('cancelled');
   const mediaTypes: Array<'images' | 'videos'> =
     Platform.OS === 'android' ? [await androidCameraMediaType()] : ['images', 'videos'];
+  if (mediaTypes.includes('videos')) {
+    await requestPermissionPrompt(
+      () => getRecordingPermissionsAsync(),
+      () => requestRecordingPermissionsAsync(),
+      {
+        title: 'Microphone',
+        message: 'Allow microphone access in Settings to record video with sound.',
+      },
+    );
+  }
   const result = await ImagePicker.launchCameraAsync({
     mediaTypes,
     quality: 1,

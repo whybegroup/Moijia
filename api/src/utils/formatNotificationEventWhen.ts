@@ -72,3 +72,13 @@ export function timeSuggestionNotificationBody(
 ): string {
   return `${suggesterName} suggested ${formatNotificationEventWhen(start, timeZone, false)} for "${eventName}"`;
 }
+
+export function eventReminderNotificationBody(
+  name: string,
+  start: Date,
+  timeZone?: string | null,
+  isAllDay?: boolean | null
+): string {
+  const when = formatNotificationEventWhen(start, timeZone, isAllDay);
+  return isAllDay ? `${name} is ${when}` : `${name} starts ${when}`;
+}

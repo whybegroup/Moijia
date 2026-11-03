@@ -1,36 +1,10 @@
-import fs from 'fs';
-import path from 'path';
-
 const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL?.trim() || 'support@moijia.com';
 const NOREPLY_EMAIL = process.env.NOREPLY_EMAIL?.trim() || 'noreply@moijia.com';
+const MAIL_ICON_URL = 'https://api.moijia.com/email/favicon.png';
 export const MAIL_FOOTER = [
   'Your right to cancel: You may cancel Pro at any time. Cancel at least 24 hours before the end of the current billing period to avoid the next charge. Pro stays active through the remainder of the paid period. After Pro expires, groups stay for half of that billing period. Then only the top two groups in My Groups are kept and become Small (1 GB). Every other group you own is permanently deleted, including its files. Reorder My Groups before that date to choose which two to keep. Manage or cancel the subscription in your Apple App Store or Google Play account settings. Deleting the app does not cancel a subscription. Refunds and billing disputes are handled by the store that charged you. We reserve the right to change pricing and will try to notify you in advance of a change.',
-  'moijia may use your data to operate and improve the Service and to send you information about your account. You can change notification preferences in the app. We use your data as described in our Privacy Policy at https://moijia.com/privacy.',
+  'Moijia may use your data to operate and improve the Service and to send you information about your account. You can change notification preferences in the app. We use your data as described in our Privacy Policy at https://moijia.com/privacy.',
 ];
-const MAIL_ICON_CID = 'favicon';
-const MAIL_ICON_PATH = path.resolve(__dirname, '../../assets/favicon.png');
-
-type MailAttachment = {
-  filename: string;
-  content: string;
-  content_id: string;
-  content_type: string;
-};
-
-function mailIconAttachment(): MailAttachment | null {
-  try {
-    if (!fs.existsSync(MAIL_ICON_PATH)) return null;
-    return {
-      filename: 'favicon.png',
-      content: fs.readFileSync(MAIL_ICON_PATH).toString('base64'),
-      content_id: MAIL_ICON_CID,
-      content_type: 'image/png',
-    };
-  } catch {
-    return null;
-  }
-}
-
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -85,7 +59,7 @@ export function buildReceiptHtml(input: {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>moijia</title>
+  <title>Moijia</title>
 </head>
 <body style="margin:0;padding:0;background-color:#ffffff;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff">
@@ -94,7 +68,7 @@ export function buildReceiptHtml(input: {
         <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:560px;">
           <tr>
             <td align="center" style="padding:0 0 20px;">
-              <img src="cid:${MAIL_ICON_CID}" width="96" height="96" alt="moijia" style="display:block;border:0;outline:none;width:96px;height:96px;border-radius:20px;" />
+              <img src="${MAIL_ICON_URL}" width="96" height="96" alt="Moijia" style="display:block;border:0;outline:none;width:96px;height:96px;border-radius:20px;" />
             </td>
           </tr>
           <tr>
@@ -126,7 +100,6 @@ type OutboundMail = {
   text: string;
   html?: string;
   replyTo?: string;
-  attachments?: MailAttachment[];
 };
 
 async function deliver(input: OutboundMail): Promise<void> {
@@ -148,14 +121,14 @@ async function deliver(input: OutboundMail): Promise<void> {
       text: input.text,
       ...(input.html ? { html: input.html } : {}),
       ...(input.replyTo ? { reply_to: input.replyTo } : {}),
-      ...(input.attachments?.length ? { attachments: input.attachments } : {}),
     }),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    console.warn(`[mail] Resend ${res.status}: ${body}`);
+    console.warn(`[mail] Resend ${res.status} to ${input.to} — ${input.subject}: ${body}`);
     throw new Error('Could not send email.');
   }
+  console.log(`[mail] sent ${input.to} — ${input.subject}`);
 }
 
 export async function sendOwnerEmail(input: {
@@ -188,14 +161,12 @@ export async function sendOwnerEmail(input: {
     return;
   }
 
-  const icon = html ? mailIconAttachment() : null;
   await deliver({
     from: NOREPLY_EMAIL,
     to,
     subject: input.subject,
     text: input.text,
     html,
-    attachments: icon ? [icon] : undefined,
   });
 }
 
@@ -211,7 +182,7 @@ export async function sendSupportEmail(input: {
     from: SUPPORT_EMAIL,
     to: SUPPORT_EMAIL,
     replyTo: email,
-    subject: `moijia support from ${name}`,
+    subject: `Moijia support from ${name}`,
     text: `Name: ${name}\nEmail: ${email}\n\n${message}`,
   });
 }

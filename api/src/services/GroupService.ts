@@ -20,7 +20,8 @@ import {
   GroupStorageBreakdown,
   GroupStorageFileList,
 } from '../models';
-import { mergeNotifPrefs, parseNotifPrefsJson } from '../utils/notifPrefsCore';
+import { parseNotifPrefsJson } from '../utils/notifPrefsCore';
+import { displayedGroupEventReminder, persistMemberNotifPrefs } from '../utils/eventReminder';
 import { extractUploadUrlsFromForumBody } from '../utils/groupPostBodyUploads';
 import { NotificationService } from './NotificationService';
 import { S3UploadService } from './S3UploadService';
@@ -1848,7 +1849,6 @@ export class GroupService {
       },
       select: { notifPrefsJson: true },
     });
-    const merged = mergeNotifPrefs(parseNotifPrefsJson(member?.notifPrefsJson), prefs);
     await prisma.groupMember.updateMany({
       where: {
         groupId,
@@ -1856,7 +1856,7 @@ export class GroupService {
         status: 'active',
       },
       data: {
-        notifPrefsJson: JSON.stringify(merged),
+        notifPrefsJson: persistMemberNotifPrefs(member?.notifPrefsJson, prefs),
       },
     });
   }
@@ -1865,13 +1865,24 @@ export class GroupService {
    * Resolved per-group notification preferences (defaults applied).
    */
   public async getMemberNotifPrefs(groupId: string, userId: string): Promise<NotifPrefs> {
-    const member = await prisma.groupMember.findUnique({
-      where: {
-        groupId_userId: { groupId, userId },
-      },
-      select: { notifPrefsJson: true },
-    });
-    return parseNotifPrefsJson(member?.notifPrefsJson);
+    const [member, user] = await Promise.all([
+      prisma.groupMember.findUnique({
+        where: {
+          groupId_userId: { groupId, userId },
+        },
+        select: { notifPrefsJson: true },
+      }),
+      prisma.user.findUnique({
+        where: { id: userId },
+        select: { notifPrefsJson: true },
+      }),
+    ]);
+    const prefs = parseNotifPrefsJson(member?.notifPrefsJson);
+    prefs.eventReminder = displayedGroupEventReminder(user?.notifPrefsJson, member?.notifPrefsJson);
+    const { eventReminderCustomized: _flag, ...clean } = prefs as typeof prefs & {
+      eventReminderCustomized?: unknown;
+    };
+    return clean;
   }
 
   /**

@@ -1,4 +1,4 @@
-# moijia — Expo App
+# Moijia — Expo App
 
 LA Korean community event app. Built with Expo Router, React Native, TypeScript.
 

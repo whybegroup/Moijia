@@ -49,17 +49,11 @@ export function StoragePaywall({
     setError('');
     try {
       const info = await purchasePro();
-      if (!info) {
-        Toast.show({ type: 'info', text1: 'Purchase cancelled' });
-        return;
-      }
+      if (!info) return;
       Toast.show({ type: 'success', text1: 'You are on Pro' });
       onClose();
     } catch (e) {
-      if (isPurchaseCancelled(e)) {
-        Toast.show({ type: 'info', text1: 'Purchase cancelled' });
-        return;
-      }
+      if (isPurchaseCancelled(e)) return;
       setError(purchasesErrorMessage(e, 'Could not start Pro.'));
     } finally {
       setPurchasing(false);

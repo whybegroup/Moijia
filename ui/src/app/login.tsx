@@ -333,7 +333,7 @@ export default function LoginScreen() {
               <Image
                 source={require('../../assets/favicon.png')}
                 style={styles.modalLogo}
-                accessibilityLabel="moijia"
+                accessibilityLabel="Moijia"
               />
               <Text style={styles.sheetTitle}>
                 {emailMode === 'signup' ? 'Sign up' : 'Log in'}

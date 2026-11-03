@@ -4,8 +4,10 @@ import { HttpError } from '../utils/httpError';
 import { PRO_PRODUCT_ID } from '../utils/subscriptionTiers';
 import {
   fetchProSnapshot,
+  formatStoreSnapshot,
   proSnapshotFromWebhookEvent,
   revenueCatEventFromBody,
+  setRevenueCatEmail,
   type RevenueCatWebhookEvent,
 } from './RevenueCatService';
 
@@ -65,7 +67,9 @@ export async function handleRevenueCatWebhook(body: unknown): Promise<{ status: 
     throw err;
   }
   if (eventId) rememberEvent(eventId);
-  console.log(`[revenuecat] ${event.type} applied for ${userId}`);
+  console.log(
+    `[revenuecat] ${event.type} applied for ${userId}: ${formatStoreSnapshot(snapshot, event.product_id ?? event.new_product_id)}`
+  );
   return { status: 200, body: { ok: true } };
 }
 
@@ -83,6 +87,13 @@ export async function reconcileStoreSubscriptions(): Promise<void> {
   if (reconcileRunning) return;
   reconcileRunning = true;
   try {
+    const withEmail = await prisma.user.findMany({
+      select: { id: true, email: true },
+    });
+    console.log(`[revenuecat] reconcile ${withEmail.length} users`);
+    for (const user of withEmail) {
+      await setRevenueCatEmail(user.id, user.email);
+    }
     const since = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
     const users = await prisma.user.findMany({
       where: {

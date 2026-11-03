@@ -7,6 +7,7 @@ import { usePathname } from 'expo-router';
 import { useAppRouter as useRouter } from '../hooks/useAppRouter';
 import { PushTokenInput, UsersService } from '@moijia/client';
 import { navigateFromNotificationPayload } from '../utils/notificationNavigation';
+import { requestPermissionPrompt } from '../utils/permissions';
 import { refreshAppOnResume } from '../utils/refreshAppOnResume';
 import { useNotifications, useUpdateNotification } from './api';
 
@@ -40,13 +41,15 @@ function pushPayloadFromResponse(
 async function resolveExpoPushToken(): Promise<string | null> {
   if (Platform.OS === 'web' || !Device.isDevice) return null;
 
-  const { status: existing } = await Notifications.getPermissionsAsync();
-  let finalStatus = existing;
-  if (existing !== 'granted') {
-    const { status } = await Notifications.requestPermissionsAsync();
-    finalStatus = status;
-  }
-  if (finalStatus !== 'granted') return null;
+  const allowed = await requestPermissionPrompt(
+    () => Notifications.getPermissionsAsync(),
+    () => Notifications.requestPermissionsAsync(),
+    {
+      title: 'Notifications',
+      message: 'Allow notifications in Settings so Moijia can alert you.',
+    },
+  );
+  if (!allowed) return null;
 
   if (Platform.OS === 'android') {
     await Notifications.setNotificationChannelAsync('default', {
