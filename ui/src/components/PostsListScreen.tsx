@@ -1,4 +1,4 @@
-import { Fragment, useState, useMemo, useRef, useCallback, useEffect } from 'react';
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -49,7 +49,6 @@ import { useCurrentUserContext } from '../contexts/CurrentUserContext';
 import { usePullToRefresh } from '../hooks/usePullToRefresh';
 import { KeyboardSafeScrollView } from './KeyboardSafeScrollView';
 import { ListAdCard } from './ListAdCard';
-import { shouldInsertListAdAfter } from '../config/ads';
 import { useAdsEnabled } from '../hooks/useAdsEnabled';
 import { UserAvatar } from './UserAvatar';
 import { GroupAvatar } from './GroupAvatar';
@@ -1312,6 +1311,7 @@ export function PostsListScreen() {
           </View>
 
           <Text style={[styles.sectionLabel, { marginTop: 18 }]}>POSTS</Text>
+          {adsEnabled ? <ListAdCard /> : null}
           
           {postsLoading ? (
             <View style={styles.card}>
@@ -1330,7 +1330,7 @@ export function PostsListScreen() {
               </View>
             </>
           ) : (
-            filtered.map((post, postIndex) => {
+            filtered.map((post) => {
               const group = groups.find(g => g.id === post.groupId);
               const userColorHex = groupColors[post.groupId] || getDefaultGroupThemeFromName(group?.name || '');
               const p = getGroupColor(userColorHex);
@@ -1345,11 +1345,10 @@ export function PostsListScreen() {
                 resourceOwnerId: post.userId,
               });
               
-              const showAd = adsEnabled && shouldInsertListAdAfter(postIndex + 1, filtered.length);
               return (
-                <Fragment key={post.id}>
                 <View
-                  style={[styles.card, { marginBottom: showAd ? 0 : 14 }]}
+                  key={post.id}
+                  style={[styles.card, { marginBottom: 14 }]}
                   onLayout={(e) => {
                     postTopByIdRef.current[post.id] = e.nativeEvent.layout.y;
                   }}
@@ -1978,8 +1977,6 @@ export function PostsListScreen() {
                     </View>
                   </View>
                 </View>
-                {showAd ? <ListAdCard /> : null}
-                </Fragment>
               );
             })
           )}
@@ -2183,7 +2180,6 @@ export function PostsListScreen() {
             : undefined
         }
       />
-      {adsEnabled ? <ListAdCard docked /> : null}
     </View>
   );
 }
@@ -2227,7 +2223,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 20,
     paddingTop: 4,
-    paddingBottom: 140,
+    paddingBottom: 110,
   },
   card: {
     backgroundColor: Colors.surface,

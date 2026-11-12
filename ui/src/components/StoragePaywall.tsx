@@ -2,6 +2,7 @@ import { useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -21,11 +22,31 @@ import { useCurrentUserContext } from '../contexts/CurrentUserContext';
 import { useOwnedGroupQuota } from '../hooks/api/useUsers';
 import { isPurchaseCancelled, purchasesErrorMessage } from '../services/revenueCat';
 
-const PERKS = [
-  { icon: 'people-outline' as const, text: 'Create up to 10 groups' },
-  { icon: 'cloud-outline' as const, text: 'Each group is Medium, with 10 GB of storage' },
-  { icon: 'phone-portrait-outline' as const, text: 'Follows this account on every device' },
-];
+const SALES_EMAIL = 'sales@moijia.com';
+
+const METRICS = [
+  { key: 'groups', label: '# groups', flex: 0.7 },
+  { key: 'storage', label: 'Storage', flex: 1.7 },
+] as const;
+
+function planRows(proPrice: string) {
+  return [
+    {
+      key: 'free',
+      name: 'Free',
+      price: '',
+      values: [{ amount: '2', note: '' }, { amount: '1 GB', note: '/ group' }],
+      highlighted: false,
+    },
+    {
+      key: 'pro',
+      name: 'Pro',
+      price: proPrice,
+      values: [{ amount: '10', note: '' }, { amount: '10 GB', note: '/ group' }],
+      highlighted: true,
+    },
+  ];
+}
 
 export function StoragePaywall({
   visible,
@@ -90,16 +111,36 @@ export function StoragePaywall({
             contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 16 }]}
             showsVerticalScrollIndicator={false}
           >
-            <Text style={styles.price}>{quota?.proPriceLabel ?? ''}</Text>
             <Text style={styles.blurb}>
-              A monthly plan for the groups you own. Free stays at 2 Small groups. Enterprise is arranged with us
-              outside the app.
+              A monthly plan for the groups you own. Pro follows this account on every device. Upgrading your plan
+              removes ads.
             </Text>
-            <View style={styles.perks}>
-              {PERKS.map((perk) => (
-                <View key={perk.text} style={styles.perkRow}>
-                  <Ionicons name={perk.icon} size={20} color={Colors.textSub} />
-                  <Text style={styles.perkText}>{perk.text}</Text>
+            <View style={styles.compare}>
+              <View style={styles.compareHead}>
+                <View style={styles.planCol} />
+                {METRICS.map((metric) => (
+                  <View key={metric.key} style={[styles.metricCol, { flex: metric.flex }]}>
+                    <Text style={styles.metricLabel}>{metric.label}</Text>
+                  </View>
+                ))}
+              </View>
+              {planRows(quota?.proPriceLabel ?? '').map((plan) => (
+                <View key={plan.key} style={[styles.planRow, plan.highlighted && styles.planRowPro]}>
+                  <View style={styles.planCol}>
+                    <Text style={styles.planName}>{plan.name}</Text>
+                    {plan.price ? <Text style={styles.planPrice}>{plan.price}</Text> : null}
+                  </View>
+                  {plan.values.map((value, index) => (
+                    <View
+                      key={METRICS[index].key}
+                      style={[styles.metricCol, styles.metricDivider, { flex: METRICS[index].flex }]}
+                    >
+                      <Text style={styles.metricValue}>
+                        {value.amount}
+                        {value.note ? <Text style={styles.metricNote}> {value.note}</Text> : null}
+                      </Text>
+                    </View>
+                  ))}
                 </View>
               ))}
             </View>
@@ -129,6 +170,13 @@ export function StoragePaywall({
               settings. After Pro expires, groups stay for half of that billing period. Then only the top two groups in My Groups are kept. The others are
               permanently deleted, and kept groups are trimmed to 1 GB.
             </Text>
+            <Text style={styles.legal}>
+              For even more group and storage options, contact us at{' '}
+              <Text selectable style={styles.legalEmail}>
+                {SALES_EMAIL}
+              </Text>
+              .
+            </Text>
           </ScrollView>
         </View>
         <AppToastMount />
@@ -155,11 +203,39 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     letterSpacing: 0.8,
   },
-  price: { marginTop: 8, fontSize: 28, fontFamily: Fonts.bold, color: Colors.text },
-  blurb: { marginTop: 6, fontSize: 15, lineHeight: 21, fontFamily: Fonts.regular, color: Colors.textSub },
-  perks: { marginTop: 16, gap: 12 },
-  perkRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  perkText: { flex: 1, fontSize: 15, fontFamily: Fonts.medium, color: Colors.text },
+  blurb: { marginTop: 12, fontSize: 15, lineHeight: 21, fontFamily: Fonts.regular, color: Colors.textSub },
+  compare: { marginTop: 20, gap: 8 },
+  compareHead: { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 14 },
+  planRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderRadius: Radius.lg,
+    backgroundColor: Colors.surface,
+  },
+  planRowPro: { borderWidth: 1, borderColor: Colors.accent },
+  planCol: { flex: 1.15, paddingRight: 8 },
+  metricCol: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  metricDivider: { borderLeftWidth: 1, borderLeftColor: Colors.borderStrong },
+  metricLabel: {
+    width: '100%',
+    fontSize: 11,
+    fontFamily: Fonts.semiBold,
+    color: Colors.textMuted,
+    letterSpacing: 0.4,
+    textAlign: 'center',
+  },
+  planName: { fontSize: 15, fontFamily: Fonts.semiBold, color: Colors.text },
+  planPrice: { marginTop: 2, fontSize: 12, fontFamily: Fonts.medium, color: Colors.textSub },
+  metricValue: {
+    width: '100%',
+    fontSize: 14,
+    fontFamily: Fonts.semiBold,
+    color: Colors.text,
+    textAlign: 'center',
+  },
+  metricNote: { fontFamily: Fonts.regular, fontSize: 13 },
   error: { marginTop: 16, color: Colors.notGoing, fontFamily: Fonts.medium, fontSize: 14 },
   cta: {
     marginTop: 20,
@@ -174,4 +250,8 @@ const styles = StyleSheet.create({
   links: { marginTop: 16, flexDirection: 'row', justifyContent: 'space-between' },
   link: { fontSize: 14, fontFamily: Fonts.medium, color: Colors.textSub },
   legal: { marginTop: 14, fontSize: 12, lineHeight: 17, fontFamily: Fonts.regular, color: Colors.textMuted },
+  legalEmail: {
+    color: Colors.textSub,
+    ...(Platform.OS === 'web' ? ({ userSelect: 'text' } as object) : {}),
+  },
 });

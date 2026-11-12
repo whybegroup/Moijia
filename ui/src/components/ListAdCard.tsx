@@ -1,3 +1,3 @@
-export function ListAdCard(_props: { docked?: boolean } = {}) {
+export function ListAdCard() {
   return null;
 }

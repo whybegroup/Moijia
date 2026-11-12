@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -32,9 +32,6 @@ import { usePullToRefresh } from '../hooks/usePullToRefresh';
 import { Pill } from './ui';
 import { CollapsibleFiltersButton } from './CollapsibleFiltersButton';
 import { PollRow, getDeadlineUrgency } from './PollRow';
-import { ListAdCard } from './ListAdCard';
-import { shouldInsertListAdAfter } from '../config/ads';
-import { useAdsEnabled } from '../hooks/useAdsEnabled';
 
 function deadlineForPoll(poll: Poll): Date | null {
   if ((poll as Poll & { deadline?: string | null }).deadline) {
@@ -106,9 +103,6 @@ export function PollsListScreen({ lockedGroupId, embedded }: PollsListScreenProp
   const router = useRouter();
   const pathname = usePathname();
   const { userId: currentUserId } = useCurrentUserContext();
-  const isGroupEmbedded = !!(embedded && lockedGroupId);
-  const adsEnabled = useAdsEnabled();
-  const showListAds = adsEnabled && !isGroupEmbedded;
   const { data: polls = [], refetch: refetchPolls } = usePolls(currentUserId ?? '');
   const { data: allGroups = [], refetch: refetchGroups } = useGroups(currentUserId ?? '');
   const { data: groupColors = {}, refetch: refetchGroupColors } = useAllGroupMemberColors(
@@ -492,7 +486,7 @@ export function PollsListScreen({ lockedGroupId, embedded }: PollsListScreenProp
 
       <ScrollView
         style={styles.pollsScroll}
-        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: showListAds ? 140 : 100 }}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 100 }}
         refreshControl={refreshControl}
       >
         {sortedPolls.length === 0 ? (
@@ -507,10 +501,8 @@ export function PollsListScreen({ lockedGroupId, embedded }: PollsListScreenProp
           sortedPolls.map((poll, i) => {
             const group = groupsById[poll.groupId];
             const colorHex = groupColors[poll.groupId] || getDefaultGroupThemeFromName(group?.name ?? 'Group');
-            const showAd = showListAds && shouldInsertListAdAfter(i + 1, sortedPolls.length);
             return (
-              <Fragment key={poll.id}>
-                <View style={styles.pollCardWrap}>
+              <View key={poll.id} style={styles.pollCardWrap}>
                   <PollRow
                     poll={poll}
                     group={group}
@@ -526,9 +518,7 @@ export function PollsListScreen({ lockedGroupId, embedded }: PollsListScreenProp
                     }
                     isLast={i === sortedPolls.length - 1}
                   />
-                </View>
-                {showAd ? <ListAdCard /> : null}
-              </Fragment>
+              </View>
             );
           })
         )}
@@ -738,12 +728,7 @@ export function PollsListScreen({ lockedGroupId, embedded }: PollsListScreenProp
     </>
   );
 
-  return (
-    <View style={[styles.safe, embedded && styles.embeddedRoot]}>
-      {inner}
-      {showListAds ? <ListAdCard docked /> : null}
-    </View>
-  );
+  return <View style={[styles.safe, embedded && styles.embeddedRoot]}>{inner}</View>;
 }
 
 const styles = StyleSheet.create({

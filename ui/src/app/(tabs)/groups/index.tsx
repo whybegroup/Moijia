@@ -35,7 +35,6 @@ import { usePullToRefresh } from '../../../hooks/usePullToRefresh';
 import type { GroupScoped } from '@moijia/client';
 import { DowngradeNotice } from '../../../components/DowngradeNotice';
 import { ListAdCard } from '../../../components/ListAdCard';
-import { shouldInsertListAdAfter } from '../../../config/ads';
 import { useAdsEnabled } from '../../../hooks/useAdsEnabled';
 import { formatPlanDate } from '../../../utils/groupPlanPeriod';
 
@@ -153,22 +152,6 @@ function ActiveGroupRow(props: ActiveGroupRowProps) {
 
 function GroupItemGap() {
   return <View style={styles.groupItemGap} />;
-}
-
-function GroupRowWithAd({
-  index,
-  offset,
-  total,
-  ...rowProps
-}: ActiveGroupRowProps & { index: number; offset: number; total: number }) {
-  const adsEnabled = useAdsEnabled();
-  const showAd = adsEnabled && shouldInsertListAdAfter(offset + index + 1, total);
-  return (
-    <View>
-      <ActiveGroupRow {...rowProps} />
-      {showAd ? <ListAdCard /> : null}
-    </View>
-  );
 }
 
 function SectionHeader({
@@ -466,25 +449,13 @@ export default function GroupsScreen() {
   const removedGroups = choosingKeepers ? myGroups.slice(keepCount) : [];
   const downgradeWhen = quota?.plannedDowngradeAt ?? null;
 
-  const groupAdTotal = myGroups.length + otherGroups.length;
   const renderActiveGroupRow = useCallback<ReorderableListRenderItem<GroupScoped>>(
-    ({ item: g, index }) => (
-      <GroupRowWithAd index={index} offset={0} total={groupAdTotal} group={g} {...rowProps} />
-    ),
-    [groupAdTotal, rowProps]
+    ({ item: g }) => <ActiveGroupRow group={g} {...rowProps} />,
+    [rowProps]
   );
   const renderOtherGroupRow = useCallback<ReorderableListRenderItem<GroupScoped>>(
-    ({ item: g, index }) => (
-      <GroupRowWithAd
-        index={index}
-        offset={myGroups.length}
-        total={groupAdTotal}
-        group={g}
-        {...rowProps}
-        warningNote={deletionWarning(g)}
-      />
-    ),
-    [groupAdTotal, myGroups.length, rowProps]
+    ({ item: g }) => <ActiveGroupRow group={g} {...rowProps} warningNote={deletionWarning(g)} />,
+    [rowProps]
   );
 
   return (
@@ -505,6 +476,11 @@ export default function GroupsScreen() {
           contentContainerStyle={styles.listContent}
           refreshControl={refreshControl}
         >
+          {adsEnabled ? (
+            <View style={styles.listAd}>
+              <ListAdCard />
+            </View>
+          ) : null}
           {downgradePending ? <SectionHeader title="My Groups" count={ownedCountLabel} /> : null}
           {downgradePending ? (
             <DowngradeNotice
@@ -561,10 +537,9 @@ export default function GroupsScreen() {
             onDragEnd={handleDragEnd}
             dragLocked={isDragging}
           />
-          <View style={{ height: adsEnabled ? 140 : 100 }} />
+          <View style={styles.listBottomPad} />
         </ScrollViewContainer>
       )}
-      {adsEnabled ? <ListAdCard docked /> : null}
     </View>
   );
 }
@@ -573,6 +548,8 @@ const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: Colors.bg },
   listContainer: { flex: 1 },
   listContent: { paddingHorizontal: 16, flexGrow: 1 },
+  listAd: { marginTop: 8 },
+  listBottomPad: { height: 100 },
   groupItemCard: {
     backgroundColor: Colors.surface,
     borderRadius: 16,
