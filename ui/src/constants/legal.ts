@@ -5,8 +5,8 @@ export const SUPPORT_PATH = '/support';
 export const TERMS_URL = `${PUBLIC_WEB_ORIGIN}${TERMS_PATH}`;
 export const PRIVACY_URL = `${PUBLIC_WEB_ORIGIN}${PRIVACY_PATH}`;
 export const SUPPORT_URL = `${PUBLIC_WEB_ORIGIN}${SUPPORT_PATH}`;
-export const LEGAL_CONTACT_EMAIL = 'whybegroup@gmail.com';
-export const LEGAL_EFFECTIVE_DATE = 'September 9, 2026';
+export const LEGAL_CONTACT_EMAIL = 'legal@moijia.com';
+export const LEGAL_EFFECTIVE_DATE = 'November 11, 2026';
 
 const PUBLIC_SEGMENTS = new Set(['login', 'terms', 'privacy', 'support']);
 
