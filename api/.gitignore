@@ -1,4 +1,3 @@
-client/
 src/generated/
 prisma/data/*.db
 prisma/data/*.db-journal
